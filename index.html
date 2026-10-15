@@ -23449,12 +23449,27 @@ function MedicineListEditor({ items, onAdd, onRemove }) {
 function ImplantBrandListEditor({ items, onAdd, onRemove, onEdit }) {
   const [name, setName] = React.useState("");
   const [sizes, setSizes] = React.useState("");
+  // Editing used to happen on blur, with no button and no brand-name field:
+  // a brand typed wrongly could never be corrected, and a sizes change saved
+  // itself the moment focus moved, with nothing to cancel it.
+  const [editAt, setEditAt] = React.useState(null);
+  const [draft, setDraft] = React.useState({ name:"", sizes:"" });
   const add = () => {
     const v = name.trim();
     if (!v) return;
     onAdd({ name: v, sizes: sizes.trim() });
     setName(""); setSizes("");
   };
+  const startEdit = (i, it) => { setEditAt(i); setDraft({ name: it.name, sizes: it.sizes || "" }); };
+  const saveEdit = (i) => {
+    const v = draft.name.trim();
+    if (!v) return;
+    onEdit(i, { name: v, sizes: draft.sizes.trim() });
+    setEditAt(null);
+  };
+  const btn = (bg, col, bd) => ({ padding:"5px 12px", fontSize:12.5, fontFamily:"inherit",
+    cursor:"pointer", borderRadius:6, background:bg, color:col, border:bd, fontWeight:700 });
+
   return React.createElement("div", null,
     React.createElement("div", { style:{ fontSize:13, color:"#383838", marginBottom:10, lineHeight:1.5 } },
       "Sizes are separated by commas — e.g. ",
@@ -23473,17 +23488,32 @@ function ImplantBrandListEditor({ items, onAdd, onRemove, onEdit }) {
             React.createElement("thead", null, React.createElement("tr", { style:{ background:BGS } },
               ["Brand","Sizes",""].map(x=>React.createElement("th", { key:x, style:{ textAlign:"left", padding:"8px 12px" } }, x))
             )),
-            React.createElement("tbody", null, items.map((it,i)=>React.createElement("tr", { key:i, style:{ borderTop:`1px solid ${BORDER}` } },
-              React.createElement("td", { style:{ padding:"7px 12px", fontWeight:600, whiteSpace:"nowrap" } }, it.name),
-              React.createElement("td", { style:{ padding:"7px 12px" } },
-                React.createElement("input", {
-                  style:{...inp, fontSize:13}, defaultValue:it.sizes||"",
-                  placeholder:"Sizes, comma separated",
-                  onBlur:e=>{ const v=e.target.value.trim(); if(v!==(it.sizes||"")) onEdit(i,{ name:it.name, sizes:v }); }
-                })),
-              React.createElement("td", { style:{ textAlign:"center" } },
-                React.createElement("button", { onClick:()=>onRemove(i), style:{ border:"none", background:"none", color:"#e24b4a", cursor:"pointer", fontSize:12.5, fontWeight:700 } }, "Remove"))
-            )))
+            React.createElement("tbody", null, items.map((it,i)=> editAt===i
+              ? React.createElement("tr", { key:i, style:{ borderTop:`1px solid ${BORDER}`, background:"#f5f9ff" } },
+                  React.createElement("td", { style:{ padding:"7px 12px" } },
+                    React.createElement("input", { style:{...inp, fontSize:13}, value:draft.name, autoFocus:true,
+                      onChange:e=>setDraft({ ...draft, name:e.target.value }) })),
+                  React.createElement("td", { style:{ padding:"7px 12px" } },
+                    React.createElement("input", { style:{...inp, fontSize:13}, value:draft.sizes,
+                      placeholder:"Sizes, comma separated",
+                      onChange:e=>setDraft({ ...draft, sizes:e.target.value }) })),
+                  React.createElement("td", { style:{ textAlign:"center", whiteSpace:"nowrap", padding:"7px 12px" } },
+                    React.createElement("button", { onClick:()=>saveEdit(i), disabled:!draft.name.trim(),
+                      style:{ ...btn(draft.name.trim()?"#059669":"#9ca3af", "#fff", "none"), marginRight:6 } }, "Save"),
+                    React.createElement("button", { onClick:()=>setEditAt(null),
+                      style:btn("transparent", "#2e2e2e", `1px solid ${BORDER}`) }, "Cancel")))
+              : React.createElement("tr", { key:i, style:{ borderTop:`1px solid ${BORDER}` } },
+                  React.createElement("td", { style:{ padding:"7px 12px", fontWeight:600, whiteSpace:"nowrap" } }, it.name),
+                  React.createElement("td", { style:{ padding:"7px 12px" } }, it.sizes || ""),
+                  React.createElement("td", { style:{ textAlign:"center", whiteSpace:"nowrap", padding:"7px 12px" } },
+                    React.createElement("button", { onClick:()=>startEdit(i, it),
+                      style:{ ...btn("#fff", "#0f6fc5", "1px solid #0f6fc5"), marginRight:6 } }, "Edit"),
+                    React.createElement("button", {
+                      // Deleting a brand takes its whole size list with it, so it
+                      // asks first and names what it is about to remove.
+                      onClick:()=>{ if (window.confirm("Delete " + it.name + " and its sizes?")) onRemove(i); },
+                      style:btn("#fff", "#b91c1c", "1px solid #e5b4b4") }, "Delete")))
+            ))
           )
         )
   );
