@@ -24849,6 +24849,17 @@ function ClinicalRecords({ globalPat, setGlobalPat }) {
   // the form, so they are pushed in the same way templates and the patient
   // are. A failed read leaves the form on its built-in list rather than
   // stranding the surgeon with an empty brand dropdown.
+  // Delivery used to be a single post 1.5 s after the form opened, and it was
+  // guarded on the id "implantSurgery" — the form is "imp_surgery", so the
+  // brands were never sent at all and the surgeon always got the form's
+  // built-in list, with nothing to say the master had been ignored. The guess
+  // at a delay was the second half of the same problem: on a slow load the
+  // iframe's scripts had not run yet, so the message landed in a document
+  // with no listener and was gone for good.
+  //
+  // The forms are blob: URLs, which share this page's origin, so the form's
+  // own hook can be waited for instead of guessed at: post on a short loop,
+  // and stop as soon as applyMasterBrands is there to have taken it.
   const sendImplantBrandsToForm = async () => {
     let brands = [];
     try {
@@ -24856,8 +24867,17 @@ function ClinicalRecords({ globalPat, setGlobalPat }) {
       if (res && res.success) brands = res.brands || [];
     } catch (e) { return; }
     if (!brands.length) return;
-    if (iframeRef.current && iframeRef.current.contentWindow) {
-      iframeRef.current.contentWindow.postMessage({ type: "KB_IMPLANT_BRANDS", brands }, "*");
+    for (let i = 0; i < 40; i++) {               // ~10 s, in 250 ms steps
+      const w = iframeRef.current && iframeRef.current.contentWindow;
+      if (w) {
+        let ready = false;
+        try { ready = typeof w.applyMasterBrands === "function"; } catch (e) { ready = false; }
+        w.postMessage({ type: "KB_IMPLANT_BRANDS", brands }, "*");
+        // The form buffers a message that beats its own setup, so an early
+        // post is never wasted; this only stops the loop running on.
+        if (ready) return;
+      }
+      await new Promise(r => setTimeout(r, 250));
     }
   };
 
@@ -24918,7 +24938,7 @@ function ClinicalRecords({ globalPat, setGlobalPat }) {
     const form = FORMS.find(f=>f.id===formId);
     if(form && form.getUrl) {
       if(pat) setTimeout(()=>sendPatientToForm(pat), 1500);
-      if(formId==="implantSurgery") setTimeout(sendImplantBrandsToForm, 1500);
+      if(formId==="imp_surgery") sendImplantBrandsToForm();
     } else {
       // Suite form — fetch fresh patient data
       let p = pat;
