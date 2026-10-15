@@ -61,11 +61,14 @@ const eq = (name, got, want) => checks.push({ name, ok: JSON.stringify(got) === 
   eq('step 1 has Implant Sites, Anaesthesia, and Investigation as separate cards',
     step1Headers, ['👑 Implant Sites — one row per implant', '💉 Anaesthesia', '🩻 Investigation']);
 
-  // --- tooth table trimmed to # / Tooth / Date, same as Crown & Bridge ------
+  // --- the row holds only what is genuinely per implant ---------------------
+  // Investigation, Impression, Tray and Bite are decided once for the case and
+  // were moved out to their own cards. System and Size went the other way:
+  // they are per implant, and the work-done sheet prints them per implant.
   const cols = await page.evaluate(() =>
     Array.from(document.querySelectorAll('#impTable thead th')).map(t => t.textContent.trim()).filter(Boolean));
-  eq('implant table no longer holds Investigation/Impression/Tray/Bite',
-    cols, ['#', 'Tooth No./Site', 'Date']);
+  eq('implant table holds the per-implant fields and nothing case-level',
+    cols, ['#', 'Tooth No./Site', 'Implant System', 'Size', 'Date']);
 
   // --- Investigation options, per the user's answer -------------------------
   const investOpts = await page.evaluate(() =>

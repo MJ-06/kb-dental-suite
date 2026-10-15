@@ -19,10 +19,17 @@ ok("the Implant Surgery form is still in the list", !!decl);
 const id = decl && decl[1];
 ok("and its id is imp_surgery", id === "imp_surgery", "got " + id);
 
-const guard = HTML.match(/if\(formId==="([\w]+)"\) sendImplantBrandsToForm\(\)/);
+const guard = HTML.match(/if\(formId===([^)]+)\) sendImplantBrandsToForm\(\)/);
 ok("opening a form can still send the brands", !!guard);
+const guarded = guard ? (guard[1].match(/"[\w]+"/g) || []).map(q => q.slice(1, -1)) : [];
 ok("the guard uses the id the form really has, not a near-miss",
-   guard && guard[1] === id, "guard is on " + (guard && guard[1]) + ", form is " + id);
+   guarded.indexOf(id) >= 0, "guard is on " + guarded.join(", ") + ", form is " + id);
+
+// Implant Prosthetic records the system and size too, so it needs the list.
+const pid = HTML.match(/\{ id:"(\w+)",\s*label:"🛠️ Implant Prosthetic"/);
+ok("the Implant Prosthetic form is still in the list", !!pid);
+ok("and it is sent the brands as well",
+   pid && guarded.indexOf(pid[1]) >= 0, "guard is on " + guarded.join(", "));
 ok("nothing is guarded on the id that never existed",
    !/formId\s*===?\s*"implantSurgery"/.test(HTML));
 
