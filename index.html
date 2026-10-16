@@ -24628,6 +24628,7 @@ function Master() {
   const [clinicProfile, setClinicProfile] = React.useState(window.CLINIC || {});
   const [loading, setLoading] = React.useState(true);
   const [msg, setMsg] = React.useState("");
+  const [errMsg, setErrMsg] = React.useState("");
 
   React.useEffect(() => {
     setLoading(true);
@@ -24671,29 +24672,56 @@ function Master() {
 
   const flash = () => { setMsg("✅ Saved"); setTimeout(()=>setMsg(""), 1200); };
 
-  const saveTreatments = async (arr) => { setTreatments(arr); await api("saveTreatmentsMaster", { treatments: JSON.stringify(arr) }); flash(); };
-  const saveDoctors = async (arr) => { setDoctorDetails(arr); await api("saveDoctorDetailsList", { doctors: JSON.stringify(arr) }); flash(); };
-  const saveEmployees = async (arr) => { setEmployees(arr); await api("saveEmployeesList", { employees: JSON.stringify(arr) }); flash(); };
-  const saveExpenseCats = async (arr) => { setExpenseCats(arr); await api("saveExpenseCategoriesList", { categories: JSON.stringify(arr) }); flash(); };
-  const savePanels = async (arr) => { setPanels(arr); await api("savePanelsList", { panels: JSON.stringify(arr) }); flash(); };
-  const saveModes = async (arr) => { setPaymentModes(arr); await api("savePaymentModesList", { modes: JSON.stringify(arr) }); flash(); };
-  const saveTemplates = async (arr) => { setClinicalTemplates(arr); await api("saveClinicalNoteTemplates", { templates: JSON.stringify(arr) }); flash(); };
-  const saveChairs = async (arr) => { setChairsList(arr); await api("saveChairsList", { chairs: JSON.stringify(arr) }); flash(); };
-  const saveMedicines = async (arr) => { setMedicines(arr); await api("saveMedicinesMaster", { medicines: JSON.stringify(arr) }); flash(); };
-  const saveImplantBrands = async (arr) => { setImplantBrands(arr); await api("saveImplantBrandsList", { brands: JSON.stringify(arr) }); flash(); };
-  const saveMedDosages = async (arr) => { setMedDosages(arr); await api("saveMedicineDosagesList", { dosages: JSON.stringify(arr) }); flash(); };
-  const saveMedFrequencies = async (arr) => { setMedFrequencies(arr); await api("saveMedicineFrequenciesList", { frequencies: JSON.stringify(arr) }); flash(); };
-  const saveMedDurations = async (arr) => { setMedDurations(arr); await api("saveMedicineDurationsList", { durations: JSON.stringify(arr) }); flash(); };
-  const saveMedInstructions = async (arr) => { setMedInstructions(arr); await api("saveMedicineInstructionsList", { instructions: JSON.stringify(arr) }); flash(); };
-  const saveMedNotes = async (arr) => { setMedNotes(arr); await api("saveMedicineNotesList", { medNotes: JSON.stringify(arr) }); flash(); };
-  const saveApptReasons = async (arr) => { setApptReasons(arr); await api("saveReasonsList", { reasons: JSON.stringify(arr) }); flash(); };
-  const saveDocCategories = async (arr) => { setDocCategories(arr); await api("saveDocumentCategoriesList", { categories: JSON.stringify(arr) }); flash(); };
-  const saveProcedureLibrary = async (arr) => { setProcedureLibrary(arr); await api("saveProcedureLibrary", { library: JSON.stringify(arr) }); flash(); };
+  // Every master save used to be fire-and-forget: the list was set on screen,
+  // the write was sent, and nothing ever looked at the answer. A write the
+  // sheet refused, or that never arrived, left the new value on screen and
+  // said "Saved" -- and the edit was simply gone at the next refresh, with
+  // nothing to say why. Now a failure puts the list back as it was and says
+  // so, so what is on screen is what is in the sheet.
+  const persist = async (action, payload, arr, setter, prev) => {
+    setter(arr);
+    try {
+      const r = await api(action, payload);
+      if (!r || r.success === false) throw new Error((r && r.error) || "the sheet did not accept it");
+      flash();
+      return true;
+    } catch (e) {
+      setter(prev);
+      setMsg("");
+      setErrMsg("Not saved — " + (e.message || "could not reach the sheet") + ". Nothing was changed.");
+      setTimeout(() => setErrMsg(""), 9000);
+      return false;
+    }
+  };
+
+  const saveTreatments = (arr) => persist("saveTreatmentsMaster", { treatments: JSON.stringify(arr) }, arr, setTreatments, treatments);
+  const saveDoctors = (arr) => persist("saveDoctorDetailsList", { doctors: JSON.stringify(arr) }, arr, setDoctorDetails, doctorDetails);
+  const saveEmployees = (arr) => persist("saveEmployeesList", { employees: JSON.stringify(arr) }, arr, setEmployees, employees);
+  const saveExpenseCats = (arr) => persist("saveExpenseCategoriesList", { categories: JSON.stringify(arr) }, arr, setExpenseCats, expenseCats);
+  const savePanels = (arr) => persist("savePanelsList", { panels: JSON.stringify(arr) }, arr, setPanels, panels);
+  const saveModes = (arr) => persist("savePaymentModesList", { modes: JSON.stringify(arr) }, arr, setPaymentModes, paymentModes);
+  const saveTemplates = (arr) => persist("saveClinicalNoteTemplates", { templates: JSON.stringify(arr) }, arr, setClinicalTemplates, clinicalTemplates);
+  const saveChairs = (arr) => persist("saveChairsList", { chairs: JSON.stringify(arr) }, arr, setChairsList, chairsList);
+  const saveMedicines = (arr) => persist("saveMedicinesMaster", { medicines: JSON.stringify(arr) }, arr, setMedicines, medicines);
+  const saveImplantBrands = (arr) => persist("saveImplantBrandsList", { brands: JSON.stringify(arr) }, arr, setImplantBrands, implantBrands);
+  const saveMedDosages = (arr) => persist("saveMedicineDosagesList", { dosages: JSON.stringify(arr) }, arr, setMedDosages, medDosages);
+  const saveMedFrequencies = (arr) => persist("saveMedicineFrequenciesList", { frequencies: JSON.stringify(arr) }, arr, setMedFrequencies, medFrequencies);
+  const saveMedDurations = (arr) => persist("saveMedicineDurationsList", { durations: JSON.stringify(arr) }, arr, setMedDurations, medDurations);
+  const saveMedInstructions = (arr) => persist("saveMedicineInstructionsList", { instructions: JSON.stringify(arr) }, arr, setMedInstructions, medInstructions);
+  const saveMedNotes = (arr) => persist("saveMedicineNotesList", { medNotes: JSON.stringify(arr) }, arr, setMedNotes, medNotes);
+  const saveApptReasons = (arr) => persist("saveReasonsList", { reasons: JSON.stringify(arr) }, arr, setApptReasons, apptReasons);
+  const saveDocCategories = (arr) => persist("saveDocumentCategoriesList", { categories: JSON.stringify(arr) }, arr, setDocCategories, docCategories);
+  const saveProcedureLibrary = (arr) => persist("saveProcedureLibrary", { library: JSON.stringify(arr) }, arr, setProcedureLibrary, procedureLibrary);
   const saveClinicProfile = async (profile) => {
-    setClinicProfile(profile);
+    const prevProfile = clinicProfile;
+    const prevWindow = window.CLINIC;
     window.CLINIC = { ...window.CLINIC, ...profile };
-    await api("saveClinicProfile", { profile: JSON.stringify(profile) });
-    flash();
+    const saved = await persist("saveClinicProfile", { profile: JSON.stringify(profile) },
+                                profile, setClinicProfile, prevProfile);
+    // persist puts the state back on failure; window.CLINIC is read straight
+    // by the forms and the header, so it has to be put back too or the clinic
+    // name on a printed sheet would disagree with the master.
+    if (!saved) window.CLINIC = prevWindow;
   };
 
   const currentTop = MASTER_STRUCTURE.find(t => t.id === topTab) || MASTER_STRUCTURE[0];
@@ -24841,6 +24869,8 @@ function Master() {
     ),
 
     msg && React.createElement("div", { style:{ fontSize:13, fontWeight:600, color:"#059669", marginBottom:10 } }, msg),
+    errMsg && React.createElement("div", { style:{ fontSize:13, fontWeight:600, color:"#b91c1c", background:"#fdf2f2",
+      border:"1px solid #e5b4b4", borderRadius:7, padding:"8px 11px", marginBottom:10 } }, errMsg),
     loading && React.createElement("div", { style:{ textAlign:"center", padding:20, color:"#444444", fontSize:14 } }, "⏳ Loading..."),
     content
   );

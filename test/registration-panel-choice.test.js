@@ -97,7 +97,10 @@ ok('and an empty list says where to fix it',
 ok('Master has a Panels tab', /\{ id:"panels",\s*label:"Panels" \}/.test(html));
 ok('it uses the same list editor as the other lists',
   /panels: \(\) => React\.createElement\(SimpleListEditor/.test(html));
-ok('adding a panel saves it', /api\("savePanelsList"/.test(html));
+// It goes through the Master screen's checked save, which reports a refused
+// write instead of leaving the panel on screen and losing it at the next
+// refresh — so look for the action, not for a bare api() call.
+ok('adding a panel saves it', /persist\("savePanelsList"/.test(html));
 ok('the panels load with the other Master lists in one request',
   /"getImplantBrandsList", "getPanelsList"/.test(html));
 
