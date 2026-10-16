@@ -23419,12 +23419,31 @@ function TreatmentListEditor({ items, onAdd, onRemove, onEdit }) {
 }
 
 // Name + Phone/Email/Role list editor (Doctors, Employees)
-function PersonListEditor({ items, onAdd, onRemove }) {
+function PersonListEditor({ items, onAdd, onRemove, onEdit }) {
   const [name, setName] = React.useState("");
   const [phone, setPhone] = React.useState("");
   const [email, setEmail] = React.useState("");
   const [role, setRole] = React.useState("");
+  // Doctors and Employees could only be added and removed. A number typed
+  // wrongly, a spelling, a change of role -- all of it meant deleting the
+  // person and retyping the other three fields. Now the row opens in place,
+  // like the fee lists, and nothing is written until Save is pressed.
+  const [editAt, setEditAt] = React.useState(null);
+  const [draft, setDraft] = React.useState({ name:"", phone:"", email:"", role:"" });
   const add = () => { const v = name.trim(); if (!v) return; onAdd({ name:v, phone, email, role }); setName(""); setPhone(""); setEmail(""); setRole(""); };
+  const startEdit = (i, it) => {
+    setEditAt(i);
+    setDraft({ name:it.name||"", phone:it.phone||"", email:it.email||"", role:it.role||"" });
+  };
+  const saveEdit = (i) => {
+    const v = draft.name.trim();
+    if (!v) return;
+    onEdit(i, { name:v, phone:draft.phone.trim(), email:draft.email.trim(), role:draft.role.trim() });
+    setEditAt(null);
+  };
+  const btn = (bg, col, bd) => ({ padding:"5px 12px", fontSize:12.5, fontFamily:"inherit",
+    cursor:"pointer", borderRadius:6, background:bg, color:col, border:bd, fontWeight:700 });
+  const cell = { padding:"7px 12px" };
   return React.createElement("div", null,
     React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1.5fr 1fr 1.5fr 1fr auto", gap:8, marginBottom:14 } },
       React.createElement("input", { style:inp, value:name, placeholder:"Name", onChange:e=>setName(e.target.value) }),
@@ -23440,14 +23459,33 @@ function PersonListEditor({ items, onAdd, onRemove }) {
             React.createElement("thead", null, React.createElement("tr", { style:{ background:BGS } },
               ["Name","Phone","Email","Role",""].map(h=>React.createElement("th", { key:h, style:{ textAlign:"left", padding:"8px 12px" } }, h))
             )),
-            React.createElement("tbody", null, items.map((it,i) => React.createElement("tr", { key:i, style:{ borderTop:`1px solid ${BORDER}` } },
-              React.createElement("td", { style:{ padding:"7px 12px", fontWeight:600 } }, it.name),
-              React.createElement("td", { style:{ padding:"7px 12px" } }, it.phone||"—"),
-              React.createElement("td", { style:{ padding:"7px 12px" } }, it.email||"—"),
-              React.createElement("td", { style:{ padding:"7px 12px" } }, it.role||"—"),
-              React.createElement("td", { style:{ textAlign:"center" } },
-                React.createElement("button", { onClick:()=>onRemove(i), style:{ border:"none", background:"none", color:"#e24b4a", cursor:"pointer", fontSize:12.5, fontWeight:700 } }, "Remove"))
-            )))
+            React.createElement("tbody", null, items.map((it,i) => editAt===i
+              ? React.createElement("tr", { key:i, style:{ borderTop:`1px solid ${BORDER}`, background:"#f5f9ff" } },
+                  ["name","phone","email","role"].map(k=>React.createElement("td", { key:k, style:cell },
+                    React.createElement("input", { style:{...inp, fontSize:13}, value:draft[k],
+                      autoFocus:k==="name",
+                      placeholder:k.charAt(0).toUpperCase()+k.slice(1),
+                      onChange:e=>setDraft({ ...draft, [k]:e.target.value }),
+                      onKeyDown:e=>{ if(e.key==="Enter") saveEdit(i); if(e.key==="Escape") setEditAt(null); } }))),
+                  React.createElement("td", { style:{ ...cell, textAlign:"center", whiteSpace:"nowrap" } },
+                    React.createElement("button", { onClick:()=>saveEdit(i), disabled:!draft.name.trim(),
+                      style:{ ...btn(draft.name.trim()?"#059669":"#9ca3af", "#fff", "none"), marginRight:6 } }, "Save"),
+                    React.createElement("button", { onClick:()=>setEditAt(null),
+                      style:btn("transparent", "#2e2e2e", `1px solid ${BORDER}`) }, "Cancel")))
+              : React.createElement("tr", { key:i, style:{ borderTop:`1px solid ${BORDER}` } },
+                  React.createElement("td", { style:{ ...cell, fontWeight:600 } }, it.name),
+                  React.createElement("td", { style:cell }, it.phone||"—"),
+                  React.createElement("td", { style:cell }, it.email||"—"),
+                  React.createElement("td", { style:cell }, it.role||"—"),
+                  React.createElement("td", { style:{ ...cell, textAlign:"center", whiteSpace:"nowrap" } },
+                    React.createElement("button", { onClick:()=>startEdit(i, it),
+                      style:{ ...btn("#fff", "#0f6fc5", "1px solid #0f6fc5"), marginRight:6 } }, "Edit"),
+                    React.createElement("button", {
+                      // Removing a person takes their phone, email and role
+                      // with them, so it asks first and names who.
+                      onClick:()=>{ if (window.confirm("Remove " + it.name + "?")) onRemove(i); },
+                      style:btn("#fff", "#b91c1c", "1px solid #e5b4b4") }, "Remove")))
+            ))
           )
         )
   );
@@ -24672,12 +24710,14 @@ function Master() {
     doctors: () => React.createElement(PersonListEditor, {
       items:doctorDetails,
       onAdd:(item)=>saveDoctors([...doctorDetails, item]),
-      onRemove:(i)=>saveDoctors(doctorDetails.filter((_,idx)=>idx!==i))
+      onRemove:(i)=>saveDoctors(doctorDetails.filter((_,idx)=>idx!==i)),
+      onEdit:(i,item)=>saveDoctors(doctorDetails.map((it,idx)=>idx===i?item:it))
     }),
     employees: () => React.createElement(PersonListEditor, {
       items:employees,
       onAdd:(item)=>saveEmployees([...employees, item]),
-      onRemove:(i)=>saveEmployees(employees.filter((_,idx)=>idx!==i))
+      onRemove:(i)=>saveEmployees(employees.filter((_,idx)=>idx!==i)),
+      onEdit:(i,item)=>saveEmployees(employees.map((it,idx)=>idx===i?item:it))
     }),
     expenses: () => React.createElement(SimpleListEditor, {
       items:expenseCats, placeholder:"New expense category...",
