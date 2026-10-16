@@ -5862,10 +5862,51 @@ const REASON_FAMILY_CODE = {
   "Denture": "PROSTHODONTIC",
   "Whitening": "AESTHETIC"
 };
+// The appointment book used to be built from this fixed list, which ran to
+// 19:30 whatever the clinic actually did. The hours and the slot length are
+// Master -> Schedule -> Clinic Timings now, so a clinic that opens at eight,
+// or runs twenty-minute slots, is a master edit and not a code change. The
+// list below is what the book falls back to until the master answers, and
+// what it uses if the master holds something impossible.
+const DEFAULT_TIMINGS = { open: "09:00", close: "19:00", slotMinutes: 30 };
 const TIME_SLOTS = [
   "09:00","09:30","10:00","10:30","11:00","11:30","12:00","12:30","13:00","13:30",
-  "14:00","14:30","15:00","15:30","16:00","16:30","17:00","17:30","18:00","18:30","19:00","19:30"
+  "14:00","14:30","15:00","15:30","16:00","16:30","17:00","17:30","18:00","18:30"
 ];
+function hhmmToMin(v) {
+  const m = /^\s*(\d{1,2}):(\d{2})\s*$/.exec(String(v == null ? "" : v));
+  if (!m) return NaN;
+  const h = +m[1], mi = +m[2];
+  return (h > 23 || mi > 59) ? NaN : h * 60 + mi;
+}
+function buildSlots(t) {
+  const a = hhmmToMin(t && t.open), b = hhmmToMin(t && t.close);
+  const step = parseInt(t && t.slotMinutes, 10);
+  // Anything that would draw an empty book — or never stop drawing — falls
+  // back rather than leaving the clinic unable to see the day.
+  if (isNaN(a) || isNaN(b) || !(step > 0) || b <= a) return TIME_SLOTS.slice();
+  const out = [];
+  for (let m = a; m < b; m += step) {
+    out.push(String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0"));
+  }
+  return out;
+}
+// Fetched once per page and shared, so the two screens that draw a day agree
+// and a second screen does not make a second request.
+let _timingsCache = null;
+function useClinicTimings() {
+  const [timings, setTimings] = React.useState(() => _timingsCache || DEFAULT_TIMINGS);
+  React.useEffect(() => {
+    let alive = true;
+    api("getClinicTimings").then(r => {
+      if (!alive || !r || !r.success) return;
+      _timingsCache = { open: r.open, close: r.close, slotMinutes: r.slotMinutes };
+      setTimings(_timingsCache);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  return { timings, slots: React.useMemo(() => buildSlots(timings), [timings]) };
+}
 const STATUS_COL = { Scheduled:"#0078B4", "Checked In":"#059669", "In Chair":"#D97706", Completed:"#6B7280", Cancelled:"#e24b4a", "No Show":"#9ca3af" };
 const DOCTOR_COL = ["#0078B4", "#7C3AED", "#059669", "#D97706", "#DB2777"];
 const WEEK_DAY_LBL = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
@@ -5981,6 +6022,7 @@ function MiniCalendar({ selDate, onSelect }) {
 }
 
 function Appointments({ globalPat, setGlobalPat, setPage }) {
+  const { slots: TIME_SLOTS } = useClinicTimings();
   const todayISO = new Date().toISOString().split("T")[0];
   const [selDate, setSelDate] = useState(todayISO);
   const [viewMode, setViewMode] = useState("chairs"); // "month" | "week" | "chairs"
@@ -6999,6 +7041,7 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
 // "+ Add Walk-in" so it can stay on the Daysheet page and only close on
 // save/cancel, instead of navigating away to the Appointments page.
 function QuickApptModal({ show, defaultDate, onClose, onSaved }) {
+  const { slots: TIME_SLOTS } = useClinicTimings();
   const [patientMode, setPatientMode] = React.useState("established");
   const [fUhid, setFUhid] = React.useState("");
   const [fFirstName, setFFirstName] = React.useState("");
@@ -23319,9 +23362,24 @@ function GenericRecordsView({ tabName, uhid }) {
 // ════════════════════════════════════════════════════════
 
 // Flat string list editor (Expense Categories, Payment Modes)
-function SimpleListEditor({ items, onAdd, onRemove, placeholder }) {
+function SimpleListEditor({ items, onAdd, onRemove, onEdit, placeholder }) {
   const [text, setText] = React.useState("");
+  // These lists could only be added to and emptied. Correcting a spelling
+  // meant removing the entry and retyping it, and anything already recorded
+  // against the old wording no longer matched it.
+  const txt = (v) => (v === undefined || v === null) ? "" : String(v);
+  const [editAt, setEditAt] = React.useState(null);
+  const [draft, setDraft] = React.useState("");
   const add = () => { const v = text.trim(); if (!v || items.includes(v)) return; onAdd(v); setText(""); };
+  const saveEdit = (i) => {
+    const v = txt(draft).trim();
+    // Renaming one entry onto another would leave the list with two the same.
+    if (!v || items.some((x, ix) => ix !== i && txt(x).trim() === v)) return;
+    onEdit(i, v);
+    setEditAt(null);
+  };
+  const btn = (bg, col, bd) => ({ padding:"5px 12px", fontSize:12.5, fontFamily:"inherit",
+    cursor:"pointer", borderRadius:6, background:bg, color:col, border:bd, fontWeight:700 });
   return React.createElement("div", null,
     React.createElement("div", { style:{ display:"flex", gap:8, marginBottom:14 } },
       React.createElement("input", { style:{...inp, flex:1}, value:text, placeholder, onChange:e=>setText(e.target.value), onKeyDown:e=>e.key==="Enter"&&add() }),
@@ -23331,10 +23389,25 @@ function SimpleListEditor({ items, onAdd, onRemove, placeholder }) {
       ? React.createElement("div", { style:{ background:BGS, borderRadius:8, padding:24, textAlign:"center", color:"#5a5a5a", fontSize:14, border:`1px dashed ${BORDER}` } }, "No entries yet.")
       : React.createElement("div", { style:{ display:"flex", flexDirection:"column", gap:6 } },
           items.map((it,i) => React.createElement("div", { key:i,
-            style:{ display:"flex", justifyContent:"space-between", alignItems:"center", background:"#fff", border:`1px solid ${BORDER}`, borderRadius:8, padding:"9px 14px" } },
-            React.createElement("span", { style:{ fontSize:14, fontWeight:600 } }, it),
-            React.createElement("button", { onClick:()=>onRemove(i),
-              style:{ border:"none", background:"none", color:"#e24b4a", cursor:"pointer", fontSize:13, fontWeight:700 } }, "Remove")
+            style:{ display:"flex", justifyContent:"space-between", alignItems:"center", gap:10,
+                    background: editAt===i ? "#f5f9ff" : "#fff", border:`1px solid ${BORDER}`, borderRadius:8, padding:"9px 14px" } },
+            editAt===i
+              ? React.createElement("input", { style:{...inp, flex:1, fontSize:13.5}, value:txt(draft), autoFocus:true,
+                  onChange:e=>setDraft(e.target.value),
+                  onKeyDown:e=>{ if(e.key==="Enter") saveEdit(i); if(e.key==="Escape") setEditAt(null); } })
+              : React.createElement("span", { style:{ fontSize:14, fontWeight:600 } }, txt(it)),
+            editAt===i
+              ? React.createElement("span", { style:{ whiteSpace:"nowrap" } },
+                  React.createElement("button", { onClick:()=>saveEdit(i), disabled:!txt(draft).trim(),
+                    style:{ ...btn(txt(draft).trim()?"#059669":"#9ca3af", "#fff", "none"), marginRight:6 } }, "Save"),
+                  React.createElement("button", { onClick:()=>setEditAt(null),
+                    style:btn("transparent", "#2e2e2e", `1px solid ${BORDER}`) }, "Cancel"))
+              : React.createElement("span", { style:{ whiteSpace:"nowrap" } },
+                  onEdit && React.createElement("button", { onClick:()=>{ setEditAt(i); setDraft(txt(it)); },
+                    style:{ ...btn("#fff", "#0f6fc5", "1px solid #0f6fc5"), marginRight:6 } }, "Edit"),
+                  React.createElement("button", {
+                    onClick:()=>{ if (window.confirm("Remove " + txt(it) + "?")) onRemove(i); },
+                    style:btn("#fff", "#b91c1c", "1px solid #e5b4b4") }, "Remove"))
           ))
         )
   );
@@ -23515,6 +23588,60 @@ function PersonListEditor({ items, onAdd, onRemove, onEdit }) {
             ))
           )
         )
+  );
+}
+
+// When the day runs, and how long a slot is. The appointment book draws its
+// columns from these, so a clinic that opens at eight, or runs twenty-minute
+// slots, is a master edit rather than a code change.
+function ClinicTimingsEditor({ timings, onSave }) {
+  const txt = (v) => (v === undefined || v === null) ? "" : String(v);
+  const [form, setForm] = React.useState({
+    open: txt(timings.open), close: txt(timings.close), slotMinutes: txt(timings.slotMinutes) });
+  React.useEffect(() => {
+    setForm({ open: txt(timings.open), close: txt(timings.close), slotMinutes: txt(timings.slotMinutes) });
+  }, [timings.open, timings.close, timings.slotMinutes]);
+
+  const step = parseInt(form.slotMinutes, 10);
+  const a = hhmmToMin(form.open), b = hhmmToMin(form.close);
+  const bad = isNaN(a) ? "The opening time must read as HH:MM."
+            : isNaN(b) ? "The closing time must read as HH:MM."
+            : !(step > 0) ? "A slot must be at least one minute long."
+            : b <= a ? "The clinic cannot close before it opens."
+            : "";
+  const preview = bad ? [] : buildSlots({ open: form.open, close: form.close, slotMinutes: step });
+  const dirty = txt(timings.open) !== form.open || txt(timings.close) !== form.close ||
+                txt(timings.slotMinutes) !== form.slotMinutes;
+
+  const field = (label, key, type, placeholder) => React.createElement("div", null,
+    React.createElement("div", { style:{ fontSize:12.5, fontWeight:700, color:"#383838", marginBottom:5 } }, label),
+    React.createElement("input", { style:inp, type, value:form[key], placeholder,
+      onChange:e=>setForm({ ...form, [key]:e.target.value }) }));
+
+  return React.createElement("div", null,
+    React.createElement("div", { style:{ fontSize:13, color:"#383838", marginBottom:14, lineHeight:1.5 } },
+      "The appointment book is drawn from these. The last slot starts before closing time, so a ",
+      "9:00 to 7:00 day at 30 minutes ends with a 6:30 appointment."),
+    React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr auto", gap:10, alignItems:"end", marginBottom:14 } },
+      field("Opens", "open", "time"),
+      field("Closes", "close", "time"),
+      field("Minutes per appointment", "slotMinutes", "number", "30"),
+      React.createElement("button", { onClick:()=>onSave({ open:form.open, close:form.close, slotMinutes:step }),
+        disabled: !!bad || !dirty,
+        style:{ padding:"9px 20px", fontSize:13, border:"none", borderRadius:7, fontWeight:700,
+                cursor: (bad || !dirty) ? "default" : "pointer",
+                background: (bad || !dirty) ? "#9ca3af" : T, color:"#fff" } }, "Save")
+    ),
+    bad
+      ? React.createElement("div", { style:{ fontSize:13, fontWeight:600, color:"#b91c1c", background:"#fdf2f2",
+          border:"1px solid #e5b4b4", borderRadius:7, padding:"8px 11px" } }, bad)
+      : React.createElement("div", { style:{ background:BGS, borderRadius:8, padding:"12px 14px", border:`1px solid ${BORDER}` } },
+          React.createElement("div", { style:{ fontSize:12.5, fontWeight:700, color:"#383838", marginBottom:7 } },
+            preview.length + " slots a day \u2014 " + (preview.length ? preview[0] + " to " + preview[preview.length-1] : "none")),
+          React.createElement("div", { style:{ display:"flex", flexWrap:"wrap", gap:5 } },
+            preview.map(t => React.createElement("span", { key:t,
+              style:{ fontSize:12, fontWeight:600, color:"#2e2e2e", background:"#fff",
+                      border:`1px solid ${BORDER}`, borderRadius:5, padding:"3px 7px" } }, t))))
   );
 }
 
@@ -24111,7 +24238,7 @@ const MASTER_STRUCTURE = [
     { id:"otherClinic",   label:"Other Clinic", placeholder:true }
   ]},
   { id:"schedule", label:"Schedule", subtabs:[
-    { id:"clinicTimings", label:"Clinic Timings", placeholder:true },
+    { id:"clinicTimings", label:"Clinic Timings" },
     { id:"workingDays",   label:"Working Days" },
     { id:"apptReasons",   label:"Appointment Reasons" },
     { id:"procedureLibrary", label:"Procedure Library" }
@@ -24758,6 +24885,7 @@ function Master() {
   const [docCategories, setDocCategories] = React.useState([]);
   const [implantBrands, setImplantBrands] = React.useState([]);
   const [panels, setPanels] = React.useState([]);
+  const [timings, setTimings] = React.useState(DEFAULT_TIMINGS);
   const [weekOff, setWeekOff] = React.useState([]);
   const [holidays, setHolidays] = React.useState([]);
   const [procedureLibrary, setProcedureLibrary] = React.useState([]);
@@ -24769,7 +24897,7 @@ function Master() {
 
   React.useEffect(() => {
     setLoading(true);
-    // Twenty lists, one request. The order here is what the callback
+    // Twenty-one lists, one request. The order here is what the callback
     // destructures, so the two must be changed together.
     apiBatch([
       "getTreatmentsMaster", "getDoctorDetailsList", "getEmployeesList",
@@ -24778,8 +24906,8 @@ function Master() {
       "getMedicineDosagesList", "getMedicineFrequenciesList", "getMedicineDurationsList",
       "getMedicineInstructionsList", "getMedicineNotesList", "getReasonsList",
       "getClinicProfile", "getDocumentCategoriesList", "getProcedureLibrary",
-      "getImplantBrandsList", "getPanelsList", "getWorkingDays"
-    ]).then(([t,d,e,c,m,tpl,ch,med,dos,freq,dur,instr,mn,ar,cp,dc,pl,ib,pnl,wd]) => {
+      "getImplantBrandsList", "getPanelsList", "getWorkingDays", "getClinicTimings"
+    ]).then(([t,d,e,c,m,tpl,ch,med,dos,freq,dur,instr,mn,ar,cp,dc,pl,ib,pnl,wd,ct]) => {
       setLoading(false);
       if (t.success) setTreatments(t.treatments || []);
       // An older backend without this list simply leaves it empty, and the
@@ -24807,6 +24935,9 @@ function Master() {
       // A backend without this list leaves the clinic open every day, which is
       // the honest answer until the days are filled in — not an invented week.
       if (wd && wd.success) { setWeekOff(wd.weekOff || []); setHolidays(wd.holidays || []); }
+      // A backend without this answers with the usual clinic day, which is
+      // also what the book falls back to, so the two never disagree.
+      if (ct && ct.success) setTimings({ open: ct.open, close: ct.close, slotMinutes: ct.slotMinutes });
     }).catch(() => setLoading(false));
   }, []);
 
@@ -24862,6 +24993,18 @@ function Master() {
       days, setWeekOff, prevDays).then(saved => { if (!saved) setHolidays(prevHols); return saved; });
   };
 
+  const saveTimings = (next) => {
+    const prev = timings;
+    return persist("saveClinicTimings",
+      { open: next.open, close: next.close, slotMinutes: String(next.slotMinutes) },
+      next, setTimings, prev).then(saved => {
+        // The book keeps its own copy for the page's lifetime; refresh it so
+        // the columns change without a reload.
+        if (saved) _timingsCache = next;
+        return saved;
+      });
+  };
+
   const saveClinicProfile = async (profile) => {
     const prevProfile = clinicProfile;
     const prevWindow = window.CLINIC;
@@ -24897,13 +25040,17 @@ function Master() {
       onRemove:(i)=>saveEmployees(employees.filter((_,idx)=>idx!==i)),
       onEdit:(i,item)=>saveEmployees(employees.map((it,idx)=>idx===i?item:it))
     }),
+    clinicTimings: () => React.createElement(ClinicTimingsEditor, {
+      timings, onSave: saveTimings
+    }),
     workingDays: () => React.createElement(WorkingDaysEditor, {
       weekOff, holidays, onSave: saveWorkingDays
     }),
     expenses: () => React.createElement(SimpleListEditor, {
       items:expenseCats, placeholder:"New expense category...",
       onAdd:(v)=>saveExpenseCats([...expenseCats, v]),
-      onRemove:(i)=>saveExpenseCats(expenseCats.filter((_,idx)=>idx!==i))
+      onRemove:(i)=>saveExpenseCats(expenseCats.filter((_,idx)=>idx!==i)),
+      onEdit:(i,v)=>saveExpenseCats(expenseCats.map((x,idx)=>idx===i?v:x))
     }),
     panels: () => React.createElement(SimpleListEditor, {
       items: panels,
@@ -24914,12 +25061,14 @@ function Master() {
     modes: () => React.createElement(SimpleListEditor, {
       items:paymentModes, placeholder:"New payment mode...",
       onAdd:(v)=>saveModes([...paymentModes, v]),
-      onRemove:(i)=>saveModes(paymentModes.filter((_,idx)=>idx!==i))
+      onRemove:(i)=>saveModes(paymentModes.filter((_,idx)=>idx!==i)),
+      onEdit:(i,v)=>saveModes(paymentModes.map((x,idx)=>idx===i?v:x))
     }),
     chairs: () => React.createElement(SimpleListEditor, {
       items:chairsList, placeholder:"New chair (e.g. Chair 5)...",
       onAdd:(v)=>saveChairs([...chairsList, v]),
-      onRemove:(i)=>saveChairs(chairsList.filter((_,idx)=>idx!==i))
+      onRemove:(i)=>saveChairs(chairsList.filter((_,idx)=>idx!==i)),
+      onEdit:(i,v)=>saveChairs(chairsList.map((x,idx)=>idx===i?v:x))
     }),
     templates: () => React.createElement(TemplateListEditor, {
       items:clinicalTemplates,
@@ -24941,17 +25090,20 @@ function Master() {
     medDosages: () => React.createElement(SimpleListEditor, {
       items:medDosages, placeholder:"New dosage (e.g. 500mg)...",
       onAdd:(v)=>saveMedDosages([...medDosages, v]),
-      onRemove:(i)=>saveMedDosages(medDosages.filter((_,idx)=>idx!==i))
+      onRemove:(i)=>saveMedDosages(medDosages.filter((_,idx)=>idx!==i)),
+      onEdit:(i,v)=>saveMedDosages(medDosages.map((x,idx)=>idx===i?v:x))
     }),
     medFrequencies: () => React.createElement(SimpleListEditor, {
       items:medFrequencies, placeholder:"New frequency (e.g. Two times a day)...",
       onAdd:(v)=>saveMedFrequencies([...medFrequencies, v]),
-      onRemove:(i)=>saveMedFrequencies(medFrequencies.filter((_,idx)=>idx!==i))
+      onRemove:(i)=>saveMedFrequencies(medFrequencies.filter((_,idx)=>idx!==i)),
+      onEdit:(i,v)=>saveMedFrequencies(medFrequencies.map((x,idx)=>idx===i?v:x))
     }),
     medDurations: () => React.createElement(SimpleListEditor, {
       items:medDurations, placeholder:"New duration (e.g. 5 Days)...",
       onAdd:(v)=>saveMedDurations([...medDurations, v]),
-      onRemove:(i)=>saveMedDurations(medDurations.filter((_,idx)=>idx!==i))
+      onRemove:(i)=>saveMedDurations(medDurations.filter((_,idx)=>idx!==i)),
+      onEdit:(i,v)=>saveMedDurations(medDurations.map((x,idx)=>idx===i?v:x))
     }),
     medInstructions: () => React.createElement(InstructionListEditor, {
       items:medInstructions,
@@ -24962,12 +25114,14 @@ function Master() {
     medNotes: () => React.createElement(SimpleListEditor, {
       items:medNotes, placeholder:"New post-op instruction (e.g. Avoid hot food for 24 hours)...",
       onAdd:(v)=>saveMedNotes([...medNotes, v]),
-      onRemove:(i)=>saveMedNotes(medNotes.filter((_,idx)=>idx!==i))
+      onRemove:(i)=>saveMedNotes(medNotes.filter((_,idx)=>idx!==i)),
+      onEdit:(i,v)=>saveMedNotes(medNotes.map((x,idx)=>idx===i?v:x))
     }),
     apptReasons: () => React.createElement(SimpleListEditor, {
       items:apptReasons, placeholder:"New appointment reason...",
       onAdd:(v)=>saveApptReasons([...apptReasons, v]),
-      onRemove:(i)=>saveApptReasons(apptReasons.filter((_,idx)=>idx!==i))
+      onRemove:(i)=>saveApptReasons(apptReasons.filter((_,idx)=>idx!==i)),
+      onEdit:(i,v)=>saveApptReasons(apptReasons.map((x,idx)=>idx===i?v:x))
     }),
     procedureLibrary: () => React.createElement(ProcedureLibraryEditor, {
       items:procedureLibrary, families:procedureFamilies, onSave:saveProcedureLibrary
@@ -24975,7 +25129,8 @@ function Master() {
     docCategories: () => React.createElement(SimpleListEditor, {
       items:docCategories, placeholder:"New document category...",
       onAdd:(v)=>saveDocCategories([...docCategories, v]),
-      onRemove:(i)=>saveDocCategories(docCategories.filter((_,idx)=>idx!==i))
+      onRemove:(i)=>saveDocCategories(docCategories.filter((_,idx)=>idx!==i)),
+      onEdit:(i,v)=>saveDocCategories(docCategories.map((x,idx)=>idx===i?v:x))
     }),
     security: () => React.createElement(MasterPasswordChanger, null),
     sales: () => React.createElement("div", { style:{ background:"#fff", border:`1px solid ${BORDER}`, borderRadius:10, padding:"20px 24px", maxWidth:560 } },

@@ -101,7 +101,7 @@ ok("Working Days is a real tab now, not a placeholder",
    /\{ id:"workingDays",   label:"Working Days" \}/.test(HTML));
 ok("it is wired to the editor", /workingDays: \(\) => React\.createElement\(WorkingDaysEditor/.test(HTML));
 ok("the master asks the backend for it", /"getPanelsList", "getWorkingDays"/.test(HTML));
-ok("and destructures it in the same position", /pnl,wd\]\) =>/.test(HTML));
+ok("and destructures it in the same position", /pnl,wd,/.test(HTML));
 ok("an older backend leaves the clinic open rather than inventing a week",
    /if \(wd && wd\.success\) \{ setWeekOff/.test(HTML));
 

@@ -772,6 +772,8 @@ function route(p) {
       case "getPanelsList":            return getPanelsList();
       case "savePanelsList":           return savePanelsList(p);
       case "getChairsList":            return getChairsList();
+      case "getClinicTimings":         return getClinicTimings();
+      case "saveClinicTimings":        return saveClinicTimings(p);
       case "getWorkingDays":           return getWorkingDays();
       case "saveWorkingDays":          return saveWorkingDays(p);
       case "saveChairsList":           return saveChairsList(p);
@@ -4411,6 +4413,69 @@ function savePanelsList(p) {
 //
 // One tab, written so a human can read it: a Week Off row names the day, a
 // Holiday row carries the date and what it is.
+// ── Clinic timings: when the day runs, and how long a slot is ─────────────
+// The appointment book draws its columns from these, so they are kept in the
+// sheet rather than fixed in the app -- a clinic that opens at eight, or runs
+// twenty-minute slots, is a master edit and not a code change.
+var CLINIC_TIMINGS_TAB = "Clinic Timings";
+var CLINIC_TIMINGS_DEFAULT = { open: "09:00", close: "19:00", slotMinutes: 30 };
+
+// A time cell can come back as text, or as a Date when Sheets decides it
+// looks like a time. Both have to end up as "HH:MM", or the book draws
+// nothing at all.
+function hhmm_(v) {
+  if (v === undefined || v === null || v === "") return "";
+  if (v instanceof Date) return Utilities.formatDate(v, Session.getScriptTimeZone(), "HH:mm");
+  var m = /^\s*(\d{1,2}):(\d{2})/.exec(String(v));
+  if (!m) return "";
+  var h = parseInt(m[1], 10), mi = parseInt(m[2], 10);
+  if (isNaN(h) || isNaN(mi) || h > 23 || mi > 59) return "";
+  return (h < 10 ? "0" : "") + h + ":" + (mi < 10 ? "0" : "") + mi;
+}
+
+function getClinicTimings() {
+  var sh = getSheet(CLINIC_TIMINGS_TAB);
+  var data = sh.getDataRange().getValues();
+  var got = {};
+  for (var i = 1; i < data.length; i++) {
+    var k = String(data[i][0] || "").trim().toLowerCase();
+    if (k) got[k] = data[i][1];
+  }
+  var open = hhmm_(got["open"]), close = hhmm_(got["close"]);
+  var step = parseInt(String(got["slot minutes"] === undefined ? "" : got["slot minutes"]).trim(), 10);
+  // A tab that has never been filled in answers with the usual clinic day
+  // rather than an empty book.
+  return {
+    success: true,
+    open: open || CLINIC_TIMINGS_DEFAULT.open,
+    close: close || CLINIC_TIMINGS_DEFAULT.close,
+    slotMinutes: (step > 0 ? step : CLINIC_TIMINGS_DEFAULT.slotMinutes)
+  };
+}
+
+function saveClinicTimings(p) {
+  var open = hhmm_(p.open), close = hhmm_(p.close);
+  var step = parseInt(String(p.slotMinutes === undefined ? "" : p.slotMinutes).trim(), 10);
+  if (!open || !close) return { success: false, error: "the opening and closing times must read as HH:MM" };
+  if (!(step > 0)) return { success: false, error: "a slot must be at least one minute long" };
+  // Closing before opening would leave the book with no columns at all, and
+  // the clinic would be unable to book anybody until somebody noticed why.
+  if (close <= open) return { success: false, error: "the clinic cannot close before it opens" };
+
+  var sh = getSheet(CLINIC_TIMINGS_TAB);
+  sh.clearContents();
+  var now = new Date().toISOString();
+  // Written with a leading apostrophe so Sheets keeps "09:00" as text instead
+  // of turning it into a time and handing back something else.
+  sh.getRange(1, 1, 4, 3).setValues([
+    ["Setting", "Value", "Updated At"],
+    ["Open", "'" + open, now],
+    ["Close", "'" + close, now],
+    ["Slot Minutes", step, now]
+  ]);
+  return { success: true };
+}
+
 var WORKING_DAYS_TAB = "Working Days";
 var WD_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
 
