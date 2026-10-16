@@ -23518,6 +23518,110 @@ function PersonListEditor({ items, onAdd, onRemove, onEdit }) {
   );
 }
 
+// Which days the clinic is closed: the weekly offs, and the dated holidays.
+// Both come from the Management Suite's Leave & Attendance, copied in once so
+// the PMS has its own copy in the sheet — every machine sees the same days,
+// and nothing here depends on that other app still being installed.
+const WD_DAYS = ["Sunday","Monday","Tuesday","Wednesday","Thursday","Friday","Saturday"];
+function WorkingDaysEditor({ weekOff, holidays, onSave }) {
+  const txt = (v) => (v === undefined || v === null) ? "" : String(v);
+  const [date, setDate] = React.useState("");
+  const [name, setName] = React.useState("");
+  const [editAt, setEditAt] = React.useState(null);
+  const [draft, setDraft] = React.useState({ date:"", name:"" });
+  const btn = (bg, col, bd) => ({ padding:"5px 12px", fontSize:12.5, fontFamily:"inherit",
+    cursor:"pointer", borderRadius:6, background:bg, color:col, border:bd, fontWeight:700 });
+  const cell = { padding:"7px 12px" };
+
+  const byDate = (a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0);
+  const toggleDay = (n) => onSave(
+    weekOff.indexOf(n) >= 0 ? weekOff.filter(d => d !== n) : weekOff.concat([n]).sort((a,b)=>a-b),
+    holidays);
+  const addHoliday = () => {
+    const d = txt(date).trim();
+    if (!d) return;
+    // One entry per date. Adding a date that is already there renames it
+    // rather than leaving the clinic with two answers for the same day.
+    const rest = holidays.filter(h => txt(h.date).trim() !== d);
+    onSave(weekOff, rest.concat([{ date:d, name:txt(name).trim() }]).sort(byDate));
+    setDate(""); setName("");
+  };
+  const saveEdit = (i) => {
+    const d = txt(draft.date).trim();
+    if (!d) return;
+    onSave(weekOff, holidays.map((h, x) => x === i ? { date:d, name:txt(draft.name).trim() } : h).sort(byDate));
+    setEditAt(null);
+  };
+  const pretty = (d) => {
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(txt(d).trim());
+    if (!m) return txt(d);
+    const dt = new Date(+m[1], +m[2]-1, +m[3]);
+    return dt.getDate() + " " + ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"][dt.getMonth()]
+           + " " + dt.getFullYear() + " \u00b7 " + WD_DAYS[dt.getDay()];
+  };
+
+  return React.createElement("div", null,
+    React.createElement("div", { style:{ fontSize:13.5, fontWeight:700, color:"#2e2e2e", marginBottom:8 } }, "Weekly off"),
+    React.createElement("div", { style:{ fontSize:13, color:"#383838", marginBottom:10, lineHeight:1.5 } },
+      "The days the clinic is closed every week. Everything else counts as a working day."),
+    React.createElement("div", { style:{ display:"flex", gap:7, flexWrap:"wrap", marginBottom:22 } },
+      WD_DAYS.map((d, n) => {
+        const off = weekOff.indexOf(n) >= 0;
+        return React.createElement("button", { key:d, onClick:()=>toggleDay(n),
+          style:{ padding:"7px 14px", fontSize:13, fontFamily:"inherit", fontWeight:700, cursor:"pointer",
+                  borderRadius:18, background: off ? "#b91c1c" : "#fff", color: off ? "#fff" : "#2e2e2e",
+                  border: off ? "1px solid #b91c1c" : `1px solid ${BORDER}` } },
+          d.slice(0,3) + (off ? " \u2014 closed" : ""));
+      })
+    ),
+
+    React.createElement("div", { style:{ fontSize:13.5, fontWeight:700, color:"#2e2e2e", marginBottom:8 } }, "Holidays"),
+    React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"auto 2fr auto", gap:8, marginBottom:14 } },
+      React.createElement("input", { style:inp, type:"date", value:date, onChange:e=>setDate(e.target.value) }),
+      React.createElement("input", { style:inp, value:name, placeholder:"What it is (e.g. Diwali)",
+        onChange:e=>setName(e.target.value), onKeyDown:e=>e.key==="Enter"&&addHoliday() }),
+      React.createElement("button", { onClick:addHoliday, style:{ padding:"0 18px", fontSize:13, border:"none",
+        borderRadius:7, cursor:"pointer", background:T, color:"#fff", fontWeight:700 } }, "+ Add")
+    ),
+    holidays.length===0
+      ? React.createElement("div", { style:{ background:BGS, borderRadius:8, padding:24, textAlign:"center",
+          color:"#5a5a5a", fontSize:14, border:`1px dashed ${BORDER}` } },
+          "No holidays listed — only the weekly offs above are closed.")
+      : React.createElement("div", { style:{ background:"#fff", border:`1px solid ${BORDER}`, borderRadius:8, overflow:"hidden" } },
+          React.createElement("table", { style:{ width:"100%", borderCollapse:"collapse", fontSize:13.5 } },
+            React.createElement("thead", null, React.createElement("tr", { style:{ background:BGS } },
+              ["Date","Holiday",""].map(h=>React.createElement("th", { key:h, style:{ textAlign:"left", padding:"8px 12px" } }, h))
+            )),
+            React.createElement("tbody", null, holidays.map((h,i) => editAt===i
+              ? React.createElement("tr", { key:i, style:{ borderTop:`1px solid ${BORDER}`, background:"#f5f9ff" } },
+                  React.createElement("td", { style:cell },
+                    React.createElement("input", { style:{...inp, fontSize:13}, type:"date", value:txt(draft.date),
+                      onChange:e=>setDraft({ ...draft, date:e.target.value }) })),
+                  React.createElement("td", { style:cell },
+                    React.createElement("input", { style:{...inp, fontSize:13}, value:txt(draft.name), autoFocus:true,
+                      onChange:e=>setDraft({ ...draft, name:e.target.value }),
+                      onKeyDown:e=>{ if(e.key==="Enter") saveEdit(i); if(e.key==="Escape") setEditAt(null); } })),
+                  React.createElement("td", { style:{ ...cell, textAlign:"center", whiteSpace:"nowrap" } },
+                    React.createElement("button", { onClick:()=>saveEdit(i), disabled:!txt(draft.date).trim(),
+                      style:{ ...btn(txt(draft.date).trim()?"#059669":"#9ca3af", "#fff", "none"), marginRight:6 } }, "Save"),
+                    React.createElement("button", { onClick:()=>setEditAt(null),
+                      style:btn("transparent", "#2e2e2e", `1px solid ${BORDER}`) }, "Cancel")))
+              : React.createElement("tr", { key:i, style:{ borderTop:`1px solid ${BORDER}` } },
+                  React.createElement("td", { style:{ ...cell, fontWeight:600, whiteSpace:"nowrap" } }, pretty(h.date)),
+                  React.createElement("td", { style:cell }, txt(h.name) || "\u2014"),
+                  React.createElement("td", { style:{ ...cell, textAlign:"center", whiteSpace:"nowrap" } },
+                    React.createElement("button", { onClick:()=>{ setEditAt(i); setDraft({ date:txt(h.date), name:txt(h.name) }); },
+                      style:{ ...btn("#fff", "#0f6fc5", "1px solid #0f6fc5"), marginRight:6 } }, "Edit"),
+                    React.createElement("button", {
+                      onClick:()=>{ if (window.confirm("Remove " + (txt(h.name) || pretty(h.date)) + "?"))
+                        onSave(weekOff, holidays.filter((_,x)=>x!==i)); },
+                      style:btn("#fff", "#b91c1c", "1px solid #e5b4b4") }, "Remove")))
+            ))
+          )
+        )
+  );
+}
+
 // Name + Default Dosage/Frequency list editor (Medicines master, used by the
 // Prescription form's searchable medicine dropdown to autofill dosage/frequency).
 function MedicineListEditor({ items, onAdd, onRemove }) {
@@ -24008,7 +24112,7 @@ const MASTER_STRUCTURE = [
   ]},
   { id:"schedule", label:"Schedule", subtabs:[
     { id:"clinicTimings", label:"Clinic Timings", placeholder:true },
-    { id:"workingDays",   label:"Working Days", placeholder:true },
+    { id:"workingDays",   label:"Working Days" },
     { id:"apptReasons",   label:"Appointment Reasons" },
     { id:"procedureLibrary", label:"Procedure Library" }
   ]},
@@ -24654,6 +24758,8 @@ function Master() {
   const [docCategories, setDocCategories] = React.useState([]);
   const [implantBrands, setImplantBrands] = React.useState([]);
   const [panels, setPanels] = React.useState([]);
+  const [weekOff, setWeekOff] = React.useState([]);
+  const [holidays, setHolidays] = React.useState([]);
   const [procedureLibrary, setProcedureLibrary] = React.useState([]);
   const [procedureFamilies, setProcedureFamilies] = React.useState([]);
   const [clinicProfile, setClinicProfile] = React.useState(window.CLINIC || {});
@@ -24663,7 +24769,7 @@ function Master() {
 
   React.useEffect(() => {
     setLoading(true);
-    // Eighteen lists, one request. The order here is what the callback
+    // Twenty lists, one request. The order here is what the callback
     // destructures, so the two must be changed together.
     apiBatch([
       "getTreatmentsMaster", "getDoctorDetailsList", "getEmployeesList",
@@ -24672,8 +24778,8 @@ function Master() {
       "getMedicineDosagesList", "getMedicineFrequenciesList", "getMedicineDurationsList",
       "getMedicineInstructionsList", "getMedicineNotesList", "getReasonsList",
       "getClinicProfile", "getDocumentCategoriesList", "getProcedureLibrary",
-      "getImplantBrandsList", "getPanelsList"
-    ]).then(([t,d,e,c,m,tpl,ch,med,dos,freq,dur,instr,mn,ar,cp,dc,pl,ib,pnl]) => {
+      "getImplantBrandsList", "getPanelsList", "getWorkingDays"
+    ]).then(([t,d,e,c,m,tpl,ch,med,dos,freq,dur,instr,mn,ar,cp,dc,pl,ib,pnl,wd]) => {
       setLoading(false);
       if (t.success) setTreatments(t.treatments || []);
       // An older backend without this list simply leaves it empty, and the
@@ -24698,6 +24804,9 @@ function Master() {
       if (cp.success && cp.profile) setClinicProfile(cp.profile);
       if (dc.success) setDocCategories(dc.categories || []);
       if (pl.success) { setProcedureLibrary(pl.library || []); setProcedureFamilies(pl.families || []); }
+      // A backend without this list leaves the clinic open every day, which is
+      // the honest answer until the days are filled in — not an invented week.
+      if (wd && wd.success) { setWeekOff(wd.weekOff || []); setHolidays(wd.holidays || []); }
     }).catch(() => setLoading(false));
   }, []);
 
@@ -24743,6 +24852,16 @@ function Master() {
   const saveApptReasons = (arr) => persist("saveReasonsList", { reasons: JSON.stringify(arr) }, arr, setApptReasons, apptReasons);
   const saveDocCategories = (arr) => persist("saveDocumentCategoriesList", { categories: JSON.stringify(arr) }, arr, setDocCategories, docCategories);
   const saveProcedureLibrary = (arr) => persist("saveProcedureLibrary", { library: JSON.stringify(arr) }, arr, setProcedureLibrary, procedureLibrary);
+  // Both halves travel together: they are one answer to "is the clinic open
+  // that day", and saving them apart would leave a moment where it is wrong.
+  const saveWorkingDays = (days, hols) => {
+    const prevDays = weekOff, prevHols = holidays;
+    setHolidays(hols);
+    return persist("saveWorkingDays",
+      { weekOff: JSON.stringify(days), holidays: JSON.stringify(hols) },
+      days, setWeekOff, prevDays).then(saved => { if (!saved) setHolidays(prevHols); return saved; });
+  };
+
   const saveClinicProfile = async (profile) => {
     const prevProfile = clinicProfile;
     const prevWindow = window.CLINIC;
@@ -24777,6 +24896,9 @@ function Master() {
       onAdd:(item)=>saveEmployees([...employees, item]),
       onRemove:(i)=>saveEmployees(employees.filter((_,idx)=>idx!==i)),
       onEdit:(i,item)=>saveEmployees(employees.map((it,idx)=>idx===i?item:it))
+    }),
+    workingDays: () => React.createElement(WorkingDaysEditor, {
+      weekOff, holidays, onSave: saveWorkingDays
     }),
     expenses: () => React.createElement(SimpleListEditor, {
       items:expenseCats, placeholder:"New expense category...",

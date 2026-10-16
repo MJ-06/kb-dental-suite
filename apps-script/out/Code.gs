@@ -772,6 +772,8 @@ function route(p) {
       case "getPanelsList":            return getPanelsList();
       case "savePanelsList":           return savePanelsList(p);
       case "getChairsList":            return getChairsList();
+      case "getWorkingDays":           return getWorkingDays();
+      case "saveWorkingDays":          return saveWorkingDays(p);
       case "saveChairsList":           return saveChairsList(p);
       case "getClinicalNoteTemplates":  return getClinicalNoteTemplates();
       case "saveClinicalNoteTemplates": return saveClinicalNoteTemplates(p);
@@ -4398,6 +4400,74 @@ function savePanelsList(p) {
   sh.appendRow(["Panel", "Updated At"]);
   var now = new Date().toISOString();
   arr.forEach(function (m) { if (String(m || "").trim()) sh.appendRow([String(m).trim(), now]); });
+  return { success: true };
+}
+
+// ── Working days: the weekly offs and the holiday list ───────
+// The clinic keeps these in the Management Suite's Leave & Attendance, which
+// lives in one browser's storage. They are copied in here once so the PMS has
+// its own copy in the sheet — every machine sees the same days, and the PMS
+// carries no dependency on that other app.
+//
+// One tab, written so a human can read it: a Week Off row names the day, a
+// Holiday row carries the date and what it is.
+var WORKING_DAYS_TAB = "Working Days";
+var WD_DAY_NAMES = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+
+function getWorkingDays() {
+  var sh = getSheet(WORKING_DAYS_TAB);
+  var data = sh.getDataRange().getValues();
+  var weekOff = [], holidays = [];
+  for (var i = 1; i < data.length; i++) {
+    var kind = String(data[i][0] || "").trim().toLowerCase();
+    if (!kind) continue;
+    var val = data[i][1];
+    if (kind === "week off") {
+      var n = parseInt(String(val === undefined || val === null ? "" : val).trim(), 10);
+      // A day named rather than numbered is still a day; take either.
+      if (isNaN(n)) n = WD_DAY_NAMES.map(function (d) { return d.toLowerCase(); })
+                                    .indexOf(String(val || "").trim().toLowerCase());
+      if (n >= 0 && n <= 6 && weekOff.indexOf(n) < 0) weekOff.push(n);
+    } else if (kind === "holiday") {
+      var date = val instanceof Date ? isoDay_(val)
+                                     : String(val === undefined || val === null ? "" : val).trim();
+      if (date) holidays.push({ date: date, name: String(data[i][2] || "").trim() });
+    }
+  }
+  weekOff.sort(function (a, b) { return a - b; });
+  holidays.sort(function (a, b) { return a.date < b.date ? -1 : a.date > b.date ? 1 : 0; });
+  return { success: true, weekOff: weekOff, holidays: holidays };
+}
+
+// A date cell can come back as a Date object rather than text, and the app
+// compares these as "YYYY-MM-DD" strings — so one is made here, from the
+// sheet's own timezone rather than UTC, or a holiday would land a day out.
+function isoDay_(d) {
+  return Utilities.formatDate(d, Session.getScriptTimeZone(), "yyyy-MM-dd");
+}
+
+function saveWorkingDays(p) {
+  var weekOff = parseList_(p.weekOff, "week off days");
+  if (weekOff && weekOff.__bad) return { success: false, error: weekOff.__bad };
+  var holidays = parseList_(p.holidays, "holiday list");
+  if (holidays && holidays.__bad) return { success: false, error: holidays.__bad };
+
+  var sh = getSheet(WORKING_DAYS_TAB);
+  sh.clearContents();
+  var now = new Date().toISOString();
+  var out = [["Type", "Day / Date", "Name", "Updated At"]];
+  weekOff.forEach(function (n) {
+    var i = parseInt(n, 10);
+    if (i >= 0 && i <= 6) out.push(["Week Off", i, WD_DAY_NAMES[i], now]);
+  });
+  holidays.forEach(function (h) {
+    var date = String((h && h.date) || "").trim();
+    // Written with a leading apostrophe so Sheets keeps it as the text the app
+    // compares, instead of reformatting it into a date and sending back
+    // something the comparison no longer matches.
+    if (date) out.push(["Holiday", "'" + date, String((h && h.name) || "").trim(), now]);
+  });
+  sh.getRange(1, 1, out.length, 4).setValues(out);
   return { success: true };
 }
 
