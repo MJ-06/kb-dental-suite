@@ -21,7 +21,7 @@ ok("a row can be put into edit", /startEdit/.test(body) && /editAt===i/.test(bod
 ok("there is a Save button", /\}, "Save"\)/.test(body));
 ok("and a Cancel beside it", /setEditAt\(null\)/.test(body) && /\}, "Cancel"\)/.test(body));
 ok("the brand name is editable, not just the sizes", /draft\.name/.test(body) && /draft\.sizes/.test(body));
-ok("Save is refused on an empty brand name", /disabled:!draft\.name\.trim\(\)/.test(body));
+ok("Save is refused on an empty brand name", /disabled:!txt\(draft\.name\)\.trim\(\)/.test(body));
 ok("nothing saves until Save is pressed — no save on blur", !/onBlur/.test(body));
 ok("there is an Edit button on each row", /\}, "Edit"\)/.test(body));
 ok("and a Delete", /\}, "Delete"\)/.test(body));

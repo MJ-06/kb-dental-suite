@@ -23,13 +23,13 @@ ok("and a Cancel beside it", /setEditAt\(null\)/.test(body) && /\}, "Cancel"\)/.
 ok("all four fields are editable, not just the name",
    ['"name"', '"phone"', '"email"', '"role"'].every(k => body.indexOf(k) > 0) &&
    /draft\[k\]/.test(body));
-ok("Save is refused on an empty name", /disabled:!draft\.name\.trim\(\)/.test(body));
+ok("Save is refused on an empty name", /disabled:!txt\(draft\.name\)\.trim\(\)/.test(body));
 ok("nothing saves until Save is pressed — no save on blur", !/onBlur/.test(body));
 ok("Enter saves and Escape backs out", /e\.key==="Enter"\) saveEdit\(i\)/.test(body) &&
    /e\.key==="Escape"\) setEditAt\(null\)/.test(body));
 ok("there is an Edit button on each row", /\}, "Edit"\)/.test(body));
 ok("and a Remove", /\}, "Remove"\)/.test(body));
-ok("Remove asks first, naming the person", /window\.confirm\("Remove " \+ it\.name/.test(body));
+ok("Remove asks first, naming the person", /window\.confirm\("Remove " \+ txt\(it\.name\)/.test(body));
 ok("Edit and Remove sit side by side on one row, not stacked",
    /"Edit"\)[\s\S]{0,500}"Remove"\)/.test(body) && /whiteSpace:"nowrap"/.test(body));
 

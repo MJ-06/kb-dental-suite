@@ -4097,7 +4097,7 @@ function getImplantBrandsList() {
   var items = [];
   for (var i = 1; i < data.length; i++) {
     if (!data[i][0]) continue;
-    items.push({ name: String(data[i][0]).trim(), sizes: String(data[i][1] || "").trim() });
+    items.push({ name: String(data[i][0]).trim(), sizes: String(data[i][1] === undefined || data[i][1] === null ? "" : data[i][1]).trim() });
   }
   return { success: true, brands: items };
 }
@@ -4235,12 +4235,25 @@ function saveClinicProfile(p) {
   return { success: true };
 }
 
+// A phone column of digits leaves a sheet as a NUMBER, not text. The app then
+// calls .trim() on it and throws, far from here and for no visible reason —
+// which is what made Master's Save button do nothing at all. Everything that
+// leaves this sheet as a person's detail leaves as text.
+function person_(row) {
+  return {
+    name:  String(row[0] === undefined || row[0] === null ? "" : row[0]).trim(),
+    phone: String(row[1] === undefined || row[1] === null ? "" : row[1]).trim(),
+    email: String(row[2] === undefined || row[2] === null ? "" : row[2]).trim(),
+    role:  String(row[3] === undefined || row[3] === null ? "" : row[3]).trim()
+  };
+}
+
 function getDoctorDetailsList() {
   var sh = getSheet("Doctor Details");
   var data = sh.getDataRange().getValues();
   var items = [];
   for (var i = 1; i < data.length; i++) {
-    if (data[i][0]) items.push({ name: data[i][0], phone: data[i][1] || "", email: data[i][2] || "", role: data[i][3] || "" });
+    if (data[i][0]) items.push(person_(data[i]));
   }
   return { success: true, doctors: items };
 }
@@ -4260,7 +4273,7 @@ function getEmployeesList() {
   var data = sh.getDataRange().getValues();
   var items = [];
   for (var i = 1; i < data.length; i++) {
-    if (data[i][0]) items.push({ name: data[i][0], phone: data[i][1] || "", email: data[i][2] || "", role: data[i][3] || "" });
+    if (data[i][0]) items.push(person_(data[i]));
   }
   return { success: true, employees: items };
 }

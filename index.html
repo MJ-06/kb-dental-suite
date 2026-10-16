@@ -23451,14 +23451,21 @@ function PersonListEditor({ items, onAdd, onRemove, onEdit }) {
   const [editAt, setEditAt] = React.useState(null);
   const [draft, setDraft] = React.useState({ name:"", phone:"", email:"", role:"" });
   const add = () => { const v = name.trim(); if (!v) return; onAdd({ name:v, phone, email, role }); setName(""); setPhone(""); setEmail(""); setRole(""); };
+  // A phone number in the sheet is a NUMBER, not text, and the backend hands
+  // it back as one. Calling .trim() on it threw inside the click handler, so
+  // Save did nothing whatever: no save, no message, the row just sat there
+  // open. Anything off a sheet is made text before it is touched — a cell's
+  // type is the sheet's business, not this form's.
+  const txt = (v) => (v === undefined || v === null) ? "" : String(v);
   const startEdit = (i, it) => {
     setEditAt(i);
-    setDraft({ name:it.name||"", phone:it.phone||"", email:it.email||"", role:it.role||"" });
+    setDraft({ name:txt(it.name), phone:txt(it.phone), email:txt(it.email), role:txt(it.role) });
   };
   const saveEdit = (i) => {
-    const v = draft.name.trim();
+    const v = txt(draft.name).trim();
     if (!v) return;
-    onEdit(i, { name:v, phone:draft.phone.trim(), email:draft.email.trim(), role:draft.role.trim() });
+    onEdit(i, { name:v, phone:txt(draft.phone).trim(),
+                email:txt(draft.email).trim(), role:txt(draft.role).trim() });
     setEditAt(null);
   };
   const btn = (bg, col, bd) => ({ padding:"5px 12px", fontSize:12.5, fontFamily:"inherit",
@@ -23482,28 +23489,28 @@ function PersonListEditor({ items, onAdd, onRemove, onEdit }) {
             React.createElement("tbody", null, items.map((it,i) => editAt===i
               ? React.createElement("tr", { key:i, style:{ borderTop:`1px solid ${BORDER}`, background:"#f5f9ff" } },
                   ["name","phone","email","role"].map(k=>React.createElement("td", { key:k, style:cell },
-                    React.createElement("input", { style:{...inp, fontSize:13}, value:draft[k],
+                    React.createElement("input", { style:{...inp, fontSize:13}, value:txt(draft[k]),
                       autoFocus:k==="name",
                       placeholder:k.charAt(0).toUpperCase()+k.slice(1),
                       onChange:e=>setDraft({ ...draft, [k]:e.target.value }),
                       onKeyDown:e=>{ if(e.key==="Enter") saveEdit(i); if(e.key==="Escape") setEditAt(null); } }))),
                   React.createElement("td", { style:{ ...cell, textAlign:"center", whiteSpace:"nowrap" } },
-                    React.createElement("button", { onClick:()=>saveEdit(i), disabled:!draft.name.trim(),
-                      style:{ ...btn(draft.name.trim()?"#059669":"#9ca3af", "#fff", "none"), marginRight:6 } }, "Save"),
+                    React.createElement("button", { onClick:()=>saveEdit(i), disabled:!txt(draft.name).trim(),
+                      style:{ ...btn(txt(draft.name).trim()?"#059669":"#9ca3af", "#fff", "none"), marginRight:6 } }, "Save"),
                     React.createElement("button", { onClick:()=>setEditAt(null),
                       style:btn("transparent", "#2e2e2e", `1px solid ${BORDER}`) }, "Cancel")))
               : React.createElement("tr", { key:i, style:{ borderTop:`1px solid ${BORDER}` } },
-                  React.createElement("td", { style:{ ...cell, fontWeight:600 } }, it.name),
-                  React.createElement("td", { style:cell }, it.phone||"—"),
-                  React.createElement("td", { style:cell }, it.email||"—"),
-                  React.createElement("td", { style:cell }, it.role||"—"),
+                  React.createElement("td", { style:{ ...cell, fontWeight:600 } }, txt(it.name)),
+                  React.createElement("td", { style:cell }, txt(it.phone)||"—"),
+                  React.createElement("td", { style:cell }, txt(it.email)||"—"),
+                  React.createElement("td", { style:cell }, txt(it.role)||"—"),
                   React.createElement("td", { style:{ ...cell, textAlign:"center", whiteSpace:"nowrap" } },
                     React.createElement("button", { onClick:()=>startEdit(i, it),
                       style:{ ...btn("#fff", "#0f6fc5", "1px solid #0f6fc5"), marginRight:6 } }, "Edit"),
                     React.createElement("button", {
                       // Removing a person takes their phone, email and role
                       // with them, so it asks first and names who.
-                      onClick:()=>{ if (window.confirm("Remove " + it.name + "?")) onRemove(i); },
+                      onClick:()=>{ if (window.confirm("Remove " + txt(it.name) + "?")) onRemove(i); },
                       style:btn("#fff", "#b91c1c", "1px solid #e5b4b4") }, "Remove")))
             ))
           )
@@ -23565,11 +23572,15 @@ function ImplantBrandListEditor({ items, onAdd, onRemove, onEdit }) {
     onAdd({ name: v, sizes: sizes.trim() });
     setName(""); setSizes("");
   };
-  const startEdit = (i, it) => { setEditAt(i); setDraft({ name: it.name, sizes: it.sizes || "" }); };
+  // The same trap as Doctors and Employees: a sheet cell can arrive as a
+  // number — a lone size of 10 would — and .trim() on a number throws inside
+  // the click handler, leaving Save doing nothing at all.
+  const txt = (v) => (v === undefined || v === null) ? "" : String(v);
+  const startEdit = (i, it) => { setEditAt(i); setDraft({ name: txt(it.name), sizes: txt(it.sizes) }); };
   const saveEdit = (i) => {
-    const v = draft.name.trim();
+    const v = txt(draft.name).trim();
     if (!v) return;
-    onEdit(i, { name: v, sizes: draft.sizes.trim() });
+    onEdit(i, { name: v, sizes: txt(draft.sizes).trim() });
     setEditAt(null);
   };
   const btn = (bg, col, bd) => ({ padding:"5px 12px", fontSize:12.5, fontFamily:"inherit",
@@ -23596,15 +23607,15 @@ function ImplantBrandListEditor({ items, onAdd, onRemove, onEdit }) {
             React.createElement("tbody", null, items.map((it,i)=> editAt===i
               ? React.createElement("tr", { key:i, style:{ borderTop:`1px solid ${BORDER}`, background:"#f5f9ff" } },
                   React.createElement("td", { style:{ padding:"7px 12px" } },
-                    React.createElement("input", { style:{...inp, fontSize:13}, value:draft.name, autoFocus:true,
+                    React.createElement("input", { style:{...inp, fontSize:13}, value:txt(draft.name), autoFocus:true,
                       onChange:e=>setDraft({ ...draft, name:e.target.value }) })),
                   React.createElement("td", { style:{ padding:"7px 12px" } },
-                    React.createElement("input", { style:{...inp, fontSize:13}, value:draft.sizes,
+                    React.createElement("input", { style:{...inp, fontSize:13}, value:txt(draft.sizes),
                       placeholder:"Sizes, comma separated",
                       onChange:e=>setDraft({ ...draft, sizes:e.target.value }) })),
                   React.createElement("td", { style:{ textAlign:"center", whiteSpace:"nowrap", padding:"7px 12px" } },
-                    React.createElement("button", { onClick:()=>saveEdit(i), disabled:!draft.name.trim(),
-                      style:{ ...btn(draft.name.trim()?"#059669":"#9ca3af", "#fff", "none"), marginRight:6 } }, "Save"),
+                    React.createElement("button", { onClick:()=>saveEdit(i), disabled:!txt(draft.name).trim(),
+                      style:{ ...btn(txt(draft.name).trim()?"#059669":"#9ca3af", "#fff", "none"), marginRight:6 } }, "Save"),
                     React.createElement("button", { onClick:()=>setEditAt(null),
                       style:btn("transparent", "#2e2e2e", `1px solid ${BORDER}`) }, "Cancel")))
               : React.createElement("tr", { key:i, style:{ borderTop:`1px solid ${BORDER}` } },
