@@ -292,12 +292,32 @@ async function apiDirect(action, data = {}) {
     // the sheet before the connection broke would be applied twice, and a
     // duplicate payment is far worse than an error message.
     const isRead = action === "batch" || action.indexOf("get") === 0;
+    // Everything used to go in the query string, the whole payload with it.
+    // A master list is sent as one JSON blob, so the longer the list the
+    // longer the URL — and past a few thousand characters the request is
+    // refused outright or never arrives whole. That is why saving got worse
+    // as the lists filled up: it was fine until the doctors and employees
+    // were in, and then it was not.
+    //
+    // A long write goes in a POST body instead, which has no such ceiling.
+    // text/plain keeps it a simple request, so there is no CORS preflight for
+    // Apps Script to fail to answer, and doPost reads the body as JSON either
+    // way. Short requests are left exactly as they were: this is the one
+    // place a receipt is written, and it is no place to change the transport
+    // for the sake of tidiness.
+    const query = p.toString();
+    const url = SCRIPT_URL + "?" + query;
+    const long = query.length > 1800;
+    const body = long ? JSON.stringify(Object.assign({ action }, data,
+                                       getSessionToken() ? { token: getSessionToken() } : {})) : null;
     const attempts = 3;
     let lastErr;
     for (let i = 0; i < attempts; i++) {
       if (i) await new Promise(r => setTimeout(r, 400 * Math.pow(3, i - 1)));
       try {
-        const r = await fetch(SCRIPT_URL + "?" + p.toString());
+        const r = long
+          ? await fetch(SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" }, body })
+          : await fetch(url);
         if (!r.ok) throw Object.assign(new Error("HTTP " + r.status), { status: r.status });
         return handleAuthFailure(await r.json());
       } catch (e) {

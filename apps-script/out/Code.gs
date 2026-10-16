@@ -396,6 +396,33 @@ var DEFAULT_DOC_CATEGORIES = [
   "Digital Scan", "Prescription (Scanned PDF)", "Referral Letter", "Consent Form (Scanned PDF)"
 ];
 
+// ── Guard for every list save ────────────────────────────────
+// A save used to clear the tab and THEN look at what it had been given. If
+// the payload never arrived, or arrived cut short, JSON.parse threw, the list
+// came out empty — and the tab had already been emptied. Every doctor, every
+// employee, gone, and { success: true } sent back, so the app had nothing to
+// show and the loss only surfaced at the next refresh.
+//
+// This parses first and refuses to touch the sheet unless it holds a real
+// list. An empty list is still allowed: removing the last row is a thing the
+// clinic may legitimately do. What is refused is a payload that is missing or
+// damaged, which is not the same thing and must never be read as "delete
+// everything".
+function parseList_(raw, label) {
+  if (Array.isArray(raw)) return raw;
+  if (raw === undefined || raw === null || raw === "") {
+    return { __bad: "the " + label + " never reached the sheet" };
+  }
+  var arr;
+  try { arr = JSON.parse(raw); }
+  catch (e) {
+    return { __bad: "the " + label + " arrived damaged — " + String(raw).length +
+                    " characters, cut short in transit" };
+  }
+  if (!Array.isArray(arr)) return { __bad: "the " + label + " was not a list" };
+  return arr;
+}
+
 function getDocumentCategoriesList() {
   var sh = getSheet(DOC_CATEGORIES_SHEET);
   if (sh.getLastRow() === 0) {
@@ -410,11 +437,11 @@ function getDocumentCategoriesList() {
 }
 
 function saveDocumentCategoriesList(p) {
+  var arr = parseList_(p.categories, "document categories");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet(DOC_CATEGORIES_SHEET);
   sh.clearContents();
   sh.appendRow(["Category", "Updated At"]);
-  var arr = [];
-  try { arr = JSON.parse(p.categories); } catch (e) { if (Array.isArray(p.categories)) arr = p.categories; }
   var now = new Date().toISOString();
   arr.forEach(function(v) { sh.appendRow([v, now]); });
   return { success: true };
@@ -2688,11 +2715,11 @@ function getProcedureLibrary() {
 // Admin-only rewrite (adding/renaming a procedure) — same clear+rewrite
 // pattern as every other master list in this file.
 function saveProcedureLibrary(p) {
+  var arr = parseList_(p.library, "procedure library");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Procedure Library");
   sh.clearContents();
   sh.appendRow(PROCEDURE_LIBRARY_HEADERS);
-  var arr = [];
-  try { arr = JSON.parse(p.library); } catch (e) { if (Array.isArray(p.library)) arr = p.library; }
   arr.forEach(function(r) {
     sh.appendRow([r.procedureCode, r.procedureName, r.familyCode || "", r.visitsMin || 0, r.visitsMax || 0,
       r.sequenceNo, r.stageType || "", r.stageCode, r.stageName, !!r.completesTreatment]);
@@ -3061,13 +3088,11 @@ function getReasonsList() {
 }
 
 function saveReasonsList(p) {
+  var arr = parseList_(p.reasons, "appointment reasons");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Appointment Reasons");
   sh.clearContents();
   sh.appendRow(["Reason", "Updated At"]);
-  var arr = [];
-  try { arr = JSON.parse(p.reasons); } catch (e) {
-    if (Array.isArray(p.reasons)) arr = p.reasons;
-  }
   arr.forEach(function(r) { sh.appendRow([r, new Date().toISOString()]); });
   return { success: true };
 }
@@ -4002,11 +4027,11 @@ function getExpenseCategoriesList() {
   return { success: true, categories: items };
 }
 function saveExpenseCategoriesList(p) {
+  var arr = parseList_(p.categories, "expense categories");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Expense Categories");
   sh.clearContents();
   sh.appendRow(["Category", "Updated At"]);
-  var arr = [];
-  try { arr = JSON.parse(p.categories); } catch (e) { if (Array.isArray(p.categories)) arr = p.categories; }
   arr.forEach(function(c) { sh.appendRow([c, new Date().toISOString()]); });
   return { success: true };
 }
@@ -4027,11 +4052,11 @@ function getTreatmentsMaster() {
   return { success: true, treatments: items };
 }
 function saveTreatmentsMaster(p) {
+  var arr = parseList_(p.treatments, "treatments master");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Treatments Master");
   sh.clearContents();
   sh.appendRow(["Treatment Name", "Fee", "Department", "Updated At"]);
-  var arr = [];
-  try { arr = JSON.parse(p.treatments); } catch (e) { if (Array.isArray(p.treatments)) arr = p.treatments; }
   var now = new Date().toISOString();
   arr.forEach(function(t) { sh.appendRow([t.name, t.fee, t.department || "", now]); });
   return { success: true };
@@ -4047,11 +4072,11 @@ function getMedicinesMaster() {
   return { success: true, medicines: items };
 }
 function saveMedicinesMaster(p) {
+  var arr = parseList_(p.medicines, "medicines master");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Medicines Master");
   sh.clearContents();
   sh.appendRow(["Medicine Name", "Default Dosage", "Default Frequency", "Updated At"]);
-  var arr = [];
-  try { arr = JSON.parse(p.medicines); } catch (e) { if (Array.isArray(p.medicines)) arr = p.medicines; }
   var now = new Date().toISOString();
   arr.forEach(function(m) { sh.appendRow([m.name, m.dosage || "", m.frequency || "", now]); });
   return { success: true };
@@ -4077,11 +4102,11 @@ function getImplantBrandsList() {
   return { success: true, brands: items };
 }
 function saveImplantBrandsList(p) {
+  var arr = parseList_(p.brands, "implant brands");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Implant Brands");
   sh.clearContents();
   sh.appendRow(["Brand", "Sizes", "Updated At"]);
-  var arr = [];
-  try { arr = JSON.parse(p.brands); } catch (e) { if (Array.isArray(p.brands)) arr = p.brands; }
   var now = new Date().toISOString();
   arr.forEach(function(b) { sh.appendRow([b.name, b.sizes || "", now]); });
   return { success: true };
@@ -4095,11 +4120,11 @@ function getMedicineDosagesList() {
   return { success: true, dosages: items };
 }
 function saveMedicineDosagesList(p) {
+  var arr = parseList_(p.dosages, "medicine dosages");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Medicine Dosages");
   sh.clearContents();
   sh.appendRow(["Dosage", "Updated At"]);
-  var arr = [];
-  try { arr = JSON.parse(p.dosages); } catch (e) { if (Array.isArray(p.dosages)) arr = p.dosages; }
   var now = new Date().toISOString();
   arr.forEach(function(v) { sh.appendRow([v, now]); });
   return { success: true };
@@ -4113,11 +4138,11 @@ function getMedicineFrequenciesList() {
   return { success: true, frequencies: items };
 }
 function saveMedicineFrequenciesList(p) {
+  var arr = parseList_(p.frequencies, "medicine frequencies");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Medicine Frequencies");
   sh.clearContents();
   sh.appendRow(["Frequency", "Updated At"]);
-  var arr = [];
-  try { arr = JSON.parse(p.frequencies); } catch (e) { if (Array.isArray(p.frequencies)) arr = p.frequencies; }
   var now = new Date().toISOString();
   arr.forEach(function(v) { sh.appendRow([v, now]); });
   return { success: true };
@@ -4131,11 +4156,11 @@ function getMedicineDurationsList() {
   return { success: true, durations: items };
 }
 function saveMedicineDurationsList(p) {
+  var arr = parseList_(p.durations, "medicine durations");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Medicine Durations");
   sh.clearContents();
   sh.appendRow(["Duration", "Updated At"]);
-  var arr = [];
-  try { arr = JSON.parse(p.durations); } catch (e) { if (Array.isArray(p.durations)) arr = p.durations; }
   var now = new Date().toISOString();
   arr.forEach(function(v) { sh.appendRow([v, now]); });
   return { success: true };
@@ -4156,11 +4181,11 @@ function getMedicineInstructionsList() {
   return { success: true, instructions: items };
 }
 function saveMedicineInstructionsList(p) {
+  var arr = parseList_(p.instructions, "medicine instructions");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Medicine Instructions");
   sh.clearContents();
   sh.appendRow(["Situation", "Instruction", "Category", "Updated At"]);
-  var arr = [];
-  try { arr = JSON.parse(p.instructions); } catch (e) { if (Array.isArray(p.instructions)) arr = p.instructions; }
   var now = new Date().toISOString();
   arr.forEach(function(v) {
     if (typeof v === "string") sh.appendRow([v, v, "", now]);
@@ -4177,11 +4202,11 @@ function getMedicineNotesList() {
   return { success: true, medNotes: items };
 }
 function saveMedicineNotesList(p) {
+  var arr = parseList_(p.medNotes, "medicine notes");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Medicine Notes");
   sh.clearContents();
   sh.appendRow(["Note", "Updated At"]);
-  var arr = [];
-  try { arr = JSON.parse(p.medNotes); } catch (e) { if (Array.isArray(p.medNotes)) arr = p.medNotes; }
   var now = new Date().toISOString();
   arr.forEach(function(v) { sh.appendRow([v, now]); });
   return { success: true };
@@ -4195,11 +4220,17 @@ function getClinicProfile() {
   return { success: true, profile: profile };
 }
 function saveClinicProfile(p) {
+  var profile = null;
+  if (p.profile && typeof p.profile === "object") profile = p.profile;
+  else if (p.profile) { try { profile = JSON.parse(p.profile); } catch (e) { profile = null; } }
+  // Same rule as the lists: a payload that never arrived, or arrived cut
+  // short, must not be read as "the clinic has no letterhead".
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) {
+    return { success: false, error: "the clinic profile never reached the sheet" };
+  }
   var sh = getSheet("Clinic Profile");
   sh.clearContents();
   sh.appendRow(["Field", "Value"]);
-  var profile = {};
-  try { profile = JSON.parse(p.profile); } catch (e) { if (p.profile && typeof p.profile === "object") profile = p.profile; }
   Object.keys(profile).forEach(function(k) { sh.appendRow([k, profile[k]]); });
   return { success: true };
 }
@@ -4214,11 +4245,11 @@ function getDoctorDetailsList() {
   return { success: true, doctors: items };
 }
 function saveDoctorDetailsList(p) {
+  var arr = parseList_(p.doctors, "doctor details");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Doctor Details");
   sh.clearContents();
   sh.appendRow(["Name", "Phone", "Email", "Role", "Updated At"]);
-  var arr = [];
-  try { arr = JSON.parse(p.doctors); } catch (e) { if (Array.isArray(p.doctors)) arr = p.doctors; }
   var now = new Date().toISOString();
   arr.forEach(function(d) { sh.appendRow([d.name, d.phone || "", d.email || "", d.role || "", now]); });
   return { success: true };
@@ -4234,11 +4265,11 @@ function getEmployeesList() {
   return { success: true, employees: items };
 }
 function saveEmployeesList(p) {
+  var arr = parseList_(p.employees, "employees");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Employees");
   sh.clearContents();
   sh.appendRow(["Name", "Phone", "Email", "Role", "Updated At"]);
-  var arr = [];
-  try { arr = JSON.parse(p.employees); } catch (e) { if (Array.isArray(p.employees)) arr = p.employees; }
   var now = new Date().toISOString();
   arr.forEach(function(emp) { sh.appendRow([emp.name, emp.phone || "", emp.email || "", emp.role || "", now]); });
   return { success: true };
@@ -4252,11 +4283,11 @@ function getPaymentModesList() {
   return { success: true, modes: items };
 }
 function savePaymentModesList(p) {
+  var arr = parseList_(p.modes, "payment modes");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Payment Modes");
   sh.clearContents();
   sh.appendRow(["Mode", "Updated At"]);
-  var arr = [];
-  try { arr = JSON.parse(p.modes); } catch (e) { if (Array.isArray(p.modes)) arr = p.modes; }
   var now = new Date().toISOString();
   arr.forEach(function(m) { sh.appendRow([m, now]); });
   return { success: true };
@@ -4309,8 +4340,8 @@ function savePanelRates(p) {
   var panel = String((p && p.panel) || "").trim();
   if (!panel) return { success: false, error: "No panel given" };
 
-  var arr = [];
-  try { arr = JSON.parse(p.rates); } catch (e) { if (Array.isArray(p.rates)) arr = p.rates; }
+  var arr = parseList_(p.rates, "rate card");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
 
   var data = sh.getDataRange().getValues();
   var kept = [];
@@ -4347,11 +4378,11 @@ function getPanelsList() {
   return { success: true, panels: items };
 }
 function savePanelsList(p) {
+  var arr = parseList_(p.panels, "panels");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Panels");
   sh.clearContents();
   sh.appendRow(["Panel", "Updated At"]);
-  var arr = [];
-  try { arr = JSON.parse(p.panels); } catch (e) { if (Array.isArray(p.panels)) arr = p.panels; }
   var now = new Date().toISOString();
   arr.forEach(function (m) { if (String(m || "").trim()) sh.appendRow([String(m).trim(), now]); });
   return { success: true };
@@ -4369,11 +4400,11 @@ function getChairsList() {
   return { success: true, chairs: items };
 }
 function saveChairsList(p) {
+  var arr = parseList_(p.chairs, "chairs");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Chairs");
   sh.clearContents();
   sh.appendRow(["Chair", "Updated At"]);
-  var arr = [];
-  try { arr = JSON.parse(p.chairs); } catch (e) { if (Array.isArray(p.chairs)) arr = p.chairs; }
   var now = new Date().toISOString();
   arr.forEach(function(c) { sh.appendRow([c, now]); });
   return { success: true };
@@ -4389,11 +4420,11 @@ function getClinicalNoteTemplates() {
   return { success: true, templates: items };
 }
 function saveClinicalNoteTemplates(p) {
+  var arr = parseList_(p.templates, "clinical note templates");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Clinical Note Templates");
   sh.clearContents();
   sh.appendRow(["Situation", "Template Text", "Category", "Updated At"]);
-  var arr = [];
-  try { arr = JSON.parse(p.templates); } catch (e) { if (Array.isArray(p.templates)) arr = p.templates; }
   var now = new Date().toISOString();
   arr.forEach(function(t) { sh.appendRow([t.situation, t.text, t.category || "", now]); });
   return { success: true };

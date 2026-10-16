@@ -38,7 +38,10 @@ function slice(from, to) {
   if (a < 0 || b < 0) throw new Error("could not slice " + from);
   return GS.slice(a, b);
 }
-const code = slice("var PANEL_RATES_TAB", "function getPanelsList() {");
+// savePanelRates now refuses a payload that never arrived rather than
+// clearing the tab over it, so it needs the shared guard in scope.
+const code = slice("function parseList_(", "function getDocumentCategoriesList(") +
+             slice("var PANEL_RATES_TAB", "function getPanelsList() {");
 
 function boot(rows) {
   const sheet = new FakeSheet(rows ? rows.slice() : []);
