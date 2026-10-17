@@ -5891,6 +5891,42 @@ function buildSlots(t) {
   }
   return out;
 }
+// Which days the clinic is shut, from Master -> Schedule -> Working Days.
+// Fetched once per page and shared, the same way the timings are.
+let _workingDaysCache = null;
+// Returns why the clinic is closed that day, or "" if it is open. The holiday
+// is named ahead of the weekly off, because "Diwali" tells the receptionist
+// more than "Sunday" does on a day that is both.
+function closedReasonFor(dateISO, weekOff, holidays) {
+  const d = String(dateISO || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return "";
+  const hit = (holidays || []).find(h => String(h && h.date || "").trim() === d);
+  if (hit) return (String(hit.name || "").trim() || "Holiday") + " \u2014 holiday";
+  // Parsed as local parts, never new Date("...") — that reads the string as
+  // UTC and can land the day before east of Greenwich.
+  const [y, m, dd] = d.split("-").map(Number);
+  const day = new Date(y, m - 1, dd).getDay();
+  if ((weekOff || []).indexOf(day) >= 0) return WD_DAYS[day] + " \u2014 weekly off";
+  return "";
+}
+function useWorkingDays() {
+  const [wd, setWd] = React.useState(() => _workingDaysCache || { weekOff: [], holidays: [] });
+  React.useEffect(() => {
+    let alive = true;
+    api("getWorkingDays").then(r => {
+      if (!alive || !r || !r.success) return;
+      _workingDaysCache = { weekOff: r.weekOff || [], holidays: r.holidays || [] };
+      setWd(_workingDaysCache);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  return {
+    weekOff: wd.weekOff, holidays: wd.holidays,
+    closedReason: React.useCallback(
+      (dateISO) => closedReasonFor(dateISO, wd.weekOff, wd.holidays), [wd]),
+  };
+}
+
 // Fetched once per page and shared, so the two screens that draw a day agree
 // and a second screen does not make a second request.
 let _timingsCache = null;
@@ -6023,6 +6059,7 @@ function MiniCalendar({ selDate, onSelect }) {
 
 function Appointments({ globalPat, setGlobalPat, setPage }) {
   const { slots: TIME_SLOTS } = useClinicTimings();
+  const { closedReason } = useWorkingDays();
   const todayISO = new Date().toISOString().split("T")[0];
   const [selDate, setSelDate] = useState(todayISO);
   const [viewMode, setViewMode] = useState("chairs"); // "month" | "week" | "chairs"
@@ -6263,6 +6300,15 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
     setFProcedureCode(""); setCaseState(null); setStartAtSequenceNo(0);
   };
 
+  // Said on the form the moment the date is picked, so nobody fills in a
+  // whole booking before being told the day is shut.
+  const dateClosedNotice = () => {
+    const shut = closedReason(fDate);
+    return shut ? React.createElement("div", { style:{ fontSize:13, fontWeight:600, color:"#b91c1c",
+      background:"#fdf2f2", border:"1px solid #e5b4b4", borderRadius:7, padding:"8px 11px", marginBottom:10 } },
+      "The clinic is closed on this day \u2014 " + shut + ". Nothing can be booked into it.") : null;
+  };
+
   const openQuickAdd = (time, chair) => {
     resetForm();
     if (time) setFTime(time);
@@ -6310,6 +6356,12 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
     if (!fDate) e.date = "Date required";
     if (!fTime) e.time = "Time required";
     if (!fDoctor) e.doctor = "Doctor required";
+    // The clinic is shut that day, so nothing can be booked into it. A walk-in
+    // that actually happens on a holiday is still recorded — that goes in
+    // through the Daily Register, which records what happened rather than
+    // scheduling something that has not.
+    const shut = closedReason(fDate);
+    if (shut) e.date = "The clinic is closed — " + shut;
     setFErrors(e);
     if (Object.keys(e).length > 0) return;
 
@@ -6765,6 +6817,10 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
 
         // ── CHAIRS VIEW ──────────────────────
         viewMode==="chairs" && loading && React.createElement("div", { style:{ textAlign:"center", padding:20, color:"#444444", fontSize:14 } }, "⏳ Loading appointments..."),
+        viewMode==="chairs" && !loading && closedReason(selDate) && React.createElement("div", {
+          style:{ fontSize:13.5, fontWeight:700, color:"#b91c1c", background:"#fdf2f2", border:"1px solid #e5b4b4",
+                  borderRadius:7, padding:"9px 12px", marginBottom:12 } },
+          "Clinic closed \u2014 " + closedReason(selDate) + ". Existing appointments still show; nothing new can be booked."),
         viewMode==="chairs" && !loading && React.createElement("div", { style:{ border:`1px solid ${BORDER}`, borderRadius:8, overflow:"hidden", marginBottom:16, background:"#fff" } },
           React.createElement("div", { style:{ display:"grid", gridTemplateColumns:`64px repeat(${chairs.length}, 1fr)`, background:T, color:"#fff" } },
             React.createElement("div", { style:{ padding:"8px 6px", fontSize:10, fontWeight:700 } }, "Time"),
@@ -6776,13 +6832,18 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
             React.createElement("div", { style:{ padding:"6px", fontSize:12, fontWeight:700, color:"#3d3d3d", background:BGS, display:"flex", alignItems:"center" } }, slot),
             chairs.map(chair => {
               const cellAppts = activeAppts.filter(a => a.time===slot && (a.chair||chairs[0])===chair);
-              const blocked = isBlocked(chair, slot);
+              // A closed day's empty cells must not invite a click that only
+              // gets refused at Save — they are shown shut, like a block.
+              const blocked = isBlocked(chair, slot) || !!closedReason(selDate);
               const dc = DOCTOR_COL[chairs.indexOf(chair) % DOCTOR_COL.length];
               return React.createElement("div", { key:chair,
                 style:{ padding:4, borderLeft:`1px solid ${BORDER}`, minHeight:40, cursor: (cellAppts.length||blocked)?"default":"pointer",
                   background: blocked ? "repeating-linear-gradient(45deg,#f2f2f2,#f2f2f2 6px,#e8e8e8 6px,#e8e8e8 12px)" : "transparent" },
                 onClick: (cellAppts.length||blocked) ? undefined : ()=>openQuickAdd(slot, chair),
-                title: blocked ? "Blocked: " + (blocks.find(b=>b.chair===chair&&slot>=b.fromTime&&slot<b.toTime)?.reason||"") : undefined
+                // A cell shut because the clinic is closed says so, rather
+                // than reading "Blocked:" with nothing after it.
+                title: closedReason(selDate) ? "Clinic closed — " + closedReason(selDate)
+                     : blocked ? "Blocked: " + (blocks.find(b=>b.chair===chair&&slot>=b.fromTime&&slot<b.toTime)?.reason||"") : undefined
               },
                 cellAppts.length===0 && !blocked && React.createElement("div", { style:{ height:32, borderRadius:5, border:`1px dashed ${BORDER}` } }),
                 cellAppts.map((a,ci) => {
@@ -6915,6 +6976,7 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
           ))
       ),
 
+      dateClosedNotice(),
       React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr 1fr 1fr", gap:12, marginBottom:14 } },
         React.createElement("div", null, React.createElement(Lbl,{c:"Date *"}),
           React.createElement(DMYDate, { value:fDate, onChange:setFDate, style:{ borderColor:fErrors.date?"#e24b4a":"" } }),
@@ -7131,7 +7193,11 @@ function QuickApptModal({ show, defaultDate, onClose, onSaved }) {
     const apptPayload = {
       date: fDate, uhid: fUhid, patientName: finalName,
       time: fTime, type: fReason, doctor: fDoctor, chair: fChair,
-      mobile: fMobile, notes: fNotes, status: "Scheduled"
+      mobile: fMobile, notes: fNotes, status: "Scheduled",
+      // Same as the Daily Register: the patient is at the desk, so this is a
+      // record of a visit rather than a booking, and a closed day does not
+      // refuse it.
+      walkIn: true
     };
     const res = await api("saveAppointment", apptPayload);
     // A walk-in is standing at the desk, so they are checked in the moment the
@@ -12011,7 +12077,11 @@ function DailyRegister({ globalPat, setGlobalPat, setPage }) {
       const res = await api("saveAppointment", {
         date: nDate, uhid: nPat.uhid, patientName: nPat.name, time: nWalkIn,
         type: nProcedureDone || "Walk-in", doctor: nDoctor, chair: "",
-        mobile: nPhone, notes: "Walk-in — added from Daily Register", status: "Scheduled"
+        mobile: nPhone, notes: "Walk-in — added from Daily Register", status: "Scheduled",
+        // A walk-in records a patient who came, not a booking, so a closed
+        // day does not refuse it: an emergency seen on a holiday is still a
+        // visit that happened and has to go on the record.
+        walkIn: true
       });
       // Only stamp a check-in for a visit happening today. Back-dating an entry
       // would otherwise record the clock at the moment of typing as the time

@@ -2265,7 +2265,32 @@ function getAppointments(p) {
   return { success: true, appointments: appts };
 }
 
+// Why the clinic is shut that day, or "" if it is open. Shared by the save
+// and the reschedule, so a booking cannot be moved onto a day it could not
+// have been made on.
+function closedReason_(dateISO) {
+  var d = String(dateISO || "").trim();
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(d)) return "";
+  var wd;
+  try { wd = getWorkingDays(); } catch (e) { return ""; }   // never block over a read that failed
+  for (var i = 0; i < wd.holidays.length; i++) {
+    if (wd.holidays[i].date === d) return (wd.holidays[i].name || "Holiday") + " (holiday)";
+  }
+  var parts = d.split("-");
+  // Built from parts in the script's own timezone; new Date(d) would read it
+  // as UTC and can land on the day before.
+  var day = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2])).getDay();
+  return wd.weekOff.indexOf(day) >= 0 ? WD_DAY_NAMES[day] + " (weekly off)" : "";
+}
+
 function saveAppointment(p) {
+  // Nothing is booked into a day the clinic is shut. A walk-in is exempt: it
+  // records a patient who actually came, which is a fact about the past and
+  // not a booking -- an emergency seen on a holiday must still be recordable.
+  if (!p.walkIn) {
+    var shut = closedReason_(p.date);
+    if (shut) return { success: false, error: "The clinic is closed on " + p.date + " \u2014 " + shut };
+  }
   var sh = getAppointmentsSheet();
   var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
   var id = "APT-" + Date.now();
@@ -2321,6 +2346,12 @@ function updateAppointmentStatus(p) {
 // In-place edit of an existing appointment's core fields (date/time/doctor/
 // chair/reason/notes) — used by the Schedule popup's "Edit" action.
 function updateAppointment(p) {
+  // Rescheduling onto a closed day is the same thing as booking one, so it is
+  // refused the same way. A date that is not being changed is not checked.
+  if (!p.walkIn && p.date) {
+    var shut = closedReason_(p.date);
+    if (shut) return { success: false, error: "The clinic is closed on " + p.date + " \u2014 " + shut };
+  }
   var sh = getAppointmentsSheet();
   var data = sh.getDataRange().getValues();
   var headers = data[0].map(String);
