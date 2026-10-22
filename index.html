@@ -16514,7 +16514,11 @@ function CRMModule() {
       // The clinic's patients are already its customers, so the CRM can take
       // them as contacts rather than anyone retyping them.
       if (d.type === "KB_CRM_ALL_PATIENTS") {
-        api("getAllPatients").then(function (r) {
+        // The CRM wants everybody the clinic has ever registered, including
+        // the ones in the old book from before the move. The dashboard count
+        // does not, so it asks without this and keeps meaning "registered
+        // here".
+        api("getAllPatients", { includeArchive: "true" }).then(function (r) {
           reply(e.source, { type: "KB_CRM_ALL_PATIENTS_RESULT", token: d.token,
                             ok: !!(r && r.success), patients: (r && r.patients) || [],
                             error: (r && r.error) || "" });

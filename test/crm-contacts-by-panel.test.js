@@ -20,7 +20,8 @@ const m = /const CRM_B64\s*=\s*([\s\S]*?);\n/.exec(HTML);
 const CRM = Buffer.from((m[1].match(/"([^"]*)"/g) || []).map(x => x.slice(1, -1)).join(""), "base64").toString("utf8");
 
 // ── the register hands over the panel ─────────────────────────────────────
-const fn = GS.slice(GS.indexOf("function getAllPatients()"), GS.indexOf("\n}", GS.indexOf("function getAllPatients()")));
+const gi = GS.indexOf("function getAllPatients(");
+const fn = GS.slice(gi, GS.indexOf("\n}", gi));
 ok("a patient carries their panel out of the register", /panel: panelCol >= 0/.test(fn));
 ok("and which category of it they are on", /panelCategory: panelCatCol >= 0/.test(fn));
 ok("and their card number", /cardId: cardCol >= 0/.test(fn));

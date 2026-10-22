@@ -649,7 +649,7 @@ function route(p) {
       case "patientCompleteRegistration": return patientCompleteRegistration(p);
       case "getPending":        return getPending();
       case "getPatient":        return getPatient(p);
-      case "getAllPatients":     return getAllPatients();
+      case "getAllPatients":     return getAllPatients(p);
       case "searchPatients":    return searchPatients(p);
       case "getTodaysBirthdays": return getTodaysBirthdays();
       case "getFollowUps":       return getFollowUps();
@@ -1303,7 +1303,52 @@ function getPatient(p) {
   return { success: false, error: "Patient not found: " + uhid };
 }
 
-function getAllPatients() {
+// Patients registered before the move live in a second book, read until now
+// only one at a time by getOldPatientData(uhid) and never counted. A clinic
+// that has been running for years has more patients than the current
+// register holds, and anything working from the whole list -- the CRM's
+// contacts above all -- has to see them.
+//
+// Opt-in, because the dashboard's patient count means "registered here" and
+// should not silently change. Deduped on the registration id, so a patient
+// who was migrated is not added twice; if every old patient was migrated this
+// returns nothing new and costs one read.
+function oldBookPatients_() {
+  try {
+    var sh = SpreadsheetApp.openById(OLD_REG_SHEET_ID).getSheets()[0];
+    var data = sh.getDataRange().getValues();
+    if (data.length <= 1) return [];
+    var h = data[0];
+    function oc(name) {
+      return h.findIndex(function (x) {
+        return String(x).toLowerCase().indexOf(name.toLowerCase()) >= 0;
+      });
+    }
+    var iId = oc("Registration ID"), iName = oc("Full Name"),
+        iGen = oc("Gender"), iDob = oc("Date of Birth"), iMob = oc("Mobile No");
+    var out = [];
+    for (var r = 1; r < data.length; r++) {
+      var row = data[r];
+      var uhid = iId >= 0 ? String(row[iId] || "").trim() : "";
+      var name = iName >= 0 ? String(row[iName] || "").trim() : "";
+      if (!uhid && !name) continue;
+      out.push({
+        uhid: uhid, name: name,
+        gender: iGen >= 0 ? String(row[iGen] || "") : "",
+        dob: iDob >= 0 ? String(row[iDob] || "") : "",
+        mobile: iMob >= 0 ? row[iMob] : "",
+        panel: "", panelCategory: "", cardId: "",
+        registeredOn: "", fromArchive: true
+      });
+    }
+    return out;
+  } catch (e) {
+    Logger.log("Old registration book unreachable: " + e.message);
+    return [];
+  }
+}
+
+function getAllPatients(p) {
   var data = regAllRows_();
   if (data.length <= 1) return { success: true, patients: [] };
   var headers = data[0];
@@ -1332,6 +1377,18 @@ function getAllPatients() {
       registeredOn: tsCol >= 0 ? r[tsCol] : ""
     };
   });
+  if (p && (p.includeArchive === true || String(p.includeArchive) === "true")) {
+    var seen = {};
+    patients.forEach(function (q) {
+      if (q.uhid) seen[String(q.uhid).trim().toUpperCase()] = true;
+    });
+    oldBookPatients_().forEach(function (q) {
+      var k = String(q.uhid || "").trim().toUpperCase();
+      if (k && seen[k]) return;
+      if (k) seen[k] = true;
+      patients.push(q);
+    });
+  }
   return { success: true, patients: patients };
 }
 
