@@ -61,16 +61,18 @@ ok("it reads the clinic's own register through the app",
    /api\("getAllPatients"\)/.test(HTML));
 ok("an import that cannot read the register says so",
    /Could not read the register/.test(CRM));
-ok("a patient already here is skipped on UHID", /if\(uh && have\[uh\.toUpperCase\(\)\]\) return;/.test(CRM));
-// Only for a contact with no UHID. Matching every patient on mobile dropped
-// whole families, who share one number — see crm-import-keeps-families.
-ok("and on mobile only where there is no UHID to go on",
-   /if\(!uh && tel && haveTelNoUhid\[tel\]\) return;/.test(CRM));
+ok("a patient already here is skipped on UHID",
+   /if\(have\[uh\.toUpperCase\(\)\]\)\{ nAlready\+\+; return; \}/.test(CRM));
+// A row with no UHID is keyed on its name AND number — never the number
+// alone, which dropped families and then second walk-ins. See
+// crm-import-keeps-families.
+ok("and on name-with-number only where there is no UHID to go on",
+   /var sk = softKey\(pt\.name, tel\);/.test(CRM));
 ok("a mobile stored as a number is still matched",
    /String\(pt\.mobile==null\?'':pt\.mobile\)\.replace\(\/\\D\/g,''\)/.test(CRM));
 ok("the imported contact carries its UHID", /uhid: uh,/.test(CRM));
-ok("running it again when nothing is missing says so",
-   /Every patient in the register is already a contact/.test(CRM));
+ok("running it again reports everyone as already here rather than adding them",
+   /nAlready \+ ' already here'/.test(CRM));
 ok("the import only ever adds — it never rewrites a contact already there",
    /persist\('contacts','contacts', st\.contacts\.concat\(added\)\)/.test(CRM));
 ok("the result is shown on the page, not left to a toast nobody saw",

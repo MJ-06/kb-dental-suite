@@ -22,22 +22,30 @@ const CRM = Buffer.from((m[1].match(/"([^"]*)"/g) || []).map(x => x.slice(1, -1)
 
 // The rule itself, lifted out and run — this is the part that lost patients.
 function importer(existing, patients) {
-  const have = {}, haveTelNoUhid = {};
+  const have = {}, haveSoft = {};
+  const softKey = (name, tel) =>
+    String(name || "").trim().toLowerCase().replace(/\s+/g, " ") + "|" + (tel || "");
   existing.forEach(c => {
     if (c.uhid) { have[String(c.uhid).trim().toUpperCase()] = true; return; }
-    if (c.phone) haveTelNoUhid[String(c.phone).replace(/\D/g, "").slice(-10)] = true;
+    const nm = ((c.firstName || "") + " " + (c.lastName || "")).trim();
+    haveSoft[softKey(nm, String(c.phone || "").replace(/\D/g, "").slice(-10))] = true;
   });
-  const added = [];
+  const added = [], skipped = { blank: 0, already: 0, softDup: 0 };
   patients.forEach(pt => {
     const uh = String(pt.uhid || "").trim();
-    if (!uh && !pt.name) return;
-    if (uh && have[uh.toUpperCase()]) return;
     const tel = String(pt.mobile == null ? "" : pt.mobile).replace(/\D/g, "").slice(-10);
-    if (!uh && tel && haveTelNoUhid[tel]) return;
-    if (uh) have[uh.toUpperCase()] = true;
-    else if (tel) haveTelNoUhid[tel] = true;
+    if (!uh && !String(pt.name || "").trim()) { skipped.blank++; return; }
+    if (uh) {
+      if (have[uh.toUpperCase()]) { skipped.already++; return; }
+      have[uh.toUpperCase()] = true;
+    } else {
+      const sk = softKey(pt.name, tel);
+      if (haveSoft[sk]) { skipped.softDup++; return; }
+      haveSoft[sk] = true;
+    }
     added.push(pt.uhid || pt.name);
   });
+  added.skipped = skipped;
   return added;
 }
 
@@ -73,8 +81,18 @@ eq("a patient already imported is not added twice",
    ["KB0002", "KB0003", "KB0004", "KB0005"]);
 eq("and the match ignores case and spacing on the UHID",
    importer([{ uhid: " kb0001 " }], family).indexOf("KB0001"), -1);
-eq("a contact typed in by hand, with no UHID, is still matched on phone",
-   importer([{ firstName: "Someone", phone: "98110 00005" }],
+// Two DIFFERENT people with no UHID on one number are two people: a shared
+// number must never cost a name, or the follow-up goes to the wrong person.
+eq("two different walk-ins on one number both arrive",
+   importer([], [{ name: "Walk In One", mobile: "9811000009" },
+                 { name: "Walk In Two", mobile: "9811000009" }]),
+   ["Walk In One", "Walk In Two"]);
+eq("but the same name on the same number is one person",
+   importer([], [{ name: "Walk In One", mobile: "9811000009" },
+                 { name: "walk in  one", mobile: "9811000009" }]),
+   ["Walk In One"]);
+eq("a contact typed in by hand, with no UHID, is matched on name and number",
+   importer([{ firstName: "No UHID", lastName: "person", phone: "98110 00005" }],
             [{ name: "No UHID person", mobile: "9811000005" }]), []);
 eq("but that never blocks a patient who has a UHID",
    importer([{ firstName: "Someone", phone: "9811000001" }], family).length, 5);
@@ -85,10 +103,25 @@ eq("running it twice adds nobody the second time",
 // ── and the rule in the page matches the one tested ───────────────────────
 ok("the page keys on the UHID alone when there is one",
    /if\(c\.uhid\) \{ have\[String\(c\.uhid\)\.trim\(\)\.toUpperCase\(\)\] = true; return; \}/.test(CRM));
-ok("and only falls back to the phone for a contact with no UHID",
-   /if\(!uh && tel && haveTelNoUhid\[tel\]\) return;/.test(CRM));
+ok("a row with no UHID is keyed on its name AND number, never the number alone",
+   /var sk = softKey\(pt\.name, tel\);/.test(CRM) && /if\(haveSoft\[sk\]\)/.test(CRM));
 ok("no phone is recorded as taken for a patient who has a UHID",
-   /else if\(tel\) haveTelNoUhid\[tel\] = true;/.test(CRM));
+   /if\(have\[uh\.toUpperCase\(\)\]\)\{ nAlready\+\+; return; \}/.test(CRM));
+
+// ── the import accounts for every row it was given ────────────────────────
+const out = importer([], [
+  { uhid: "KB1", name: "A", mobile: "1" }, { uhid: "KB1", name: "A again", mobile: "1" },
+  { name: "B", mobile: "2" }, { name: "B", mobile: "2" },
+  { name: "", mobile: "3" },
+]);
+eq("added plus every stated reason equals what the register returned",
+   out.length + out.skipped.already + out.skipped.softDup + out.skipped.blank, 5);
+eq("and each reason is counted separately",
+   [out.length, out.skipped.already, out.skipped.softDup, out.skipped.blank], [2, 1, 1, 1]);
+ok("the page reports that arithmetic rather than only a total",
+   /Register holds ' \+ nTotal/.test(CRM) && /already here/.test(CRM) &&
+   /the same name and number as another row/.test(CRM) &&
+   /neither a UHID nor a name/.test(CRM));
 
 // ── the toolbar that was cutting off ──────────────────────────────────────
 ok("the contacts count says what it is counting, not 'of 1'", !/' of 1'/.test(CRM));

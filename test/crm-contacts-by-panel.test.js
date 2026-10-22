@@ -67,7 +67,7 @@ ok("and keeps the panel, category and card on the contact itself",
    /panel: pt\.panel\|\|'', panelCategory: pt\.panelCategory\|\|'', cardId: pt\.cardId\|\|''/.test(CRM));
 ok("new companies are saved even when no new contact was added",
    /if\(newCompanies\) persist\('companies','companies', companies\);/.test(CRM));
-ok("the result says how many went under a panel", /of them under a panel/.test(CRM));
+ok("the result says how many went under a panel", /onPanel \+ ' under a panel'/.test(CRM));
 
 // ── and the list can be split by panel ────────────────────────────────────
 ok("Contacts has a panel filter", /st\.contactCompany/.test(CRM));
