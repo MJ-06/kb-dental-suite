@@ -22834,11 +22834,35 @@ function csSheets(items) {
 // backend's setupClinicalRecordTabs created "purely for pasting in historical
 // records with real columns". Nothing in the app read them, so records typed
 // or pasted straight into the sheet never showed anywhere.
+// Every form's work-done sheet is built from the tab it saves into: one
+// column per visit, one row per thing that form records. The four with a
+// Visit Date column carry the per-visit log the RCT form keeps; the rest
+// write one row per save, so the row IS the visit and Timestamp is its date.
+//
+// A form missing from here has no work-done sheet at all — the record view
+// never fetches its rows. That, and nothing about the forms themselves, is
+// what kept the other fourteen blank.
 const CS_RECORD_TAB = {
-  rct:         { tab: "RCT",                col: "Tooth No.",     date: "Visit Date" },
-  imp_surgery: { tab: "Implant Surgery",    col: "Implant Site",  date: "Visit Date" },
-  imp_prosth:  { tab: "Implant Prosthetic", col: "Implant Site",  date: "Visit Date" },
-  crown:       { tab: "Crown & Bridge",     col: "Tooth No.",     date: "Visit Date" }
+  rct:             { tab: "RCT",                   col: "Tooth No.",        date: "Visit Date" },
+  imp_surgery:     { tab: "Implant Surgery",       col: "Implant Site",     date: "Visit Date" },
+  imp_prosth:      { tab: "Implant Prosthetic",    col: "Implant Site",     date: "Visit Date" },
+  crown:           { tab: "Crown & Bridge",        col: "Tooth No.",        date: "Visit Date" },
+  restoration:     { tab: "Restoration",           col: "Tooth No. / Site", date: "Timestamp" },
+  pedo:            { tab: "Pedo",                  col: "Tooth No. / Site", date: "Timestamp" },
+  denture:         { tab: "Denture",               col: "Tooth No. / Site", date: "Timestamp" },
+  minorSurgery:    { tab: "Minor Surgery",         col: "Tooth No. / Site", date: "Timestamp" },
+  intraOral:       { tab: "Intra Oral Scan",       col: "Tooth No. / Site", date: "Timestamp" },
+  radiograph:      { tab: "Radiograph",            col: "Tooth No. / Site", date: "Timestamp" },
+  labLog:          { tab: "Lab Log",               col: "Tooth No. / Site", date: "Work Sending Date" },
+  localAnesthesia: { tab: "Local Anesthesia",      col: "Injection Site",   date: "Timestamp" },
+  pathology:       { tab: "Pathology",             col: "Sample Collection Site / Teeth No.", date: "Sample Collection Date" },
+  radiology:       { tab: "Radiology",             col: "Site/Teeth No.",   date: "Advised Date" },
+  orthodontics:    { tab: "Orthodontics",          col: "Arch",             date: "Tratment Starting Date" },
+  orthoProgress:   { tab: "Orthodontics Progress", date: "Visit Date" },
+  // Scaling and TM Joint record the mouth, not a tooth, so they have no site
+  // column and the sheet simply does not draw that row.
+  scaling:         { tab: "Scaling",               date: "Timestamp" },
+  tmJoint:         { tab: "TMJoint",               date: "Timestamp" }
 };
 // Identity columns belong in the header block, not as rows of the table.
 const CS_SKIP_COLS = ["Timestamp","UHID","UHID No.","Patient Name","Name of Patient","Age","Gender","_rowIndex"];
@@ -23040,7 +23064,9 @@ function ClinicalSheetRecordView({ formId, sheetType, uhid, onNewEntry }) {
             React.createElement("tr", null, React.createElement("td", { colSpan: CS_COLS_PER_SHEET + 1, style: secCell },
               "Recorded in the sheet \u2014 " + tabCfg.tab +
               (groups.length > 1 ? "  (sheet " + (gi+1) + " of " + groups.length + ")" : ""))),
-            r(tabCfg.col || "Tooth", row => row[tabCfg.col], true),
+            // Scaling and TM Joint record the mouth, not a tooth. Drawing an
+            // empty "Tooth" row for them would be a line of nothing.
+            tabCfg.col ? r(tabCfg.col, row => row[tabCfg.col], true) : null,
             r("Date", row => { const v = row[tabCfg.date]; return v ? fmtDMY(v) : ""; }, true),
             // Any column that holds a date is shown dd/mm/yyyy like the rest of
             // the record, rather than however the sheet happens to store it.
@@ -23075,7 +23101,7 @@ function ClinicalSheetRecordView({ formId, sheetType, uhid, onNewEntry }) {
       React.createElement("button", {
         onClick: () => printSheetRecord(tabCfg, sheetRows, sheetCols, uhid),
         style:{ padding:"7px 16px", fontSize:13, fontWeight:700, border:"none", borderRadius:7,
-                cursor:"pointer", background:T, color:"#fff" } }, "\uD83D\uDDA8 Print Clinical Record")),
+                cursor:"pointer", background:T, color:"#fff" } }, "\uD83D\uDDA8 Print Work Done Sheet")),
     sheetTable());
   if (!data) return React.createElement("div", { style:{ padding:"40px 28px", textAlign:"center" } },
     sheetErrBanner,
@@ -23200,7 +23226,7 @@ function ClinicalSheetRecordView({ formId, sheetType, uhid, onNewEntry }) {
         onClick: () => printClinicalRecord(cfg, data, items, sheetType),
         style:{ padding:"7px 16px", fontSize:13, fontWeight:700, border:"none", borderRadius:7,
                 cursor:"pointer", background:T, color:"#fff" }
-      }, "🖨 Print Clinical Record")),
+      }, "🖨 Print Work Done Sheet")),
     React.createElement("div", { style:{ background:"#fff", border:`1px solid ${BORDER}`, borderRadius:10, padding:"14px 18px", marginBottom:14 } },
       FRow("Patient", data.pName),
       FRow("UHID", data.pId),
@@ -23309,15 +23335,16 @@ function printSheetRecord(tabCfg, rows, cols, uhid) {
   const html = groups.map((group, gi) => {
     const line = (label, get, bold) => `<tr><td class="l">${esc(label)}</td>` +
       group.map(r => `<td class="${bold ? "b" : ""}">${r ? esc(get(r)) : ""}</td>`).join("") + `</tr>`;
-    let body = `<tr><td class="sec" colspan="${CS_COLS_PER_SHEET + 1}">${esc(tabCfg.tab)} Record</td></tr>`;
-    body += line(tabCfg.col || "Tooth", r => r[tabCfg.col] || "", true);
+    let body = `<tr><td class="sec" colspan="${CS_COLS_PER_SHEET + 1}">${esc(tabCfg.tab)} Work Done</td></tr>`;
+    // No site column means the form records the mouth rather than a tooth.
+    if (tabCfg.col) body += line(tabCfg.col, r => r[tabCfg.col] || "", true);
     body += line("Date", r => r[tabCfg.date] ? fmtDMY(r[tabCfg.date]) : "", true);
     labels.forEach(h => { body += line(h, r => {
       const v = r[h];
       if (!v || String(v) === "\u2014") return "";
       return /date/i.test(h) ? fmtDMY(v) : String(v);
     }); });
-    return crPage((tabCfg.tab || "") + " — Clinical Record", patientRow, body, code, gi + 1, groups.length);
+    return crPage((tabCfg.tab || "") + " Work Done Sheet", patientRow, body, code, gi + 1, groups.length);
   }).join("");
   crOpenPrint(html);
 }
@@ -23372,7 +23399,7 @@ function printClinicalRecord(cfg, data, items, sheetType) {
                 `</td></tr>`;
       });
     }
-    return crPage((sheetType || "") + " — Clinical Record", patientRow, body, code, gi + 1, groups.length);
+    return crPage((sheetType || "") + " Work Done Sheet", patientRow, body, code, gi + 1, groups.length);
   }).join("");
   crOpenPrint(html);
 }
