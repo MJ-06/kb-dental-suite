@@ -62,8 +62,10 @@ ok("it reads the clinic's own register through the app",
 ok("an import that cannot read the register says so",
    /Could not read the register/.test(CRM));
 ok("a patient already here is skipped on UHID", /if\(uh && have\[uh\.toUpperCase\(\)\]\) return;/.test(CRM));
-ok("and on mobile, so a contact added by hand is not doubled",
-   /if\(tel && haveTel\[tel\]\) return;/.test(CRM));
+// Only for a contact with no UHID. Matching every patient on mobile dropped
+// whole families, who share one number — see crm-import-keeps-families.
+ok("and on mobile only where there is no UHID to go on",
+   /if\(!uh && tel && haveTelNoUhid\[tel\]\) return;/.test(CRM));
 ok("a mobile stored as a number is still matched",
    /String\(pt\.mobile==null\?'':pt\.mobile\)\.replace\(\/\\D\/g,''\)/.test(CRM));
 ok("the imported contact carries its UHID", /uhid: uh,/.test(CRM));
