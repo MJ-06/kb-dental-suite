@@ -762,6 +762,7 @@ function route(p) {
 
       // ── Finance ────────────────────────────────────────────
       case "getReceipts":          return getReceipts(p);
+      case "getRevenueByPatient":  return getRevenueByPatient(p);
       case "saveReceipt":          return saveReceipt(p);
       case "getDailyCollection":   return getDailyCollection(p);
       case "getPatientOutstanding":return getPatientOutstanding(p);
@@ -3886,6 +3887,38 @@ function saveReceipt(p) {
     return { success: true, row: entryTarget };
   } catch (e) {
     return { success: false, error: e.message };
+  }
+}
+
+// What each patient has actually paid, as one number per patient.
+//
+// The source report needs revenue against thousands of patients at once, and
+// sending every receipt to do that would be a large payload to add up in the
+// browser. This adds them up where the rows already are, and sends back a
+// total per registration id and nothing else.
+function getRevenueByPatient(p) {
+  try {
+    var fromDate = p && p.fromDate ? new Date(p.fromDate) : null;
+    var toDate = p && p.toDate ? new Date(p.toDate) : null;
+    if (toDate) toDate.setHours(23, 59, 59);
+
+    var rows = readFinanceRows("Receipt No.");
+    var total = {}, counted = 0;
+    rows.forEach(function (r) {
+      var uhid = String(fcVal(r, ["uhid"]) || "").trim().toUpperCase();
+      if (!uhid) return;
+      var rawDate = fcVal(r, ["date"]);
+      var d = rawDate ? new Date(rawDate) : null;
+      if (fromDate && d && d < fromDate) return;
+      if (toDate && d && d > toDate) return;
+      var fee = Number(receiptFeeAndMode(r).fee);
+      if (!isFinite(fee)) fee = 0;
+      total[uhid] = (total[uhid] || 0) + fee;
+      counted++;
+    });
+    return { success: true, revenue: total, receipts: counted };
+  } catch (e) {
+    return { success: false, error: String(e.message || e) };
   }
 }
 
