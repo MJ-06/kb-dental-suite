@@ -61,6 +61,37 @@ function regSheets_() {
 // Card ID columns the main book does not, and dropping them would make a panel
 // patient look like an ordinary one everywhere they are listed. Columns are
 // matched by name, never by position, because the two books drift.
+// A patient who comes back after a long gap has their details collected
+// again for NABH, and registration writes a NEW row rather than overwriting
+// the old one. That is the right thing to keep -- the old row is the record
+// of what was true then -- but it means one patient can hold several rows
+// under one registration id, and the CURRENT one is the last of them.
+//
+// Everything that answers "who is this patient" has to take that last row.
+// Taking the first meant the app showed the details the re-registration was
+// performed to replace: the old address, the old number, the old history.
+//
+// Later is decided by the Timestamp where there is one, and by position
+// otherwise, since registration appends.
+function regLatestByUhid_(data, uhidCol) {
+  var tsCol = findRegColumn_(data[0], ["Timestamp", "Registered On"]);
+  var best = {};
+  for (var i = 1; i < data.length; i++) {
+    var id = String(data[i][uhidCol] || "").trim().toUpperCase();
+    if (!id) continue;
+    var when = tsCol >= 0 ? data[i][tsCol] : "";
+    var t = (when instanceof Date) ? when.getTime() : (when ? Date.parse(String(when)) : NaN);
+    var cur = best[id];
+    if (!cur) { best[id] = { row: i, t: t }; continue; }
+    // A row with a date beats one without; between two dates the later wins;
+    // with no dates at all the later row wins, because registration appends.
+    if (!isNaN(t) && isNaN(cur.t)) best[id] = { row: i, t: t };
+    else if (!isNaN(t) && !isNaN(cur.t)) { if (t >= cur.t) best[id] = { row: i, t: t }; }
+    else if (isNaN(t) && isNaN(cur.t)) best[id] = { row: i, t: t };
+  }
+  return best;
+}
+
 function regAllRows_() {
   if (_regAllRowsCache) return _regAllRowsCache;
   var sheets = regSheets_();
@@ -1253,7 +1284,11 @@ function getPatient(p) {
   });
   if (uhidColIdx < 0) uhidColIdx = 0;
 
-  for (var i = 1; i < data.length; i++) {
+  // The LAST row for this id, not the first: a patient re-registered for
+  // NABH has a newer row, and that is the one that is true now.
+  var latest = regLatestByUhid_(data, uhidColIdx);
+  var hit = latest[uhid];
+  for (var i = hit ? hit.row : 1; i < data.length; i++) {
     if (String(data[i][uhidColIdx]).trim().toUpperCase() === uhid) {
       var obj = {};
       headers.forEach(function(h, k) { obj[h] = data[i][k]; });
@@ -1364,8 +1399,14 @@ function getAllPatients(p) {
   var panelCol = findRegColumn_(headers, ["Panel"]);
   var panelCatCol = findRegColumn_(headers, ["Panel Category"]);
   var cardCol = findRegColumn_(headers, ["Card ID"]);
-  var patients = data.slice(1).map(function(r) {
-    return {
+  // One entry per patient, from their newest row — the count means patients,
+  // not rows, and a re-registered patient is one patient.
+  var newest = uhidCol >= 0 ? regLatestByUhid_(data, uhidCol) : {};
+  var patients = [];
+  data.slice(1).forEach(function(r, idx) {
+    var rowId = uhidCol >= 0 ? String(r[uhidCol] || "").trim().toUpperCase() : "";
+    if (rowId && newest[rowId] && newest[rowId].row !== idx + 1) return;
+    patients.push({
       uhid: uhidCol >= 0 ? String(r[uhidCol]||"") : "",
       name: nameCol >= 0 ? String(r[nameCol]||"") : "",
       gender: genderCol >= 0 ? String(r[genderCol]||"") : "",
@@ -1375,7 +1416,7 @@ function getAllPatients(p) {
       panelCategory: panelCatCol >= 0 ? String(r[panelCatCol]||"").trim() : "",
       cardId: cardCol >= 0 ? String(r[cardCol]||"").trim() : "",
       registeredOn: tsCol >= 0 ? r[tsCol] : ""
-    };
+    });
   });
   if (p && (p.includeArchive === true || String(p.includeArchive) === "true")) {
     var seen = {};
@@ -1447,8 +1488,13 @@ function searchPatients(p) {
   var iDob    = fc("dateofbirth")    >= 0 ? fc("dateofbirth")    : fc("dob");
   var iGender = fc("gender");
 
+  // One line per patient, from their newest row. Listing every row showed a
+  // re-registered patient twice, once with the details that were replaced.
+  var newest = iUhid >= 0 ? regLatestByUhid_(data, iUhid) : {};
   var results = [];
   for (var i = 1; i < data.length; i++) {
+    var rowId = iUhid >= 0 ? String(data[i][iUhid] || "").trim().toUpperCase() : "";
+    if (rowId && newest[rowId] && newest[rowId].row !== i) continue;
     var uhid   = iUhid   >= 0 ? String(data[i][iUhid]  ||"").toLowerCase() : "";
     var name   = iName   >= 0 ? String(data[i][iName]  ||"").toLowerCase() : "";
     var mobile = iMobile >= 0 ? String(data[i][iMobile]||"").toLowerCase() : "";

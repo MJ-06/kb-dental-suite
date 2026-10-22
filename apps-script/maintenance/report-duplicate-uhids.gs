@@ -1,18 +1,18 @@
 // The registration ids that more than one row is using.
 //
-// The register holds 2,535 rows but only 2,492 distinct registration ids, so
-// about forty rows share an id with another row. That is why the CRM stopped
-// at 2,496: it files a patient under their id, and an id already taken reads
-// as somebody already imported.
+// These are NOT two people on one id. A patient returning after a long gap
+// has their details collected again for NABH, and registration writes a new
+// row rather than overwriting the old one — so the same person holds several
+// rows under one id, and the newest is what is true now. Keeping the old row
+// is right: it records what was true then.
 //
-// It matters a great deal more than the CRM. Clinical records, billing,
-// appointments and the work-done sheets are ALL keyed on the registration id.
-// Two different people sharing one means their histories are mixed: one
-// patient's sheet shows the other's treatment, and a claim can be raised
-// against the wrong person.
+// The app takes the newest row everywhere now, so nothing is being filed
+// against the wrong person and there is nothing here that must be fixed.
+// This is for looking: which patients came back, when they were re-collected,
+// and whether any pair carries genuinely different names — which WOULD be two
+// people on one id, and would want sorting out.
 //
-// This lists them so they can be put right. It only reads — nothing is
-// written, moved or changed.
+// It only reads — nothing is written, moved or changed.
 //
 // WHERE: the MAIN PMS book's Apps Script project, as a new script file.
 // HOW:   pick reportDuplicateUhids in the function dropdown and press Run.
@@ -59,7 +59,7 @@ function reportDuplicateUhids() {
   var shared = Object.keys(seen).filter(function (k) { return seen[k].rows.length > 1; });
   var samePerson = 0, differentPeople = 0, extraRows = 0;
 
-  Logger.log("REGISTRATION IDS IN USE MORE THAN ONCE");
+  Logger.log("REGISTRATION IDS HELD BY MORE THAN ONE ROW");
   Logger.log("");
   shared.forEach(function (k) {
     var g = seen[k];
@@ -68,7 +68,7 @@ function reportDuplicateUhids() {
     g.rows.forEach(function (x) { names[x.name.toLowerCase().replace(/\s+/g, " ")] = true; });
     var distinct = Object.keys(names).length;
     if (distinct > 1) differentPeople++; else samePerson++;
-    Logger.log("%s  %s", g.id, distinct > 1 ? "— DIFFERENT NAMES" : "— same name, entered twice");
+    Logger.log("%s  %s", g.id, distinct > 1 ? "— DIFFERENT NAMES, worth a look" : "— same patient, re-registered");
     g.rows.forEach(function (x) {
       Logger.log("      row %s: %s%s", x.row, x.name || "(no name)", x.mobile ? "  ·  " + x.mobile : "");
     });
@@ -76,8 +76,8 @@ function reportDuplicateUhids() {
 
   Logger.log("");
   Logger.log("%s id(s) used by more than one row, %s extra row(s) in all.", shared.length, extraRows);
-  Logger.log("  %s where the rows carry DIFFERENT names — two people on one id.", differentPeople);
-  Logger.log("  %s where the name is the same — the patient was entered twice.", samePerson);
+  Logger.log("  %s where the name is the same — the patient came back and was re-collected.", samePerson);
+  Logger.log("  %s where the rows carry DIFFERENT names — worth checking those are the same person.", differentPeople);
   if (noId.length) {
     Logger.log("");
     Logger.log("%s row(s) carry no registration id at all:", noId.length);
@@ -86,6 +86,7 @@ function reportDuplicateUhids() {
     });
   }
   Logger.log("");
-  Logger.log("Two people on one id is the one to fix first: their records,");
-  Logger.log("bills and work-done sheets are being filed against each other.");
+  Logger.log("The app reads the newest row for each id, so these patients show");
+  Logger.log("their current details. Only a pair with different names needs a");
+  Logger.log("second look — the rest are ordinary NABH re-registrations.");
 }
