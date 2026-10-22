@@ -1313,6 +1313,12 @@ function getAllPatients() {
   var dobCol = findRegColumn_(headers, ["Date of Birth", "DOB"]);
   var mobileCol = findRegColumn_(headers, ["Mobile No.", "Mobile"]);
   var tsCol = findRegColumn_(headers, ["Timestamp", "Registered On"]);
+  // A panel patient belongs to their panel, not to nobody. The CRM groups
+  // contacts by it, and billing already turns on it, so it travels with the
+  // patient rather than being looked up a second way.
+  var panelCol = findRegColumn_(headers, ["Panel"]);
+  var panelCatCol = findRegColumn_(headers, ["Panel Category"]);
+  var cardCol = findRegColumn_(headers, ["Card ID"]);
   var patients = data.slice(1).map(function(r) {
     return {
       uhid: uhidCol >= 0 ? String(r[uhidCol]||"") : "",
@@ -1320,6 +1326,9 @@ function getAllPatients() {
       gender: genderCol >= 0 ? String(r[genderCol]||"") : "",
       dob: dobCol >= 0 ? String(r[dobCol]||"") : "",
       mobile: mobileCol >= 0 ? r[mobileCol] : "",
+      panel: panelCol >= 0 ? String(r[panelCol]||"").trim() : "",
+      panelCategory: panelCatCol >= 0 ? String(r[panelCatCol]||"").trim() : "",
+      cardId: cardCol >= 0 ? String(r[cardCol]||"").trim() : "",
       registeredOn: tsCol >= 0 ? r[tsCol] : ""
     };
   });
