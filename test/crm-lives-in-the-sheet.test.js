@@ -118,8 +118,10 @@ ok("an unreadable book never overwrites what is here",
    /if\(!\(r && r\.ok && r\.data\)\)\{[\s\S]{0,260}syncState:'local'/.test(CRM));
 
 // ── the app in between ────────────────────────────────────────────────────
-const mod = HTML.slice(HTML.indexOf("function CRMModule()"),
-                       HTML.indexOf("function CRMModule()") + 3000);
+// To the end of the component, not a fixed number of characters — a slice of
+// 3000 silently stopped covering it the moment the module grew.
+const modStart = HTML.indexOf("function CRMModule()");
+const mod = HTML.slice(modStart, HTML.indexOf("\n}", HTML.indexOf("return React.createElement", modStart)));
 ok("the app answers the CRM's load", /d\.type === "KB_CRM_LOAD"/.test(mod) && /api\("getCrmData"\)/.test(mod));
 ok("and its saves", /d\.type === "KB_CRM_SAVE"/.test(mod) && /api\("saveCrmCollection"/.test(mod));
 ok("a failed read is reported, not swallowed into an empty CRM",
