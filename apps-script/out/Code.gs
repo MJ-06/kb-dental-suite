@@ -772,6 +772,8 @@ function route(p) {
       case "getPanelsList":            return getPanelsList();
       case "savePanelsList":           return savePanelsList(p);
       case "getChairsList":            return getChairsList();
+      case "getCrmData":               return getCrmData();
+      case "saveCrmCollection":        return saveCrmCollection(p);
       case "getClinicTimings":         return getClinicTimings();
       case "saveClinicTimings":        return saveClinicTimings(p);
       case "getWorkingDays":           return getWorkingDays();
@@ -4448,6 +4450,98 @@ function savePanelsList(p) {
 // The appointment book draws its columns from these, so they are kept in the
 // sheet rather than fixed in the app -- a clinic that opens at eight, or runs
 // twenty-minute slots, is a master edit and not a code change.
+// ── CRM ──────────────────────────────────────────────────────
+// The CRM kept everything in one browser's local storage: a lead taken at the
+// front desk was invisible on any other machine, and clearing site data threw
+// the lot away with no copy anywhere. Each collection is a tab now, so it is
+// shared, backed up with the rest of the book, and readable by a human.
+//
+// One row per record, one column per field, headers extended as new fields
+// appear -- the same way the clinical records grow. A value that is not a
+// plain scalar is stored as JSON in its cell and parsed back on the way out,
+// so a lead's stage history survives the round trip without needing its own
+// tab.
+var CRM_COLLECTIONS = ["pipelines", "leads", "contacts", "companies",
+                       "followups", "products", "activities", "payments", "sources"];
+function crmTab_(name) { return "CRM " + name.charAt(0).toUpperCase() + name.slice(1); }
+
+function crmCell_(v) {
+  if (v === undefined || v === null) return "";
+  var t = typeof v;
+  if (t === "string" || t === "number" || t === "boolean") return v;
+  try { return JSON.stringify(v); } catch (e) { return String(v); }
+}
+function crmValue_(v) {
+  if (typeof v !== "string") return v;
+  var t = v.trim();
+  if (t === "") return "";
+  // Only text that is actually shaped like JSON is parsed; a note that merely
+  // starts with a brace stays the note it was.
+  if ((t.charAt(0) === "[" && t.slice(-1) === "]") || (t.charAt(0) === "{" && t.slice(-1) === "}")) {
+    try { return JSON.parse(t); } catch (e) { return v; }
+  }
+  return v;
+}
+
+function getCrmReadOne_(name) {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(crmTab_(name));
+  if (!sh || sh.getLastRow() < 2) return [];
+  var data = sh.getDataRange().getValues();
+  var headers = data[0].map(String);
+  var out = [];
+  for (var i = 1; i < data.length; i++) {
+    var row = data[i], any = false, rec = {};
+    for (var c = 0; c < headers.length; c++) {
+      if (!headers[c]) continue;
+      var v = row[c];
+      // A blank cell is a field that record never had. Returning "" for it
+      // would hand the CRM a tags of "" where it expects a list, and an empty
+      // string has no .map — the record comes back as it went in.
+      if (v === "" || v === null || v === undefined) continue;
+      any = true;
+      rec[headers[c]] = crmValue_(v);
+    }
+    if (any) out.push(rec);
+  }
+  return out;
+}
+
+function getCrmData() {
+  var out = {};
+  CRM_COLLECTIONS.forEach(function (name) { out[name] = getCrmReadOne_(name); });
+  return { success: true, data: out };
+}
+
+function saveCrmCollection(p) {
+  var name = String(p.collection || "").trim();
+  if (CRM_COLLECTIONS.indexOf(name) < 0) {
+    return { success: false, error: "unknown CRM collection: " + name };
+  }
+  var records = parseList_(p.records, name);
+  if (records && records.__bad) return { success: false, error: records.__bad };
+
+  // Every field any record carries becomes a column, in the order first seen,
+  // with id first so the tab is legible to whoever opens it.
+  var headers = [];
+  records.forEach(function (r) {
+    if (!r || typeof r !== "object") return;
+    Object.keys(r).forEach(function (k) { if (headers.indexOf(k) < 0) headers.push(k); });
+  });
+  if (headers.indexOf("id") > 0) headers.splice(headers.indexOf("id"), 1), headers.unshift("id");
+  if (!headers.length) headers = ["id"];
+
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(crmTab_(name)) || ss.insertSheet(crmTab_(name));
+  sh.clearContents();
+  var out = [headers];
+  records.forEach(function (r) {
+    out.push(headers.map(function (h) { return crmCell_(r ? r[h] : ""); }));
+  });
+  sh.getRange(1, 1, out.length, headers.length).setValues(out);
+  return { success: true, count: records.length };
+}
+
 var CLINIC_TIMINGS_TAB = "Clinic Timings";
 var CLINIC_TIMINGS_DEFAULT = { open: "09:00", close: "19:00", slotMinutes: 30 };
 
