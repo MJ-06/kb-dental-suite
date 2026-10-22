@@ -61,8 +61,11 @@ ok("it reads the clinic's own register through the app",
    /api\("getAllPatients"\)/.test(HTML));
 ok("an import that cannot read the register says so",
    /Could not read the register/.test(CRM));
-ok("a patient already here is skipped on UHID",
-   /if\(have\[uh\.toUpperCase\(\)\]\)\{ nAlready\+\+; return; \}/.test(CRM));
+// On the UHID *and* the name — two different people were given one id at the
+// desk, and on the id alone the second never became a contact. See
+// crm-import-keeps-families.
+ok("a patient already here is skipped on UHID and name",
+   /if\(have\[ik\]\)\{ nAlready\+\+; return; \}/.test(CRM));
 // A row with no UHID is keyed on its name AND number — never the number
 // alone, which dropped families and then second walk-ins. See
 // crm-import-keeps-families.
