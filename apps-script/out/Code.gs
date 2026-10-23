@@ -960,7 +960,12 @@ function saveRegistration(p) {
   // Only a genuinely new patient is routed by what the front desk chose.
   var isPanel = String(p.patientType || "") === "Panel";
   if (!sh) sh = regSheetFor_(isPanel);
-  if (isPanel) ensureRegColumns_(sh, ["Patient Type", "Panel", "Panel Category", "Card ID"]);
+  // Both books get these columns, not only the panel one. A private patient
+  // is worth recording as "Normal" rather than as a blank cell: the CRM has
+  // to tell a private patient from one nobody has got round to marking, and
+  // a blank cannot say which it is. Without this the main book had no Panel
+  // Type column at all and the value was written into nothing.
+  ensureRegColumns_(sh, ["Patient Type", "Panel", "Panel Category", "Card ID"]);
 
   if (sh.getLastRow() === 0) {
     sh.appendRow([

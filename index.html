@@ -1825,12 +1825,16 @@ function Registration({
       regStatus: "Quick",
       // Sent only for a panel patient, so a normal registration's row is
       // exactly the shape it has always been.
+      // A private patient is recorded as "Normal", not left blank. The CRM
+      // has to tell a private patient from one nobody has got round to
+      // marking, and a blank cell cannot say which it is. It is data only —
+      // nothing about it is printed on the registration slip.
       ...(patientType === "panel" ? {
         patientType: "Panel",
         panel: panel,
         panelCategory: q.panelCat,
         cardId: q.cardId.trim()
-      } : {})
+      } : patientType === "normal" ? { patientType: "Normal" } : {})
     });
     setQBusy(false);
     setApiMsg("");
@@ -2031,12 +2035,16 @@ function Registration({
       // When the form is opened from an iPad link the browser knows none of
       // this, so nothing is sent and the backend keeps what it already has
       // against the UHID rather than being told to blank it.
+      // A private patient is recorded as "Normal", not left blank. The CRM
+      // has to tell a private patient from one nobody has got round to
+      // marking, and a blank cell cannot say which it is. It is data only —
+      // nothing about it is printed on the registration slip.
       ...(patientType === "panel" ? {
         patientType: "Panel",
         panel: panel,
         panelCategory: q.panelCat,
         cardId: q.cardId.trim()
-      } : {})
+      } : patientType === "normal" ? { patientType: "Normal" } : {})
     });
     setSaving(false);
     setApiMsg("");
@@ -2236,8 +2244,15 @@ function Registration({
     cur: 0
   }), patientType && ceQ("div", {
     style: { fontSize: 13, color: patientType === "panel" ? "#7C3AED" : "#555", marginBottom: 10, display: "flex", gap: 10, alignItems: "center" }
-  }, ceQ("span", { style: { fontWeight: patientType === "panel" ? 700 : 400 } },
-    patientType === "panel" ? "Panel patient" + (panel ? " \u2014 " + panel : "") : "Normal patient"), ceQ("button", {
+  }, ceQ("span", {
+    // Recorded against the patient so the CRM can separate panel from
+    // private. It is never printed — the registration slip is the same for
+    // both, and the panel belongs on the claim, not on the patient's copy.
+    style: { fontSize: 12.5, fontWeight: 800, padding: "3px 10px", borderRadius: 20,
+      background: patientType === "panel" ? "#f3e8ff" : "#eef3fb",
+      color: patientType === "panel" ? "#6b21a8" : "#1357A6",
+      border: "1px solid " + (patientType === "panel" ? "#d8b4fe" : "#cfe0f5") } },
+    patientType === "panel" ? "PANEL" + (panel ? " \u00b7 " + panel : "") : "PRIVATE"), ceQ("button", {
     onClick: () => { setPatientType(""); setPanel(""); },
     style: { padding: "3px 10px", fontSize: 12.5, background: "transparent", color: T, border: `1px solid ${BORDER}`, borderRadius: 6, cursor: "pointer" }
   }, "change")), quickCard, apiMsg && /*#__PURE__*/React.createElement("div", {
