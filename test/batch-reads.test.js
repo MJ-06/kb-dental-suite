@@ -92,7 +92,10 @@ ok('index.html has the batch helper', /async function apiBatch\(actions\)/.test(
 ok('it falls back to individual calls on an older backend',
   /return Promise\.all\(actions\.map\(a => api\(a\)\)\);/.test(html));
 
-const master = html.slice(html.indexOf('apiBatch(['));
+// The Master page's call specifically — there are other apiBatch callers now
+// (the CRM asks for its staff this way), and the first one in the file is not
+// necessarily this one.
+const master = html.slice(html.indexOf('apiBatch([\n      "getTreatmentsMaster"'));
 const names = (master.slice(0, master.indexOf(']')).match(/"([^"]+)"/g) || []).length;
 const destructured = (/\.then\(\(\[([^\]]+)\]/.exec(master) || [, ''])[1]
   .split(',').map(s => s.trim()).filter(Boolean).length;
