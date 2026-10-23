@@ -885,13 +885,23 @@ function getNextUHID() {
 // labels (e.g. "Mobile No.", "Complete Address") that don't match the app's
 // own short field names, so every read/write here must resolve dynamically
 // rather than assume a fixed column order. Returns -1 if none match.
+// The loose match earns its keep -- registers in the wild spell a heading
+// "Mobile", "Mobile No." or "Mobile Number" and all three must find the one
+// column. But loose alone is not enough once two headings nest: "Referred By"
+// is inside "Referred By Type", and whichever column happened to sit first
+// would win. So an exact match is looked for across every header before any
+// substring is accepted.
 function findRegColumn_(headers, candidates) {
+  var norm = function (v) { return String(v).toLowerCase().replace(/[^a-z0-9]/g, ""); };
+  var have = [];
+  for (var i = 0; i < headers.length; i++) have.push(norm(headers[i]));
   for (var c = 0; c < candidates.length; c++) {
-    var want = String(candidates[c]).toLowerCase().replace(/[^a-z0-9]/g, "");
-    for (var i = 0; i < headers.length; i++) {
-      var have = String(headers[i]).toLowerCase().replace(/[^a-z0-9]/g, "");
-      if (have === want || have.indexOf(want) >= 0) return i;
-    }
+    var want = norm(candidates[c]);
+    for (var j = 0; j < have.length; j++) if (have[j] === want) return j;
+  }
+  for (var c2 = 0; c2 < candidates.length; c2++) {
+    var want2 = norm(candidates[c2]);
+    for (var k = 0; k < have.length; k++) if (have[k].indexOf(want2) >= 0) return k;
   }
   return -1;
 }
@@ -965,7 +975,8 @@ function saveRegistration(p) {
   // to tell a private patient from one nobody has got round to marking, and
   // a blank cannot say which it is. Without this the main book had no Panel
   // Type column at all and the value was written into nothing.
-  ensureRegColumns_(sh, ["Patient Type", "Panel", "Panel Category", "Card ID"]);
+  ensureRegColumns_(sh, ["Patient Type", "Panel", "Panel Category", "Card ID",
+                         "Referred By Type"]);
 
   if (sh.getLastRow() === 0) {
     sh.appendRow([
@@ -1010,6 +1021,11 @@ function saveRegistration(p) {
     // so the iPad form completing a panel registration cannot wipe the claim
     // details it was never told about.
     "Patient Type": p.patientType || "",
+    // Who the referrer IS, beside their name. A referral can come from a
+    // patient, a referring doctor, somebody doing PR for the clinic or a
+    // member of staff, and which of those it was decides whether anything is
+    // owed for it -- a name on its own cannot say.
+    "Referred By Type": p.referredByType || "",
     "Panel": p.panel || "",
     "Panel Category": p.panelCategory || "",
     "Card ID": p.cardId || "",
@@ -1403,6 +1419,8 @@ function getAllPatients(p) {
   // contacts by it, and billing already turns on it, so it travels with the
   // patient rather than being looked up a second way.
   var panelCol = findRegColumn_(headers, ["Panel"]);
+  var refCol = findRegColumn_(headers, ["Referred By"]);
+  var refTypeCol = findRegColumn_(headers, ["Referred By Type"]);
   var panelCatCol = findRegColumn_(headers, ["Panel Category"]);
   var cardCol = findRegColumn_(headers, ["Card ID"]);
   // One entry per patient, from their newest row — the count means patients,
@@ -1421,6 +1439,10 @@ function getAllPatients(p) {
       panel: panelCol >= 0 ? String(r[panelCol]||"").trim() : "",
       panelCategory: panelCatCol >= 0 ? String(r[panelCatCol]||"").trim() : "",
       cardId: cardCol >= 0 ? String(r[cardCol]||"").trim() : "",
+      // Carried out so the CRM can open a lead that already says where the
+      // patient came from, instead of somebody retyping it.
+      referredBy: refCol >= 0 ? String(r[refCol]||"").trim() : "",
+      referredByType: refTypeCol >= 0 ? String(r[refTypeCol]||"").trim() : "",
       registeredOn: tsCol >= 0 ? r[tsCol] : ""
     });
   });

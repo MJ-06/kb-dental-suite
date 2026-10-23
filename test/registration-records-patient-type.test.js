@@ -42,8 +42,10 @@ eq("both save paths use that rule", (HTML.match(/patientType === "normal" \? \{ 
 
 // ── the columns exist to receive it ───────────────────────────────────────
 const fn = GS.slice(GS.indexOf("function saveRegistration(p)"), GS.indexOf("\n}", GS.indexOf("function saveRegistration(p)")));
+const ensured = (fn.match(/ensureRegColumns_\(sh, \[[\s\S]*?\]\)/) || [""])[0];
 ok("both books get the four columns, not only the panel one",
-   /\n  ensureRegColumns_\(sh, \["Patient Type", "Panel", "Panel Category", "Card ID"\]\);/.test(fn));
+   ["Patient Type", "Panel", "Panel Category", "Card ID"].every(n => ensured.indexOf('"' + n + '"') >= 0),
+   ensured);
 ok("and it is no longer gated on the patient being a panel one",
    !/if \(isPanel\) ensureRegColumns_/.test(GS));
 ok("the value is written to the Patient Type column", /"Patient Type": p\.patientType \|\| ""/.test(fn));
