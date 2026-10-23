@@ -26,31 +26,55 @@ const CRM = Buffer.from((html.slice(a, html.indexOf(";\n", a)).match(/"([^"]*)"/
 const CODE = CRM.replace(/<!--[\s\S]*?-->/g, "").replace(/\/\*[\s\S]*?\*\//g, "")
                 .replace(/^\s*\/\/.*$/gm, "");
 
-// ── the import rule, pulled out and run ───────────────────────────────────
-const body = CODE.slice(CODE.indexOf("function importPatientsAsContacts()"),
-                        CODE.indexOf("function crmSaveOne("));
-const inner = body.slice(body.indexOf("crmAllPatients().then(function(r){"));
+// ── the rules, pulled out and run ─────────────────────────────────────────
+// Which pipeline and stage, and how a referrer becomes a source, are shared
+// by the import and by the patients the desk queues. Both are run here
+// against the one copy, so the two paths cannot be checked apart.
+const SHARED = CODE.slice(CODE.indexOf("function consultPipeline("),
+                          CODE.indexOf("function crmSaveOne("));
+const IMPORT = CODE.slice(CODE.indexOf("function importPatientsAsContacts()"),
+                          CODE.indexOf("function crmSaveOne("));
+const DRAIN = CODE.slice(CODE.indexOf("function drainLeadInbox("),
+                         CODE.indexOf("function toast("));
 
-// The pieces the rule needs, standing in for the screen around it.
-function runImport(patients, state) {
+// The pieces the rules need, standing in for the screen around them.
+function sandbox(state, extra) {
   const st = Object.assign({ contacts: [], companies: [], leads: [], pipelines: [] }, state || {});
   const saved = {};
   let n = 0;
-  const sandbox = {
+  const args = {
     st,
     uid: () => "id" + (++n),
     nowISO: () => "2026-10-23T00:00:00.000Z",
     persist: (key, _s, data) => { saved[key] = data; },
-    upd: patch => { saved._msg = patch.importMsg !== undefined ? patch.importMsg : saved._msg; },
-    crmAllPatients: () => Promise.resolve({ ok: true, patients })
+    upd: patch => { if (patch.importMsg !== undefined) saved._msg = patch.importMsg; },
+    toast: (msg) => { saved._toast = msg; },
+    // Stubbed one level below crmMarkInboxTaken, so the real one runs and the
+    // message it actually sends is what gets inspected.
+    crmAsk: (msg) => { saved._sent = msg; saved._taken = msg.ids; return Promise.resolve({ ok: true }); }
   };
-  // The body as written, with its one outer call made resolvable.
-  const src = inner.slice(0, inner.lastIndexOf("});"));
-  const fn = new Function("st", "uid", "nowISO", "persist", "upd", "r",
-    src.replace("crmAllPatients().then(function(r){", "").trim());
-  fn(sandbox.st, sandbox.uid, sandbox.nowISO, sandbox.persist, sandbox.upd,
-     { ok: true, patients });
-  return saved;
+  return { st, saved, args: Object.assign(args, extra || {}) };
+}
+
+function runImport(patients, state) {
+  const s = sandbox(state);
+  const inner = IMPORT.slice(IMPORT.indexOf("crmAllPatients().then(function(r){"));
+  const src = inner.slice(0, inner.lastIndexOf("});"))
+    .replace("crmAllPatients().then(function(r){", "").trim();
+  const keys = Object.keys(s.args);
+  new Function(...keys, "r", SHARED + "\n" + src)(
+    ...keys.map(k => s.args[k]), { ok: true, patients });
+  return s.saved;
+}
+
+// The desk's queue, drained the way a CRM load drains it.
+function runDrain(inbox, state) {
+  const s = sandbox(state);
+  const keys = Object.keys(s.args);
+  new Function(...keys, "__inbox", "__loaded",
+    SHARED + "\n" + DRAIN + "\nreturn drainLeadInbox(__inbox, __loaded);")(
+    ...keys.map(k => s.args[k]), inbox, state || {});
+  return s.saved;
 }
 
 const PIPE = {
@@ -153,6 +177,99 @@ ok("a panel patient still becomes a company", (out.companies || []).length === 1
    JSON.stringify(out.companies));
 ok("and is still filed under it", !!out.contacts[0].companyId);
 ok("while also getting their consultation lead", (out.leads || []).length === 1);
+
+
+// ── registering a patient is what opens the lead, not a button ────────────
+// The whole point. Before this, a lead only appeared when somebody
+// remembered to press Import Patients, so "every new patient" was not true.
+
+// The desk queues; it does not write CRM Leads itself. Saving a collection
+// clears the tab and writes the whole list back, so a lead added from
+// outside while the CRM is open would be wiped by its next save.
+ok("the desk queues a lead when a patient is registered",
+   /function queueConsultationLead\(patient\)/.test(html));
+ok("from the quick registration",
+   /queueConsultationLead\(\{\s*uhid: newUhid/.test(html));
+ok("and from the full form",
+   /if \(!isEditing\) queueConsultationLead\(/.test(html));
+ok("but not when an existing record is merely being corrected",
+   /!isEditing/.test(html.slice(html.indexOf("queueConsultationLead({\n        uhid, name: P.name")  - 200,
+                                html.indexOf("queueConsultationLead({\n        uhid, name: P.name"))));
+ok("the queueing never blocks or fails the registration",
+   /Promise\.resolve\(api\("queueCrmLead", patient\)\)\.catch/.test(html));
+ok("the queue rides on the load the CRM already makes",
+   /leadInbox: \(r && r\.leadInbox\) \|\| \[\]/.test(html));
+
+const PIPE2 = PIPE;
+const QUEUED = { id: "li1", uhid: "KB7001", name: "Priya Nair", mobile: "9811007001" };
+
+let d = runDrain([QUEUED], { pipelines: [PIPE2] });
+eq("a queued patient becomes a lead with no button pressed",
+   (d.leads || []).map(l => l.uhid), ["KB7001"]);
+eq("at the consultation stage", d.leads[0].stageId, "s2");
+ok("and a contact is made for them, since registration gets there first",
+   (d.contacts || []).length === 1, JSON.stringify(d.contacts));
+eq("the lead points at that contact", d.leads[0].contactId, d.contacts[0].id);
+ok("the screen says so", /Consultation/.test(d._toast || ""), d._toast);
+eq("and the queue entry is stamped taken", d._taken, ["li1"]);
+eq("over the message the host listens for", d._sent.type, "KB_CRM_INBOX_TAKEN");
+
+// Stamping only after the leads are written: a failure leaves them queued.
+const order = [];
+(() => {
+  const s = sandbox({ pipelines: [PIPE2] });
+  s.args.persist = (k, _x, v) => { order.push("persist:" + k); };
+  s.args.crmAsk = () => { order.push("taken"); return Promise.resolve({ ok: true }); };
+  const keys = Object.keys(s.args);
+  new Function(...keys, "__inbox", "__loaded",
+    SHARED + "\n" + DRAIN + "\nreturn drainLeadInbox(__inbox, __loaded);")(
+    ...keys.map(k => s.args[k]), [QUEUED], { pipelines: [PIPE2] });
+})();
+eq("the leads are written before the queue is stamped, not after",
+   order[order.length - 1], "taken");
+
+// ── it must not double up with the import ────────────────────────────────
+d = runDrain([QUEUED], {
+  pipelines: [PIPE2],
+  leads: [{ id: "L1", uhid: "KB7001", stageId: "s2" }],
+  contacts: [{ id: "C1", uhid: "KB7001" }]
+});
+ok("a patient an import already gave a lead does not get a second one",
+   !(d.leads || []).length, JSON.stringify(d.leads));
+ok("nor a second contact", !(d.contacts || []).length);
+eq("and is still stamped taken, so it stops being looked at", d._taken, ["li1"]);
+
+d = runDrain([QUEUED, { id: "li2", uhid: "KB7001", name: "Priya Nair" }], { pipelines: [PIPE2] });
+eq("the same patient queued twice gets one lead", (d.leads || []).length, 1);
+eq("and both entries are cleared", d._taken, ["li1", "li2"]);
+
+// An existing contact is reused rather than duplicated.
+d = runDrain([QUEUED], { pipelines: [PIPE2], contacts: [{ id: "C9", uhid: "KB7001" }] });
+ok("an existing contact is reused", !(d.contacts || []).length);
+eq("and the lead points at it", d.leads[0].contactId, "C9");
+
+// ── nowhere to put them ──────────────────────────────────────────────────
+d = runDrain([QUEUED], { pipelines: [] });
+ok("with no pipeline the patient stays queued rather than being lost",
+   !(d.leads || []).length && !d._taken, JSON.stringify(d._taken));
+
+d = runDrain([], { pipelines: [PIPE2] });
+ok("an empty queue does nothing at all", !d._taken && !(d.leads || []).length);
+
+// ── the referrer survives the queue ──────────────────────────────────────
+d = runDrain([{ id: "li3", uhid: "KB7002", name: "R S", referredByType: "Staff", referredBy: "Reception" }],
+             { pipelines: [PIPE2] });
+eq("a staff referral is credited to staff", d.leads[0].source, "Staff Referral");
+eq("with the name kept", d.leads[0].referredBy, "Reception");
+eq("the contact agrees with the lead", d.contacts[0].source, "Staff Referral");
+
+// Both paths must produce the same source for the same referral.
+const viaImport = runImport([{ uhid: "KB8001", name: "T U", referredByType: "Doctor", referredBy: "Dr A" }],
+                            { pipelines: [PIPE2] }).leads[0];
+const viaDesk = runDrain([{ id: "li4", uhid: "KB8002", name: "V W", referredByType: "Doctor", referredBy: "Dr A" }],
+                         { pipelines: [PIPE2] }).leads[0];
+eq("a referral means the same thing whichever way the patient reached the CRM",
+   [viaDesk.source, viaDesk.stageId], [viaImport.source, viaImport.stageId]);
 
 console.log("==============================================================================");
 console.log("  " + pass + " passed, " + fail + " failed");

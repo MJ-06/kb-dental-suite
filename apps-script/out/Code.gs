@@ -806,6 +806,8 @@ function route(p) {
       case "getChairsList":            return getChairsList();
       case "getCrmData":               return getCrmData();
       case "saveCrmCollection":        return saveCrmCollection(p);
+      case "queueCrmLead":             return queueCrmLead(p);
+      case "markCrmLeadsTaken":        return markCrmLeadsTaken(p);
       case "getClinicTimings":         return getClinicTimings();
       case "saveClinicTimings":        return saveClinicTimings(p);
       case "getWorkingDays":           return getWorkingDays();
@@ -4679,10 +4681,124 @@ function getCrmReadOne_(name) {
   return out;
 }
 
+// Patients registered at the desk, waiting to be turned into leads.
+//
+// Registration cannot write CRM Leads itself. The CRM saves a collection by
+// clearing the tab and writing its whole list back, so a lead appended from
+// outside while the CRM is open would be wiped by its next save. The desk
+// therefore appends HERE, to a tab the CRM never rewrites wholesale, and the
+// CRM drains it when it next loads. One writer each, and nothing to lose.
+var CRM_LEAD_INBOX_TAB = "CRM Lead Inbox";
+var CRM_LEAD_INBOX_HEADERS = ["id", "uhid", "name", "mobile", "panel", "panelCategory",
+                              "cardId", "referredBy", "referredByType", "createdAt", "takenAt"];
+
+function crmLeadInboxSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(CRM_LEAD_INBOX_TAB);
+  if (!sh) sh = ss.insertSheet(CRM_LEAD_INBOX_TAB);
+  if (sh.getLastRow() === 0) {
+    sh.getRange(1, 1, 1, CRM_LEAD_INBOX_HEADERS.length).setValues([CRM_LEAD_INBOX_HEADERS]);
+  }
+  return sh;
+}
+
+function crmLeadInboxRows_() {
+  var sh = crmLeadInboxSheet_();
+  if (sh.getLastRow() < 2) return { sheet: sh, headers: CRM_LEAD_INBOX_HEADERS.slice(), rows: [] };
+  var data = sh.getDataRange().getValues();
+  var headers = data[0].map(String);
+  var rows = [];
+  for (var i = 1; i < data.length; i++) {
+    var rec = { __row: i + 1 };
+    for (var c = 0; c < headers.length; c++) {
+      if (headers[c]) rec[headers[c]] = data[i][c];
+    }
+    rows.push(rec);
+  }
+  return { sheet: sh, headers: headers, rows: rows };
+}
+
+// Called by the desk the moment a NEW patient is registered.
+function queueCrmLead(p) {
+  var uhid = String(p.uhid || "").trim();
+  var name = String(p.name || "").trim();
+  if (!uhid && !name) return { success: false, error: "neither a UHID nor a name" };
+
+  var box = crmLeadInboxRows_();
+  // A patient who is already queued, or was queued and taken, is not queued
+  // again. Re-registering after a long gap is the same person coming back --
+  // NABH asks for their details afresh, it does not make them a new patient.
+  if (uhid) {
+    var key = uhid.toUpperCase();
+    for (var i = 0; i < box.rows.length; i++) {
+      if (String(box.rows[i].uhid || "").trim().toUpperCase() === key) {
+        return { success: true, queued: false, reason: "already queued" };
+      }
+    }
+  }
+
+  var rec = {
+    id: "li" + new Date().getTime() + Math.random().toString(36).slice(2, 5),
+    uhid: uhid, name: name,
+    mobile: String(p.mobile == null ? "" : p.mobile),
+    panel: String(p.panel || ""), panelCategory: String(p.panelCategory || ""),
+    cardId: String(p.cardId || ""),
+    referredBy: String(p.referredBy || ""), referredByType: String(p.referredByType || ""),
+    createdAt: new Date().toISOString(), takenAt: ""
+  };
+  box.sheet.appendRow(box.headers.map(function (h) { return rec[h] === undefined ? "" : rec[h]; }));
+  return { success: true, queued: true, id: rec.id };
+}
+
+// Stamped once the CRM has made leads of them, so a second load does not make
+// the same leads again.
+function markCrmLeadsTaken(p) {
+  var ids = parseList_(p.ids, "lead inbox ids");
+  if (ids && ids.__bad) return { success: false, error: ids.__bad };
+  if (!ids.length) return { success: true, marked: 0 };
+
+  var want = {};
+  ids.forEach(function (id) { want[String(id).trim()] = true; });
+
+  var box = crmLeadInboxRows_();
+  var col = box.headers.indexOf("takenAt");
+  if (col < 0) return { success: false, error: "the inbox has no takenAt column" };
+
+  var when = new Date().toISOString(), marked = 0;
+  box.rows.forEach(function (r) {
+    if (!want[String(r.id || "").trim()]) return;
+    if (String(r.takenAt || "").trim()) return;
+    box.sheet.getRange(r.__row, col + 1).setValue(when);
+    marked++;
+  });
+  return { success: true, marked: marked };
+}
+
 function getCrmData() {
   var out = {};
   CRM_COLLECTIONS.forEach(function (name) { out[name] = getCrmReadOne_(name); });
-  return { success: true, data: out };
+  // Carried on the load the CRM already makes, rather than a second round
+  // trip. Only the ones nobody has turned into a lead yet.
+  var waiting = [];
+  try {
+    crmLeadInboxRows_().rows.forEach(function (r) {
+      if (String(r.takenAt || "").trim()) return;
+      if (!String(r.uhid || "").trim() && !String(r.name || "").trim()) return;
+      waiting.push({
+        id: String(r.id || ""), uhid: String(r.uhid || "").trim(),
+        name: String(r.name || "").trim(),
+        mobile: String(r.mobile == null ? "" : r.mobile),
+        panel: String(r.panel || ""), panelCategory: String(r.panelCategory || ""),
+        cardId: String(r.cardId || ""),
+        referredBy: String(r.referredBy || ""), referredByType: String(r.referredByType || "")
+      });
+    });
+  } catch (e) {
+    // A missing or unreadable inbox must not stop the CRM loading everything
+    // else -- it would look like the clinic had no leads at all.
+    waiting = [];
+  }
+  return { success: true, data: out, leadInbox: waiting };
 }
 
 function saveCrmCollection(p) {
