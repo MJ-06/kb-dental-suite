@@ -24101,81 +24101,6 @@ function PersonListEditor({ items, onAdd, onRemove, onEdit }) {
   );
 }
 
-// The blank area of the pre-printed prescription pad: how far in the printing
-// has to stay to clear the letterhead at the top, the doctors down the left
-// and the footer at the bottom. These belong to the PAD, so when it is
-// reprinted with a taller header this is a measurement, not a code change.
-function PadMarginsEditor({ margins, onSave }) {
-  const txt = (v) => (v === undefined || v === null) ? "" : String(v);
-  const mm = (v) => { const m = /^(\d+(?:\.\d+)?)/.exec(txt(v).trim()); return m ? m[1] : ""; };
-  const [form, setForm] = React.useState({
-    top: mm(margins.top), right: mm(margins.right), bottom: mm(margins.bottom), left: mm(margins.left) });
-  React.useEffect(() => {
-    setForm({ top: mm(margins.top), right: mm(margins.right), bottom: mm(margins.bottom), left: mm(margins.left) });
-  }, [margins.top, margins.right, margins.bottom, margins.left]);
-
-  // A save used to report itself only through a green line at the top of a
-  // long page that clears after a second, while the Save button greyed out —
-  // which reads exactly like nothing having happened. It says so here, where
-  // the numbers were typed, and stays said.
-  const [saved, setSaved] = React.useState("");
-  const SIDES = [["top","Top","clears the letterhead"],["left","Left","clears the doctors' names"],
-                 ["bottom","Bottom","clears the footer"],["right","Right","the outside edge"]];
-  const num = (k) => parseFloat(form[k]);
-  const bad = SIDES.map(([k,l]) => (!(num(k) >= 0) ? l : (num(k) > 120 ? l + " is larger than the page" : "")))
-                   .filter(Boolean)[0] || "";
-  const dirty = SIDES.some(([k]) => mm(margins[k]) !== txt(form[k]).trim());
-  // A4 is 210 x 297. What is left to print in, once the pad is cleared.
-  const w = 210 - (num("left") || 0) - (num("right") || 0);
-  const h = 297 - (num("top") || 0) - (num("bottom") || 0);
-
-  return React.createElement("div", null,
-    React.createElement("div", { style:{ fontSize:13, color:"#383838", marginBottom:14, lineHeight:1.5 } },
-      "Measure your pad with a ruler and put the numbers in, in millimetres. ",
-      "Nothing is printed inside these edges, so the letterhead, the doctors' names and the footer stay clear."),
-    React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"repeat(4, 1fr) auto", gap:10, alignItems:"end", marginBottom:14 } },
-      SIDES.map(([k, label, why]) => React.createElement("div", { key:k },
-        React.createElement("div", { style:{ fontSize:12.5, fontWeight:700, color:"#383838", marginBottom:3 } }, label + " (mm)"),
-        React.createElement("div", { style:{ fontSize:12, color:"#5a5a5a", marginBottom:5 } }, why),
-        React.createElement("input", { style:inp, type:"number", step:"0.5", min:"0", value:form[k],
-          onChange:e=>setForm({ ...form, [k]:e.target.value }) }))),
-      React.createElement("button", { onClick:()=>{
-          const next = { top:form.top+"mm", right:form.right+"mm", bottom:form.bottom+"mm", left:form.left+"mm" };
-          setSaved("saving");
-          Promise.resolve(onSave(next)).then(okd => {
-            setSaved(okd === false ? "failed" : "done");
-          }).catch(() => setSaved("failed"));
-        },
-        disabled: !!bad || !dirty,
-        style:{ padding:"9px 20px", fontSize:13, border:"none", borderRadius:7, fontWeight:700,
-                cursor:(bad||!dirty)?"default":"pointer", background:(bad||!dirty)?"#9ca3af":T, color:"#fff" } },
-        saved === "saving" ? "Saving\u2026" : "Save")
-    ),
-    saved === "done" && !dirty
-      ? React.createElement("div", { style:{ fontSize:13, fontWeight:700, color:"#2E7D32", background:"#E8F5E9",
-          border:"1px solid #A5D6A7", borderRadius:7, padding:"8px 11px", marginBottom:10 } },
-          "\u2713 Saved. The case paper will print "
-          + mm(margins.top) + "mm from the top, " + mm(margins.left) + "mm from the left, "
-          + mm(margins.bottom) + "mm from the bottom and " + mm(margins.right) + "mm from the right.")
-      : null,
-    saved === "failed"
-      ? React.createElement("div", { style:{ fontSize:13, fontWeight:700, color:"#b91c1c", background:"#fdf2f2",
-          border:"1px solid #e5b4b4", borderRadius:7, padding:"8px 11px", marginBottom:10 } },
-          "Not saved \u2014 the message at the top of this page says why. The numbers above are back as they were.")
-      : null,
-    bad
-      ? React.createElement("div", { style:{ fontSize:13, fontWeight:600, color:"#b91c1c", background:"#fdf2f2",
-          border:"1px solid #e5b4b4", borderRadius:7, padding:"8px 11px" } },
-          "Check the " + bad + " \u2014 it has to be a number of millimetres.")
-      : React.createElement("div", { style:{ background:BGS, borderRadius:8, padding:"12px 14px", border:`1px solid ${BORDER}` } },
-          React.createElement("div", { style:{ fontSize:12.5, color:"#383838" } },
-            "Leaves ", React.createElement("b", null, Math.round(w) + " \u00d7 " + Math.round(h) + " mm"),
-            " to print in, on an A4 sheet."),
-          React.createElement("div", { style:{ fontSize:12.5, color:"#5a5a5a", marginTop:5 } },
-            "If the printing runs into the footer, raise the bottom figure; if it starts too low, lower the top one."))
-  );
-}
-
 // When the day runs, and how long a slot is. The appointment book draws its
 // columns from these, so a clinic that opens at eight, or runs twenty-minute
 // slots, is a master edit rather than a code change.
@@ -24820,7 +24745,6 @@ const MASTER_STRUCTURE = [
     { id:"employees",     label:"Employees" },
     { id:"chairs",        label:"Chairs" },
     { id:"implantBrands", label:"Implant Brands & Sizes" },
-    { id:"padMargins",    label:"Prescription Pad" },
     { id:"otherClinic",   label:"Other Clinic", placeholder:true }
   ]},
   { id:"schedule", label:"Schedule", subtabs:[
@@ -25391,17 +25315,27 @@ function ClinicProfileEditor({ profile, onSave }) {
   const [logo, setLogo] = React.useState(profile.logo || "");
   const [padTop, setPadTop] = React.useState(profile.padTop || "44");
   const [padRight, setPadRight] = React.useState(profile.padRight || "15");
-  const [padBottom, setPadBottom] = React.useState(profile.padBottom || "18");
+  // The footer needs about 13mm; 18 threw away five on every case paper.
+  const [padBottom, setPadBottom] = React.useState(profile.padBottom || "15");
   const [padLeft, setPadLeft] = React.useState(profile.padLeft || "52");
 
   React.useEffect(() => {
     setName(profile.name || ""); setAddress(profile.address || ""); setPhone(profile.phone || "");
     setMobiles(profile.mobiles || ""); setEmail(profile.email || ""); setLogo(profile.logo || "");
     setPadTop(profile.padTop || "44"); setPadRight(profile.padRight || "15");
-    setPadBottom(profile.padBottom || "18"); setPadLeft(profile.padLeft || "52");
+    setPadBottom(profile.padBottom || "15"); setPadLeft(profile.padLeft || "52");
   }, [profile]);
 
-  const save = () => onSave({ name, address, phone, mobiles, email, logo, padTop, padRight, padBottom, padLeft });
+  // Saving used to report itself only through a line at the TOP of this page,
+  // which on a screen this long is scrolled out of sight by the time the
+  // button is reached — so a save that worked looked like nothing at all.
+  const [saved, setSaved] = React.useState("");
+  const save = () => {
+    setSaved("saving");
+    Promise.resolve(onSave({ name, address, phone, mobiles, email, logo, padTop, padRight, padBottom, padLeft }))
+      .then(okd => setSaved(okd === false ? "failed" : "done"))
+      .catch(() => setSaved("failed"));
+  };
 
   const onLogoFile = (e) => {
     const file = e.target.files && e.target.files[0];
@@ -25447,7 +25381,15 @@ function ClinicProfileEditor({ profile, onSave }) {
         React.createElement("div", { style:{ fontSize:10, color:"#444444", marginBottom:3 } }, "Left (mm)"),
         React.createElement("input", { style:{ ...inp, width:70 }, value:padLeft, onChange:e=>setPadLeft(e.target.value) }))
     ),
-    React.createElement("button", { onClick:save, style:{ padding:"9px 22px", fontSize:13, border:"none", borderRadius:7, cursor:"pointer", background:T, color:"#fff", fontWeight:700 } }, "💾 Save Clinic Profile")
+    React.createElement("button", { onClick:save, style:{ padding:"9px 22px", fontSize:13, border:"none", borderRadius:7, cursor:"pointer", background:T, color:"#fff", fontWeight:700 } },
+      saved === "saving" ? "Saving\u2026" : "\uD83D\uDCBE Save Clinic Profile"),
+    saved === "done" && React.createElement("div", { style:{ fontSize:13, fontWeight:700, color:"#2E7D32",
+      background:"#E8F5E9", border:"1px solid #A5D6A7", borderRadius:7, padding:"9px 12px", marginTop:12, maxWidth:560 } },
+      "\u2713 Saved. The case paper will print " + padTop + "mm from the top, " + padLeft +
+      "mm from the left, " + padBottom + "mm from the bottom and " + padRight + "mm from the right."),
+    saved === "failed" && React.createElement("div", { style:{ fontSize:13, fontWeight:700, color:"#b91c1c",
+      background:"#fdf2f2", border:"1px solid #e5b4b4", borderRadius:7, padding:"9px 12px", marginTop:12, maxWidth:560 } },
+      "Not saved \u2014 the message at the top of this page says why. Nothing was changed.")
   );
 }
 
@@ -25471,7 +25413,6 @@ function Master() {
   const [docCategories, setDocCategories] = React.useState([]);
   const [implantBrands, setImplantBrands] = React.useState([]);
   const [panels, setPanels] = React.useState([]);
-  const [padMargins, setPadMargins] = React.useState({ top:"44mm", right:"15mm", bottom:"15mm", left:"52mm" });
   const [timings, setTimings] = React.useState(DEFAULT_TIMINGS);
   const [weekOff, setWeekOff] = React.useState([]);
   const [holidays, setHolidays] = React.useState([]);
@@ -25484,7 +25425,7 @@ function Master() {
 
   React.useEffect(() => {
     setLoading(true);
-    // Twenty-two lists, one request. The order here is what the callback
+    // Twenty-one lists, one request. The order here is what the callback
     // destructures, so the two must be changed together.
     apiBatch([
       "getTreatmentsMaster", "getDoctorDetailsList", "getEmployeesList",
@@ -25493,9 +25434,8 @@ function Master() {
       "getMedicineDosagesList", "getMedicineFrequenciesList", "getMedicineDurationsList",
       "getMedicineInstructionsList", "getMedicineNotesList", "getReasonsList",
       "getClinicProfile", "getDocumentCategoriesList", "getProcedureLibrary",
-      "getImplantBrandsList", "getPanelsList", "getWorkingDays", "getClinicTimings",
-      "getPadMargins"
-    ]).then(([t,d,e,c,m,tpl,ch,med,dos,freq,dur,instr,mn,ar,cp,dc,pl,ib,pnl,wd,ct,pm]) => {
+      "getImplantBrandsList", "getPanelsList", "getWorkingDays", "getClinicTimings"
+    ]).then(([t,d,e,c,m,tpl,ch,med,dos,freq,dur,instr,mn,ar,cp,dc,pl,ib,pnl,wd,ct]) => {
       setLoading(false);
       if (t.success) setTreatments(t.treatments || []);
       // An older backend without this list simply leaves it empty, and the
@@ -25526,7 +25466,6 @@ function Master() {
       // A backend without this answers with the usual clinic day, which is
       // also what the book falls back to, so the two never disagree.
       if (ct && ct.success) setTimings({ open: ct.open, close: ct.close, slotMinutes: ct.slotMinutes });
-      if (pm && pm.success && pm.margins) setPadMargins(pm.margins);
     }).catch(() => setLoading(false));
   }, []);
 
@@ -25582,9 +25521,6 @@ function Master() {
       days, setWeekOff, prevDays).then(saved => { if (!saved) setHolidays(prevHols); return saved; });
   };
 
-  const savePadMargins = (next) =>
-    persist("savePadMargins", { margins: JSON.stringify(next) }, next, setPadMargins, padMargins);
-
   const saveTimings = (next) => {
     const prev = timings;
     return persist("saveClinicTimings",
@@ -25607,6 +25543,7 @@ function Master() {
     // by the forms and the header, so it has to be put back too or the clinic
     // name on a printed sheet would disagree with the master.
     if (!saved) window.CLINIC = prevWindow;
+    return saved;
   };
 
   const currentTop = MASTER_STRUCTURE.find(t => t.id === topTab) || MASTER_STRUCTURE[0];
@@ -25631,9 +25568,6 @@ function Master() {
       onAdd:(item)=>saveEmployees([...employees, item]),
       onRemove:(i)=>saveEmployees(employees.filter((_,idx)=>idx!==i)),
       onEdit:(i,item)=>saveEmployees(employees.map((it,idx)=>idx===i?item:it))
-    }),
-    padMargins: () => React.createElement(PadMarginsEditor, {
-      margins: padMargins, onSave: savePadMargins
     }),
     clinicTimings: () => React.createElement(ClinicTimingsEditor, {
       timings, onSave: saveTimings
@@ -26271,19 +26205,10 @@ function Prescription({ globalPat }) {
   const [todaysProcedures, setTodaysProcedures] = React.useState([]);
   const [medicines, setMedicines] = React.useState([]);
   const [medLists, setMedLists] = React.useState({ dosages: [], frequencies: [], durations: [], instructions: [], medNotes: [], instructionsLib: [] });
-  // The case paper prints onto the pre-printed pad, so it must keep clear of
-  // the letterhead, the doctors down the left and the footer. Those margins
-  // are the PAD's, not the app's, and are set in Master — this used to be
-  // state nothing ever filled, so the form always fell back to the numbers
-  // compiled into it and a reprinted pad meant a code change.
+  // Filled from the clinic profile below, which is where the margins are set
+  // and always has been. A second fetch of its own here would race that one,
+  // and whichever answered last would decide what the pad looks like.
   const [padMargins, setPadMargins] = React.useState(null);
-  React.useEffect(() => {
-    let alive = true;
-    api("getPadMargins").then(r => {
-      if (alive && r && r.success && r.margins) setPadMargins(r.margins);
-    }).catch(() => {});
-    return () => { alive = false; };
-  }, []);
   const [clinicName, setClinicName] = React.useState(null);
 
   React.useEffect(() => {
@@ -26293,7 +26218,7 @@ function Prescription({ globalPat }) {
         if (p.padTop || p.padRight || p.padBottom || p.padLeft) {
           setPadMargins({
             top: (p.padTop || "44") + "mm", right: (p.padRight || "15") + "mm",
-            bottom: (p.padBottom || "18") + "mm", left: (p.padLeft || "52") + "mm"
+            bottom: (p.padBottom || "15") + "mm", left: (p.padLeft || "52") + "mm"
           });
         }
         if (p.name) setClinicName(p.name);

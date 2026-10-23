@@ -806,8 +806,6 @@ function route(p) {
       case "getChairsList":            return getChairsList();
       case "getCrmData":               return getCrmData();
       case "saveCrmCollection":        return saveCrmCollection(p);
-      case "getPadMargins":            return getPadMargins();
-      case "savePadMargins":           return savePadMargins(p);
       case "getClinicTimings":         return getClinicTimings();
       case "saveClinicTimings":        return saveClinicTimings(p);
       case "getWorkingDays":           return getWorkingDays();
@@ -4687,72 +4685,6 @@ function saveCrmCollection(p) {
   });
   sh.getRange(1, 1, out.length, headers.length).setValues(out);
   return { success: true, count: records.length };
-}
-
-// ── Prescription pad margins ─────────────────────────────────
-// The case paper prints onto the clinic's pre-printed pad, so it has to keep
-// clear of the letterhead at the top, the doctors down the left and the
-// footer at the bottom. Those are properties of the PAD, not of the app, and
-// a reprint with a taller header would otherwise need a developer. They are
-// kept here so the clinic can measure its own pad and set them.
-var PAD_MARGINS_TAB = "Pad Margins";
-var PAD_MARGINS_DEFAULT = { top: "44mm", right: "15mm", bottom: "15mm", left: "52mm" };
-var PAD_MARGIN_SIDES = ["top", "right", "bottom", "left"];
-
-// Accepts "15", "15mm" or "1.5cm" and answers in millimetres, because a
-// margin typed without a unit is the commonest way to get a blank page.
-function padMm_(v) {
-  if (v === undefined || v === null || v === "") return "";
-  var str = String(v).trim().toLowerCase();
-  var m = /^(\d+(?:\.\d+)?)\s*(mm|cm|in)?$/.exec(str);
-  if (!m) return "";
-  var n = parseFloat(m[1]);
-  if (!isFinite(n) || n < 0) return "";
-  if (m[2] === "cm") n = n * 10;
-  else if (m[2] === "in") n = n * 25.4;
-  // A margin bigger than the page leaves nowhere to print.
-  if (n > 200) return "";
-  return (Math.round(n * 10) / 10) + "mm";
-}
-
-function getPadMargins() {
-  var sh = getSheet(PAD_MARGINS_TAB);
-  var data = sh.getDataRange().getValues();
-  var got = {};
-  for (var i = 1; i < data.length; i++) {
-    var k = String(data[i][0] || "").trim().toLowerCase();
-    if (k) got[k] = data[i][1];
-  }
-  var out = {};
-  PAD_MARGIN_SIDES.forEach(function (side) {
-    out[side] = padMm_(got[side]) || PAD_MARGINS_DEFAULT[side];
-  });
-  return { success: true, margins: out };
-}
-
-function savePadMargins(p) {
-  var margins = p && p.margins;
-  if (typeof margins === "string") { try { margins = JSON.parse(margins); } catch (e) { margins = null; } }
-  if (!margins || typeof margins !== "object") {
-    return { success: false, error: "the margins never reached the sheet" };
-  }
-  var out = {}, bad = [];
-  PAD_MARGIN_SIDES.forEach(function (side) {
-    var v = padMm_(margins[side]);
-    if (!v) bad.push(side);
-    else out[side] = v;
-  });
-  if (bad.length) {
-    return { success: false, error: "could not read the " + bad.join(" and ") + " margin \u2014 give it in mm" };
-  }
-
-  var sh = getSheet(PAD_MARGINS_TAB);
-  sh.clearContents();
-  var now = new Date().toISOString();
-  var rows = [["Setting", "Value", "Updated At"]];
-  PAD_MARGIN_SIDES.forEach(function (side) { rows.push([side, out[side], now]); });
-  sh.getRange(1, 1, rows.length, 3).setValues(rows);
-  return { success: true, margins: out };
 }
 
 var CLINIC_TIMINGS_TAB = "Clinic Timings";
