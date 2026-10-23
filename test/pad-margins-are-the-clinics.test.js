@@ -96,6 +96,23 @@ ok("it shows what is left to print in", /to print in, on an A4 sheet/.test(ed));
 ok("a margin larger than the page is refused before it is saved", /num\(k\) > 120/.test(ed));
 ok("Save is dead until something changed", /!!bad \|\| !dirty/.test(ed));
 
+// A green line at the top of a long page that clears after a second, while
+// the Save button greys out, reads exactly like nothing having happened.
+ok("the outcome is said where the numbers were typed",
+   /saved === "done" && !dirty/.test(ed) && /Saved\. The case paper will print /.test(ed));
+ok("and it repeats the margins back, so there is something to check",
+   /mm\(margins\.top\) \+ "mm from the top, "/.test(ed));
+ok("a refused save says so there too, and that the numbers went back",
+   /saved === "failed"/.test(ed) && /back as they were/.test(ed));
+ok("the button says it is working while it is",
+   /saved === "saving" \? "Saving/.test(ed));
+ok("the confirmation waits for the save to actually land",
+   /Promise\.resolve\(onSave\(next\)\)\.then\(okd =>/.test(ed));
+ok("and a save that reports false is not shown as done",
+   /okd === false \? "failed" : "done"/.test(ed));
+ok("the Master's save hands the result back for that",
+   /const savePadMargins = \(next\) =>\n    persist\("savePadMargins"/.test(HTML));
+
 // ── the form's own fallback ───────────────────────────────────────────────
 const m = /const PRESCRIPTION_FORM_B64\s*=\s*([\s\S]*?);\n/.exec(HTML);
 const PRESC = Buffer.from((m[1].match(/"([^"]*)"/g) || []).map(x => x.slice(1, -1)).join(""), "base64").toString("utf8");
