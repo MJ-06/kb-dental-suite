@@ -164,12 +164,22 @@ ok("a payload that did not arrive whole is refused, not acted on half",
 
 // ── what the CRM is handed ───────────────────────────────────────────────
 const gcd = GS.slice(GS.indexOf("function getCrmData()"), GS.indexOf("\n}", GS.indexOf("function getCrmData()")));
-ok("the queue rides on the load the CRM already makes",
-   /leadInbox: waiting/.test(gcd), gcd);
+const waiting = slice("crmLeadsWaiting_");
+ok("the queue rides on the load the CRM already makes, so opening it is one call",
+   /leadInbox: crmLeadsWaiting_\(\)/.test(gcd), gcd);
 ok("only the entries nobody has turned into a lead yet",
-   /if \(String\(r\.takenAt \|\| ""\)\.trim\(\)\) return;/.test(gcd));
+   /if \(String\(r\.takenAt \|\| ""\)\.trim\(\)\) return;/.test(waiting));
 ok("and an unreadable inbox does not stop the CRM loading everything else",
-   /catch \(e\) \{[\s\S]*waiting = \[\];/.test(gcd), gcd.slice(-400));
+   /catch \(e\) \{\s*waiting = \[\];/.test(waiting), waiting.slice(-300));
+
+// Asked for again every minute while the screen is open, so it is its own
+// action: reloading all nine collections on a timer to find out whether one
+// patient walked in would not be quick on a clinic's register.
+ok("the waiting list can be read on its own, without the rest",
+   /function getCrmLeadInbox\(\)/.test(GS));
+ok("and it is routed", /case "getCrmLeadInbox":\s+return getCrmLeadInbox\(\);/.test(GS));
+ok("reading just the waiting list touches no other collection",
+   slice("getCrmLeadInbox").indexOf("CRM_COLLECTIONS") < 0);
 
 // ── reachable from the app ───────────────────────────────────────────────
 ok("queueCrmLead is routed", /case "queueCrmLead":\s+return queueCrmLead\(p\);/.test(GS));

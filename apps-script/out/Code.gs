@@ -807,6 +807,7 @@ function route(p) {
       case "getCrmData":               return getCrmData();
       case "saveCrmCollection":        return saveCrmCollection(p);
       case "queueCrmLead":             return queueCrmLead(p);
+      case "getCrmLeadInbox":          return getCrmLeadInbox();
       case "markCrmLeadsTaken":        return markCrmLeadsTaken(p);
       case "getClinicTimings":         return getClinicTimings();
       case "saveClinicTimings":        return saveClinicTimings(p);
@@ -4808,11 +4809,16 @@ function markCrmLeadsTaken(p) {
   return { success: true, marked: marked };
 }
 
-function getCrmData() {
-  var out = {};
-  CRM_COLLECTIONS.forEach(function (name) { out[name] = getCrmReadOne_(name); });
-  // Carried on the load the CRM already makes, rather than a second round
-  // trip. Only the ones nobody has turned into a lead yet.
+// The patients waiting to become leads, and nothing else.
+//
+// Its own action because the CRM asks for it again every minute while it is
+// open: reloading all nine collections on a timer to find out whether one
+// patient walked in would be absurd, and on a clinic's register it would not
+// be quick.
+//
+// Never throws. A missing or unreadable inbox reads as "nobody waiting",
+// because the alternative is the CRM looking as though it had lost its leads.
+function crmLeadsWaiting_() {
   var waiting = [];
   try {
     crmLeadInboxRows_().rows.forEach(function (r) {
@@ -4828,11 +4834,21 @@ function getCrmData() {
       });
     });
   } catch (e) {
-    // A missing or unreadable inbox must not stop the CRM loading everything
-    // else -- it would look like the clinic had no leads at all.
     waiting = [];
   }
-  return { success: true, data: out, leadInbox: waiting };
+  return waiting;
+}
+
+function getCrmLeadInbox() {
+  return { success: true, leadInbox: crmLeadsWaiting_() };
+}
+
+function getCrmData() {
+  var out = {};
+  CRM_COLLECTIONS.forEach(function (name) { out[name] = getCrmReadOne_(name); });
+  // Carried on the load the CRM already makes, rather than a second round
+  // trip, so opening the screen needs only the one call.
+  return { success: true, data: out, leadInbox: crmLeadsWaiting_() };
 }
 
 function saveCrmCollection(p) {
