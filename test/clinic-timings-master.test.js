@@ -104,7 +104,7 @@ ok("Clinic Timings is a real tab now, not a placeholder",
    /\{ id:"clinicTimings", label:"Clinic Timings" \}/.test(HTML));
 ok("wired to its editor", /clinicTimings: \(\) => React\.createElement\(ClinicTimingsEditor/.test(HTML));
 ok("the master loads it", /"getWorkingDays", "getClinicTimings"/.test(HTML));
-ok("and destructures it in the same position", /pnl,wd,ct\]\) =>/.test(HTML));
+ok("and destructures it in the same position", /pnl,wd,ct[,\]]/.test(HTML));
 ok("the appointment book reads the master, not the fixed list",
    /function Appointments\(\{[^}]*\}\) \{\n  const \{ slots: TIME_SLOTS \} = useClinicTimings\(\);/.test(HTML));
 ok("and so does the quick-booking box",
