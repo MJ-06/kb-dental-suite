@@ -1090,6 +1090,28 @@ function regRow_(uhid) {
   return null;
 }
 
+// A list out of the register, however it was written: JSON from the desk,
+// "A, B, C" from the patient's own form on the iPad.
+//
+// This replaces safeParseJSON(x || "[]") || fallback, which could not work:
+// an empty array is TRUTHY in JavaScript, so the fallback after the || was
+// dead code and a patient whose conditions sat in the long-named column
+// always came back with none.
+function regList_(v) {
+  if (Object.prototype.toString.call(v) === "[object Array]") return v;
+  var s = String(v == null ? "" : v).trim();
+  if (!s) return [];
+  if (s.charAt(0) === "[") {
+    try {
+      var a = JSON.parse(s);
+      if (Object.prototype.toString.call(a) === "[object Array]") {
+        return a.map(function (x) { return String(x).trim(); }).filter(Boolean);
+      }
+    } catch (e) { /* not JSON after all -- read it as text below */ }
+  }
+  return s.split(",").map(function (x) { return x.trim(); }).filter(Boolean);
+}
+
 function regGet_(row, candidates) {
   var col = findRegColumn_(row.headers, candidates);
   return col >= 0 ? String(row.values[col] || "").trim() : "";
@@ -1323,11 +1345,20 @@ function getPatient(p) {
       // never called). That dead call was the main reason loading a patient,
       // and therefore saving a receipt, felt slow. Removed.
 
-      // Support both old column names and new column names
+      // Support both old column names and new column names.
+      //
+      // This used to read obj[name] -- an EXACT header match. The register's
+      // own headings are full questions ("Have you ever suffered/suffering
+      // from any of the following?"), so a lookup for "Conditions" found
+      // nothing and the patient's medical history came back empty whoever had
+      // filled it in. Matched the way the rest of the register is matched now,
+      // still taking the first candidate that actually holds something.
       function get() {
         var tries = Array.prototype.slice.call(arguments);
         for (var t = 0; t < tries.length; t++) {
-          var v = String(obj[tries[t]] || "").trim();
+          var col = findRegColumn_(headers, [tries[t]]);
+          if (col < 0) continue;
+          var v = String(data[i][col] || "").trim();
           if (v) return v;
         }
         return "";
@@ -1349,9 +1380,12 @@ function getPatient(p) {
         emergencyRelation: get("Emergency Relation", "Relation with Person"),
         emergencyContact:  get("Emergency Contact", "In Case Of Emergency Contact Number"),
         referredBy:        get("Referred By", "How did you know about this clinic?"),
-        conditions:        safeParseJSON(get("Conditions") || "[]") || (get("Have you ever suffered/suffering from any of the following?") ? [get("Have you ever suffered/suffering from any of the following?")] : []),
+        // The two halves of the clinic write these differently: the desk
+        // saves a JSON array, the patient's own form on the iPad sends plain
+        // "A, B, C". Both are read.
+        conditions:        regList_(get("Conditions", "Have you ever suffered/suffering from any of the following?")),
         medicines:         get("Medicines", "Medicines you are taking currently:"),
-        allergies:         safeParseJSON(get("Allergies") || "[]") || (get("Are you allergic to any of the following?") ? [get("Are you allergic to any of the following?")] : []),
+        allergies:         regList_(get("Allergies", "Are you allergic to any of the following?")),
         habits:            get("Habits"),
         complaint:         get("Complaint", "What is your chief complaint?"),
         painLevel:         get("Pain Level", "What is your level of pain on a scale of 0-10?"),
