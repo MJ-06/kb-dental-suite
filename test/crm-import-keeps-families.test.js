@@ -109,12 +109,22 @@ eq("running it twice adds nobody the second time",
    }), family), []);
 
 // ── and the rule in the page matches the one tested ───────────────────────
+// Keyed on the UHID and nothing else -- matching on the mobile as well is
+// what used to turn a family of four sharing one number into one contact.
 ok("the page keys on the UHID, which is one patient",
-   /if\(c\.uhid\) \{ have\[String\(c\.uhid\)\.trim\(\)\.toUpperCase\(\)\] = true; return; \}/.test(CRM));
+   /if\(c\.uhid\) \{ var k = String\(c\.uhid\)\.trim\(\)\.toUpperCase\(\); have\[k\] = true;/.test(CRM));
 ok("a row with no UHID is keyed on its name AND number, never the number alone",
    /var sk = softKey\(pt\.name, tel\);/.test(CRM) && /if\(haveSoft\[sk\]\)/.test(CRM));
+// A patient already here returns before softKey is ever reached, so their
+// number is never recorded as taken and cannot block a relative.
 ok("no phone is recorded as taken for a patient who has a UHID",
-   /if\(have\[ik\]\)\{ nAlready\+\+; return; \}/.test(CRM));
+   /if\(have\[ik\]\)\{[\s\S]{0,900}?nAlready\+\+; return;\s*\}/.test(CRM));
+ok("and the UHID branch never touches the name-and-number index",
+   (function(){
+     const i = CRM.indexOf("if(have[ik]){");
+     const j = CRM.indexOf("nAlready++; return;", i);
+     return CRM.slice(i, j).indexOf("haveSoft") < 0;
+   })());
 
 
 // ── the import accounts for every row it was given ────────────────────────

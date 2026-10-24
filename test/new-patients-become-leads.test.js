@@ -317,6 +317,47 @@ const pi = runImport([{ uhid: "KB9200", name: "D D", panel: "CGHS" }], { pipelin
 eq("the import files a panel patient the same way",
    pi.contacts[0].companyId, (pi.companies || []).filter(c => c.name === "CGHS")[0].id);
 
+
+// ── an import repairs a contact that predates the panel fields ───────────
+// The 2,496 contacts were created by the first import, before the panel came
+// across, and an import that only ever skipped a contact it already had left
+// them showing as "Individual" for good, however many times it was re-run.
+let m = runImport([{ uhid: "KB7700", name: "Meera Das", mobile: "9811007700",
+                     panel: "CGHS", panelCategory: "Serving", cardId: "CG-7" }],
+                  { pipelines: [PIPE2],
+                    contacts: [{ id: "old1", firstName: "Meera", lastName: "Das", uhid: "KB7700" }] });
+eq("the contact is not added a second time", (m.contacts || []).length, 1);
+eq("but its panel is filled in from the register",
+   [m.contacts[0].panel, m.contacts[0].panelCategory, m.contacts[0].cardId],
+   ["CGHS", "Serving", "CG-7"]);
+ok("and it is filed under the panel company",
+   !!m.contacts[0].companyId && m.contacts[0].companyId === (m.companies || []).filter(c => c.name === "CGHS")[0].id,
+   JSON.stringify({ on: m.contacts[0].companyId, cos: m.companies }));
+ok("the desk is told it was mended, not silently changed",
+   /already here, now filed under their panel/.test(m._msg || ""), m._msg);
+ok("no lead is opened for somebody who was already a contact",
+   !(m.leads || []).length, JSON.stringify(m.leads));
+
+// A panel somebody set by hand is not overwritten by the register.
+m = runImport([{ uhid: "KB7701", name: "A B", panel: "CGHS" }],
+              { pipelines: [PIPE2],
+                contacts: [{ id: "old2", firstName: "A", lastName: "B", uhid: "KB7701",
+                             panel: "DGEHS", companyId: "CO_D" }] });
+// Nothing is written at all: somebody may have set that panel by hand, and
+// a repair must not argue with them.
+ok("a panel already on the contact is left as it is",
+   m.contacts === undefined, JSON.stringify(m.contacts));
+ok("and nothing is reported as mended for them",
+   !/now filed under their panel/.test(m._msg || ""), m._msg);
+
+// A private patient is not given a panel by a repair.
+m = runImport([{ uhid: "KB7702", name: "C D" }],
+              { pipelines: [PIPE2],
+                contacts: [{ id: "old3", firstName: "C", lastName: "D", uhid: "KB7702" }] });
+ok("a private patient already here is left completely alone",
+   m.contacts === undefined, JSON.stringify(m.contacts));
+ok("and nothing is reported as mended", !/now filed under their panel/.test(m._msg || ""), m._msg);
+
 console.log("==============================================================================");
 console.log("  " + pass + " passed, " + fail + " failed");
 process.exit(fail ? 1 : 0);

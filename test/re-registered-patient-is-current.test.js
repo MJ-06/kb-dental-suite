@@ -72,7 +72,7 @@ ok("and the patient list counts patients, not rows",
 const m = /const CRM_B64\s*=\s*([\s\S]*?);\n/.exec(HTML);
 const CRM = Buffer.from((m[1].match(/"([^"]*)"/g) || []).map(x => x.slice(1, -1)).join(""), "base64").toString("utf8");
 ok("one registration id is one contact again",
-   /if\(c\.uhid\) \{ have\[String\(c\.uhid\)\.trim\(\)\.toUpperCase\(\)\] = true; return; \}/.test(CRM));
+   /if\(c\.uhid\) \{ var k = String\(c\.uhid\)\.trim\(\)\.toUpperCase\(\); have\[k\] = true;/.test(CRM));
 ok("the id-and-name key is gone, with its talk of two people on one id",
    !/idKey\(/.test(CRM) && !/sharing a UHID with a different patient/.test(CRM));
 // The phone rule must NOT come back with it: families really do share a number.

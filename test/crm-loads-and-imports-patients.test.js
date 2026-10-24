@@ -65,7 +65,7 @@ ok("an import that cannot read the register says so",
 // desk, and on the id alone the second never became a contact. See
 // crm-import-keeps-families.
 ok("a patient already here is skipped on UHID and name",
-   /if\(have\[ik\]\)\{ nAlready\+\+; return; \}/.test(CRM));
+   /if\(have\[ik\]\)\{[\s\S]{0,900}?nAlready\+\+; return;\s*\}/.test(CRM));
 // A row with no UHID is keyed on its name AND number — never the number
 // alone, which dropped families and then second walk-ins. See
 // crm-import-keeps-families.
@@ -76,8 +76,18 @@ ok("a mobile stored as a number is still matched",
 ok("the imported contact carries its UHID", /uhid: uh,/.test(CRM));
 ok("running it again reports everyone as already here rather than adding them",
    /nAlready \+ ' already here'/.test(CRM));
-ok("the import only ever adds — it never rewrites a contact already there",
-   /persist\('contacts','contacts', st\.contacts\.concat\(added\)\)/.test(CRM));
+// It used to only ever add. That left the contacts made by the first import
+// -- before the panel fields were carried across -- showing as "Individual"
+// for good, because a re-run skipped them untouched. It now fills in a panel
+// the register knows and the contact has not got.
+ok("an import fills in a panel a contact is missing",
+   /mended\.push\(\{ id: ex\.id, panel: String\(pt\.panel\)\.trim\(\)/.test(CRM));
+ok("but only where the contact has none, so nothing set by hand is argued with",
+   /String\(pt\.panel\|\|''\)\.trim\(\) && !String\(ex\.panel\|\|''\)\.trim\(\)/.test(CRM));
+ok("and the repairs go up with the additions as one list",
+   /persist\('contacts','contacts', next\.concat\(added\)\)/.test(CRM));
+ok("the desk is told, rather than contacts changing silently",
+   /already here, now filed under their panel/.test(CRM));
 ok("the result is shown on the page, not left to a toast nobody saw",
    /st\.sec==='contacts' && st\.importMsg/.test(CRM));
 ok("the button is disabled while it runs, so it cannot be double-pressed",
