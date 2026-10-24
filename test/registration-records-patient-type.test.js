@@ -67,7 +67,7 @@ eq("and says nothing about the panel, the card or the patient type",
 
 // ── which is what lets the CRM separate them ──────────────────────────────
 ok("the panel leaves the register with the patient",
-   /panel: panelCol >= 0 \? String\(r\[panelCol\]\|\|""\)\.trim\(\) : ""/.test(GS));
+   /panel: \(panelCol >= 0 && String\(r\[panelCol\]\|\|""\)\.trim\(\)\)/.test(GS));
 // That rule lives inside the CRM's base64 blob, so it has to be decoded.
 const m = /const CRM_B64\s*=\s*([\s\S]*?);\n/.exec(HTML);
 const CRM = Buffer.from((m[1].match(/"([^"]*)"/g) || []).map(x => x.slice(1, -1)).join(""), "base64").toString("utf8");

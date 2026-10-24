@@ -22,8 +22,12 @@ const CRM = Buffer.from((m[1].match(/"([^"]*)"/g) || []).map(x => x.slice(1, -1)
 // ── the register hands over the panel ─────────────────────────────────────
 const gi = GS.indexOf("function getAllPatients(");
 const fn = GS.slice(gi, GS.indexOf("\n}", gi));
-ok("a patient carries their panel out of the register", /panel: panelCol >= 0/.test(fn));
-ok("and which category of it they are on", /panelCategory: panelCatCol >= 0/.test(fn));
+// Taken from any of the patient's rows, not only the newest -- see
+// panel-survives-both-books, which runs this for real.
+ok("a patient carries their panel out of the register",
+   /panel: \(panelCol >= 0 && String\(r\[panelCol\]\|\|""\)\.trim\(\)\)/.test(fn), fn);
+ok("and which category of it they are on",
+   /panelCategory: \(panelCatCol >= 0 && String\(r\[panelCatCol\]\|\|""\)\.trim\(\)\)/.test(fn), fn);
 ok("and their card number", /cardId: cardCol >= 0/.test(fn));
 // The names, not the exact line — the call grows as registration records more.
 const ensured = (GS.match(/ensureRegColumns_\(sh, \[[\s\S]*?\]\)/) || [""])[0];
@@ -31,7 +35,7 @@ ok("read from the columns registration actually writes",
    ["Patient Type", "Panel", "Panel Category", "Card ID"].every(n => ensured.indexOf('"' + n + '"') >= 0),
    ensured);
 ok("a book without those columns simply reports no panel, rather than failing",
-   /findRegColumn_\(headers, \["Panel"\]\)/.test(fn) && /panelCol >= 0 \? String/.test(fn));
+   /findRegColumn_\(headers, \["Panel"\]\)/.test(fn) && /panelCol >= 0 && String/.test(fn), fn);
 
 // ── the panel becomes the company, run for real ───────────────────────────
 // The matching rule is what stops "CGHS" and "cghs" becoming two companies,

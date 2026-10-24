@@ -1463,6 +1463,30 @@ function getAllPatients(p) {
   // One entry per patient, from their newest row — the count means patients,
   // not rows, and a re-registered patient is one patient.
   var newest = uhidCol >= 0 ? regLatestByUhid_(data, uhidCol) : {};
+
+  // The panel is taken from ANY of a patient's rows, not only the newest.
+  //
+  // A patient has rows in both books once they go on a panel, and NABH
+  // re-collection adds more. The newest row is the right one for a name or a
+  // number -- that is what re-collection is for -- but not for the panel: a
+  // blank there is somebody not filling the field in again, not the patient
+  // leaving the panel. Taking the newest row wholesale dropped the panel of
+  // anyone whose most recent row happened not to repeat it, and the CRM then
+  // filed them under no company at all.
+  var panelOf = {};
+  if (uhidCol >= 0 && panelCol >= 0) {
+    for (var pi = 1; pi < data.length; pi++) {
+      var pid = String(data[pi][uhidCol] || "").trim().toUpperCase();
+      if (!pid || panelOf[pid]) continue;
+      var pv = String(data[pi][panelCol] || "").trim();
+      if (!pv) continue;
+      panelOf[pid] = {
+        panel: pv,
+        category: panelCatCol >= 0 ? String(data[pi][panelCatCol] || "").trim() : "",
+        cardId: cardCol >= 0 ? String(data[pi][cardCol] || "").trim() : ""
+      };
+    }
+  }
   var patients = [];
   data.slice(1).forEach(function(r, idx) {
     var rowId = uhidCol >= 0 ? String(r[uhidCol] || "").trim().toUpperCase() : "";
@@ -1473,9 +1497,12 @@ function getAllPatients(p) {
       gender: genderCol >= 0 ? String(r[genderCol]||"") : "",
       dob: dobCol >= 0 ? String(r[dobCol]||"") : "",
       mobile: mobileCol >= 0 ? r[mobileCol] : "",
-      panel: panelCol >= 0 ? String(r[panelCol]||"").trim() : "",
-      panelCategory: panelCatCol >= 0 ? String(r[panelCatCol]||"").trim() : "",
-      cardId: cardCol >= 0 ? String(r[cardCol]||"").trim() : "",
+      panel: (panelCol >= 0 && String(r[panelCol]||"").trim())
+               || (rowId && panelOf[rowId] ? panelOf[rowId].panel : ""),
+      panelCategory: (panelCatCol >= 0 && String(r[panelCatCol]||"").trim())
+               || (rowId && panelOf[rowId] ? panelOf[rowId].category : ""),
+      cardId: (cardCol >= 0 && String(r[cardCol]||"").trim())
+               || (rowId && panelOf[rowId] ? panelOf[rowId].cardId : ""),
       // Carried out so the CRM can open a lead that already says where the
       // patient came from, instead of somebody retyping it.
       referredBy: refCol >= 0 ? String(r[refCol]||"").trim() : "",
