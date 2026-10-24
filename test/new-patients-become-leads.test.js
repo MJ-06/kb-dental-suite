@@ -32,8 +32,12 @@ const CODE = CRM.replace(/<!--[\s\S]*?-->/g, "").replace(/\/\*[\s\S]*?\*\//g, ""
 // against the one copy, so the two paths cannot be checked apart.
 const SHARED = CODE.slice(CODE.indexOf("function consultPipeline("),
                           CODE.indexOf("function crmSaveOne("));
-const IMPORT = CODE.slice(CODE.indexOf("function importPatientsAsContacts()"),
-                          CODE.indexOf("function crmSaveOne("));
+// To the import function's own close, not to the next named function -- the
+// shared helpers sit between them now.
+const IMPORT = (() => {
+  const a = CODE.indexOf("function importPatientsAsContacts()");
+  return CODE.slice(a, CODE.indexOf("\n  }", a) + 4);
+})();
 const DRAIN = CODE.slice(CODE.indexOf("function drainLeadInbox("),
                          CODE.indexOf("function toast("));
 
@@ -270,6 +274,48 @@ const viaDesk = runDrain([{ id: "li4", uhid: "KB8002", name: "V W", referredByTy
                          { pipelines: [PIPE2] }).leads[0];
 eq("a referral means the same thing whichever way the patient reached the CRM",
    [viaDesk.source, viaDesk.stageId], [viaImport.source, viaImport.stageId]);
+
+
+// ── a panel patient must not land as "Individual" ────────────────────────
+// The point of the panel field on the registration form: CGHS and DGEHS
+// patients are separable from the cash patients in the CRM. The drain used
+// to set companyId:'' outright, so every panel patient registered at the
+// desk showed under Company as Individual -- the one thing it exists to stop.
+let pd = runDrain([{ id: "li9", uhid: "KB9100", name: "Meera Das", panel: "CGHS",
+                     panelCategory: "Serving", cardId: "CG-77" }], { pipelines: [PIPE2] });
+eq("the panel becomes a company", (pd.companies || []).map(c => c.name), ["CGHS"]);
+eq("marked as a panel, not an ordinary company", pd.companies[0].industry, "Panel");
+ok("and the patient is filed under it, not left as an individual",
+   pd.contacts[0].companyId === pd.companies[0].id,
+   JSON.stringify({ on: pd.contacts[0].companyId, co: pd.companies[0].id }));
+eq("the panel, category and card stay on the contact as well",
+   [pd.contacts[0].panel, pd.contacts[0].panelCategory, pd.contacts[0].cardId],
+   ["CGHS", "Serving", "CG-77"]);
+
+// A panel the CRM already knows is reused, not duplicated.
+pd = runDrain([{ id: "li10", uhid: "KB9101", name: "T Iyer", panel: "cghs" }],
+              { pipelines: [PIPE2], companies: [{ id: "CO1", name: "CGHS", industry: "Panel" }] });
+ok("a panel already on file is reused however it is typed", !(pd.companies || []).length,
+   JSON.stringify(pd.companies));
+eq("and the patient goes under the existing one", pd.contacts[0].companyId, "CO1");
+
+// Two panel patients in one drain share the one company.
+pd = runDrain([{ id: "li11", uhid: "KB9102", name: "A A", panel: "DGEHS" },
+               { id: "li12", uhid: "KB9103", name: "B B", panel: "DGEHS" }], { pipelines: [PIPE2] });
+eq("two patients on one panel make one company", (pd.companies || []).length, 1);
+eq("and both go under it",
+   pd.contacts.map(c => c.companyId), [pd.companies[0].id, pd.companies[0].id]);
+
+// A private patient has no company, which is what makes the split mean
+// something.
+pd = runDrain([{ id: "li13", uhid: "KB9104", name: "C C" }], { pipelines: [PIPE2] });
+eq("a private patient is filed under no company", pd.contacts[0].companyId, "");
+ok("and no company is invented for them", !(pd.companies || []).length);
+
+// The import path must still behave the same way.
+const pi = runImport([{ uhid: "KB9200", name: "D D", panel: "CGHS" }], { pipelines: [PIPE2] });
+eq("the import files a panel patient the same way",
+   pi.contacts[0].companyId, (pi.companies || []).filter(c => c.name === "CGHS")[0].id);
 
 console.log("==============================================================================");
 console.log("  " + pass + " passed, " + fail + " failed");

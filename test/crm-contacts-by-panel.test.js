@@ -67,10 +67,17 @@ eq("and nothing new is made", h.made(), 0);
 
 // ── the import files them ─────────────────────────────────────────────────
 ok("an imported contact is filed under its panel", /companyId: companyFor\(pt\.panel\)/.test(CRM));
+// The desk's own queue files them too. It used to set companyId:'' outright,
+// so a panel patient registered at the desk showed as "Individual" -- the one
+// thing the panel field exists to prevent.
+ok("and so is one the desk queued, by the same rule",
+   /companyId:panels\.idFor\(pt\.panel\)/.test(CRM));
+ok("both paths share the one rule rather than keeping a copy each",
+   (CRM.match(/function panelCompanies\(/g) || []).length === 1);
 ok("and keeps the panel, category and card on the contact itself",
    /panel: pt\.panel\|\|'', panelCategory: pt\.panelCategory\|\|'', cardId: pt\.cardId\|\|''/.test(CRM));
 ok("new companies are saved even when no new contact was added",
-   /if\(newCompanies\) persist\('companies','companies', companies\);/.test(CRM));
+   (CRM.match(/if\(panels\.added\(\)\) persist\('companies','companies', panels\.list\(\)\);/g) || []).length === 2);
 ok("the result says how many went under a panel", /onPanel \+ ' under a panel'/.test(CRM));
 
 // ── and the list can be split by panel ────────────────────────────────────
