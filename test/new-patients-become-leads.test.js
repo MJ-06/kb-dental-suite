@@ -60,7 +60,19 @@ function sandbox(state, extra) {
   return { st, saved, args: Object.assign(args, extra || {}) };
 }
 
+// Today, as the register writes it.
+const TODAY_ISO = (d => d.getFullYear() + "-" +
+  String(d.getMonth() + 1).padStart(2, "0") + "-" +
+  String(d.getDate()).padStart(2, "0"))(new Date());
+
 function runImport(patients, state) {
+  // An import opens a lead only for a patient registered TODAY, so a bulk
+  // sync cannot bury the board under people seen years ago. These fixtures
+  // are about the lead rules rather than that date rule, so a patient who
+  // does not say when they registered counts as today; the tests for the
+  // date rule below pass it explicitly.
+  patients = (patients || []).map(p =>
+    p.registeredOn === undefined ? Object.assign({ registeredOn: TODAY_ISO + "T10:00:00.000Z" }, p) : p);
   const s = sandbox(state);
   const inner = IMPORT.slice(IMPORT.indexOf("crmAllPatients().then(function(r){"));
   const src = inner.slice(0, inner.lastIndexOf("});"))
@@ -357,6 +369,53 @@ m = runImport([{ uhid: "KB7702", name: "C D" }],
 ok("a private patient already here is left completely alone",
    m.contacts === undefined, JSON.stringify(m.contacts));
 ok("and nothing is reported as mended", !/now filed under their panel/.test(m._msg || ""), m._msg);
+
+
+// ── an import must not bury the board ────────────────────────────────────
+// An import is a bulk sync: it sweeps up patients registered months or years
+// ago. Opening a consultation for each of them would fill the board with
+// people who were seen long ago. Only the ones registered today get one.
+const todayISO = TODAY_ISO;
+
+let im = runImport([{ uhid: "KB8100", name: "Walked In Today", mobile: "9811008100",
+                      registeredOn: todayISO + "T10:30:00.000Z" }], { pipelines: [PIPE2] });
+eq("a patient registered today still gets a consultation lead",
+   (im.leads || []).map(l => l.uhid), ["KB8100"]);
+
+im = runImport([{ uhid: "KB8101", name: "Seen Years Ago", mobile: "9811008101",
+                  registeredOn: "2019-04-02T10:30:00.000Z" }], { pipelines: [PIPE2] });
+eq("a patient registered years ago is added as a contact", (im.contacts || []).length, 1);
+ok("but no lead is opened for them", !(im.leads || []).length, JSON.stringify(im.leads));
+ok("and the desk is told why, rather than wondering where they went",
+   /registered before today, so no lead opened/.test(im._msg || ""), im._msg);
+
+// Explicitly blank, which is what a register with no Timestamp column hands
+// over -- the harness default above only applies when nothing is said.
+im = runImport([{ uhid: "KB8102", name: "No Timestamp", mobile: "9811008102", registeredOn: "" }],
+               { pipelines: [PIPE2] });
+ok("a register with no timestamp to go on opens no lead either",
+   !(im.leads || []).length, JSON.stringify(im.leads));
+eq("though the patient is still added", (im.contacts || []).length, 1);
+
+im = runImport([
+  { uhid: "KB8103", name: "Old One", registeredOn: "2020-01-01T00:00:00.000Z" },
+  { uhid: "KB8104", name: "New One", registeredOn: todayISO + "T09:00:00.000Z" }
+], { pipelines: [PIPE2] });
+eq("a mixed import opens leads only for today's patients",
+   (im.leads || []).map(l => l.uhid), ["KB8104"]);
+eq("while adding both as contacts", (im.contacts || []).length, 2);
+
+// The desk's own queue is the live path and does not depend on this at all:
+// a patient queued at registration always gets their lead.
+const q = runDrain([{ id: "li20", uhid: "KB8105", name: "Queued Now" }], { pipelines: [PIPE2] });
+eq("a patient the desk queued still gets a lead, whatever the import does",
+   (q.leads || []).map(l => l.uhid), ["KB8105"]);
+
+// Local time, not UTC: a patient registered at nine in the evening in India
+// is already tomorrow by UTC and would never count as today.
+ok("today is judged in local time", /d\.getFullYear\(\) \+ '-'/.test(CODE), "");
+ok("and the rule reads the register's own timestamp",
+   /registeredToday\(pt\)/.test(CODE));
 
 console.log("==============================================================================");
 console.log("  " + pass + " passed, " + fail + " failed");
