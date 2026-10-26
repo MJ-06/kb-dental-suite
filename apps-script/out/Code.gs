@@ -979,7 +979,7 @@ function saveRegistration(p) {
   // a blank cannot say which it is. Without this the main book had no Panel
   // Type column at all and the value was written into nothing.
   ensureRegColumns_(sh, ["Patient Type", "Panel", "Panel Category", "Card ID",
-                         "Referred By Type"]);
+                         "Referred By Type", "Mobile 2"]);
 
   if (sh.getLastRow() === 0) {
     sh.appendRow([
@@ -1029,6 +1029,10 @@ function saveRegistration(p) {
     // member of staff, and which of those it was decides whether anything is
     // owed for it -- a name on its own cannot say.
     "Referred By Type": p.referredByType || "",
+    // A second mobile. The form had a "Landline" box that nothing saved or
+    // read back -- whatever the desk typed in it was thrown away -- and a
+    // family is far likelier to give another mobile than a landline.
+    "Mobile 2": p.mobile2 || "",
     "Panel": p.panel || "",
     "Panel Category": p.panelCategory || "",
     "Card ID": p.cardId || "",
@@ -1371,6 +1375,7 @@ function getPatient(p) {
         gender:            get("Gender"),
         dob:               formatDOB(get("DOB", "Date of Birth")),
         mobile:            get("Mobile", "Mobile No.", "Mobile No"),
+        mobile2:           get("Mobile 2", "Mobile2", "Landline"),
         whatsapp:          get("WhatsApp", "WhatsApp No.", "WhatsApp No"),
         email:             get("Email", "Email "),
         bloodGroup:        get("Blood Group"),
@@ -2522,26 +2527,60 @@ function saveAppointment(p) {
 // Status transitions also stamp the matching time column (Checked In ->
 // CheckinTime, In Chair -> EngagedTime, Completed -> CheckoutTime) so the
 // Daysheet can show each step's actual time, mirroring a front-desk workflow.
+// A visit moves Scheduled -> Checked In -> In Chair -> Completed, and each
+// step stamps a time. It can move BACK too: somebody presses Check In for a
+// patient who then does not come, and until now there was no way to undo it
+// -- the appointment was stuck checked in and the stamp stayed on the day
+// sheet for good.
+var APPT_STEPS = [
+  { status: "Scheduled",  stamp: "" },
+  { status: "Checked In", stamp: "CheckinTime" },
+  { status: "In Chair",   stamp: "EngagedTime" },
+  { status: "Completed",  stamp: "CheckoutTime" }
+];
+function apptStepOf_(status) {
+  for (var i = 0; i < APPT_STEPS.length; i++) {
+    if (APPT_STEPS[i].status === status) return i;
+  }
+  return -1;   // Cancelled, No Show: not on the line at all
+}
+
 function updateAppointmentStatus(p) {
   var sh = getAppointmentsSheet();
   var data = sh.getDataRange().getValues();
   var headers = data[0].map(String);
   var col = function(name) { return headers.indexOf(name); };
   var apptId = String(p.apptId || "").trim();
-
-  var stampCol = null;
-  if (p.status === "Checked In") stampCol = "CheckinTime";
-  else if (p.status === "In Chair") stampCol = "EngagedTime";
-  else if (p.status === "Completed") stampCol = "CheckoutTime";
+  var step = apptStepOf_(p.status);
 
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][col("ID")]).trim() === apptId) {
       sh.getRange(i + 1, col("Status") + 1).setValue(p.status);
-      if (stampCol) {
-        sh.getRange(i + 1, col(stampCol) + 1).setValue(fmtTime(new Date()));
+
+      if (step >= 0) {
+        // Every stamp AFTER the step being set is cleared, because it
+        // records something that is no longer true: a patient put back to
+        // Scheduled was never checked in, and leaving the time behind would
+        // keep them on the day sheet as having arrived.
+        for (var k = step + 1; k < APPT_STEPS.length; k++) {
+          var ahead = col(APPT_STEPS[k].stamp);
+          if (ahead >= 0) sh.getRange(i + 1, ahead + 1).setValue("");
+        }
+        // The step's own stamp is written only if it has none. Stepping back
+        // from In Chair to Checked In must not rewrite the time the patient
+        // actually walked in.
+        var own = APPT_STEPS[step].stamp ? col(APPT_STEPS[step].stamp) : -1;
+        if (own >= 0 && !String(data[i][own] || "").trim()) {
+          sh.getRange(i + 1, own + 1).setValue(fmtTime(new Date()));
+        }
       }
+
       if (p.cancelReason) {
         sh.getRange(i + 1, col("CancelReason") + 1).setValue(p.cancelReason);
+      }
+      // Undoing a cancellation leaves no reason behind to contradict it.
+      if (step >= 0 && col("CancelReason") >= 0 && !p.cancelReason) {
+        sh.getRange(i + 1, col("CancelReason") + 1).setValue("");
       }
       return { success: true };
     }

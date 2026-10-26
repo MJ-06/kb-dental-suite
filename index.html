@@ -1562,12 +1562,16 @@ const emptyP = {
   religion: "",
   maritalStatus: "",
   address: "",
-  landline: "",
   mobile: "",
   whatsapp: "",
   email: "",
   govtIdType: "",
   govtIdNo: "",
+  // Was "landline", which nothing ever saved or read back: whatever the desk
+  // typed into it was thrown away the moment the form was submitted. Families
+  // give a second mobile far more often than a landline, so it is that now,
+  // and it is written to the register like every other field.
+  mobile2: "",
   referredBy: "",
   referredByType: "",
   emergencyName: "",
@@ -1764,6 +1768,7 @@ function Registration({
             emergencyName:     p.emergencyName     || "",
             emergencyRelation: p.emergencyRelation || "",
             emergencyContact:  p.emergencyContact  || "",
+            mobile2:           p.mobile2           || "",
             referredBy:        p.referredBy        || "",
             referredByType:    p.referredByType    || ""
           }));
@@ -2082,6 +2087,7 @@ function Registration({
       emergencyName: P.emergencyName,
       emergencyRelation: P.emergencyRelation,
       emergencyContact: P.emergencyContact,
+      mobile2: P.mobile2 || "",
       referredBy: P.referredBy || "",
       referredByType: P.referredByType || "",
       conditions: M.conditions,
@@ -2544,7 +2550,47 @@ function Registration({
     }
   }, "Editing Existing Record \u2014 UHID: ", /*#__PURE__*/React.createElement("strong", null, uhid))), /*#__PURE__*/React.createElement(Sec, {
     t: "Personal Information"
-  }), /*#__PURE__*/React.createElement("div", {
+  }),
+  // Private or on a panel, on the sheet itself rather than only on the screen
+  // before it. Somebody opening an existing patient, or filling the full form
+  // on the iPad, never saw the quick screen that asked -- so there was no way
+  // to see which a patient was, or to correct it. It is data only: nothing
+  // about it is printed, and the slip is the same for both.
+  ceQ("div", { style: { border: `1px solid ${patientType === "panel" ? "#7C3AED" : BORDER}`,
+      background: patientType === "panel" ? "#faf5ff" : "#fff",
+      borderRadius: 9, padding: "12px 14px", marginBottom: 14 } },
+    ceQ("div", { style: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" } },
+      ceQ(Lbl, { c: "Patient Type" }),
+      ceQ("div", { style: { display: "flex", gap: 8 } },
+        [["normal", "Normal", T], ["panel", "Panel", "#7C3AED"]].map(([v, label, col]) =>
+          ceQ("button", { key: v,
+            onClick: () => { setPatientType(v); if (v === "normal") { setPanel(""); setQ(prev => ({ ...prev, panelCat: "", cardId: "" })); } },
+            style: { padding: "8px 22px", fontSize: 14, fontWeight: 700, cursor: "pointer",
+              fontFamily: "inherit", borderRadius: 8,
+              background: patientType === v ? col : "#fff",
+              color: patientType === v ? "#fff" : col,
+              border: "1.5px solid " + col } }, label)))),
+    patientType === "panel" && ceQ("div", {
+      style: { display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "0 14px", marginTop: 12 }
+    },
+      ceQ("div", null, ceQ(Lbl, { c: "Panel" }),
+        ceQ("select", { style: inp, value: panel, onChange: e => setPanel(e.target.value) },
+          ceQ("option", { value: "" }, panelsLoaded ? "Select a panel" : "Loading\u2026"),
+          panels.map(n => ceQ("option", { key: n, value: n }, n)))),
+      ceQ("div", null, ceQ(Lbl, { c: "Card Holder" }),
+        ceQ("select", { style: inp, value: q.panelCat,
+          onChange: e => setQ(prev => ({ ...prev, panelCat: e.target.value })) },
+          ceQ("option", { value: "" }, "Select"),
+          ["Serving", "Pensioner"].map(c => ceQ("option", { key: c, value: c }, c)))),
+      ceQ("div", null, ceQ(Lbl, { c: "Card ID" }),
+        ceQ("input", { style: inp, value: q.cardId, placeholder: "As printed on the card",
+          onChange: e => setQ(prev => ({ ...prev, cardId: e.target.value })) }))),
+    patientType === "panel" && panelsLoaded && !panels.length && ceQ("div", {
+      style: { fontSize: 13, color: "#92400e", background: "#fffbeb", border: "1px solid #f59e0b",
+        borderRadius: 7, padding: "9px 12px", marginTop: 10, lineHeight: 1.6 }
+    }, "No panels have been set up yet. Add them in ",
+       ceQ("strong", null, "Master \u2192 Accounts \u2192 Panels"), ".")),
+  /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
       gridTemplateColumns: "1fr 1fr",
@@ -2736,11 +2782,13 @@ function Registration({
   }), /*#__PURE__*/React.createElement(Err, {
     msg: errors.whatsapp
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Lbl, {
-    c: "Landline"
+    c: "Mobile 2"
   }), /*#__PURE__*/React.createElement("input", {
     style: inp,
-    value: P.landline || "",
-    onChange: up(setP, "landline")
+    value: P.mobile2 || "",
+    inputMode: "numeric",
+    placeholder: "Second number, if any",
+    onChange: up(setP, "mobile2")
   }))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
@@ -6074,6 +6122,37 @@ const WEEK_DAY_LBL = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 const CANCEL_REASONS = ["Cancelled by Patient","Cancelled by Doctor","Cancelled by Clinic","No Show"];
 // Which action button to show for the current status, and what the next status becomes
 const APPT_NEXT_ACTION = { Scheduled:{ label:"Check In", next:"Checked In" }, "Checked In":{ label:"Engage", next:"In Chair" }, "In Chair":{ label:"Check Out", next:"Completed" } };
+// And the way back. Check In is one click and the patient may simply not
+// turn up; until now that could not be undone, so the appointment stayed
+// checked in and the time stayed on the day sheet for good. Stepping back
+// clears the stamps that are no longer true.
+const APPT_UNDO_ACTION = {
+  "Checked In": { label: "Undo check-in", back: "Scheduled",
+                  confirm: "Undo the check-in? The appointment goes back to Scheduled and the check-in time is cleared." },
+  "In Chair":   { label: "Back to checked in", back: "Checked In",
+                  confirm: "Put this patient back to Checked In? The engaged time is cleared." },
+  "Completed":  { label: "Reopen visit", back: "In Chair",
+                  confirm: "Reopen this visit? It goes back to In Chair and the check-out time is cleared." }
+};
+
+// Which stamps a status no longer has. Mirrors what the sheet does when an
+// appointment steps back, so the row on screen says the same thing.
+const APPT_STAMP_ORDER = [
+  { status: "Scheduled",  key: "" },
+  { status: "Checked In", key: "checkinTime" },
+  { status: "In Chair",   key: "engagedTime" },
+  { status: "Completed",  key: "checkoutTime" }
+];
+function apptClearedStamps(status) {
+  let at = -1;
+  for (let i = 0; i < APPT_STAMP_ORDER.length; i++) {
+    if (APPT_STAMP_ORDER[i].status === status) at = i;
+  }
+  if (at < 0) return {};                 // Cancelled, No Show: nothing cleared
+  const out = {};
+  for (let k = at + 1; k < APPT_STAMP_ORDER.length; k++) out[APPT_STAMP_ORDER[k].key] = "";
+  return out;
+}
 
 function toISODate(d) {
   const y = d.getFullYear(), m = String(d.getMonth()+1).padStart(2,"0"), day = String(d.getDate()).padStart(2,"0");
@@ -6558,8 +6637,9 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
   const updateStatus = async (apptId, status) => {
     const res = await api("updateAppointmentStatus", { apptId, status });
     if (!res || !res.success) { setApiMsg("Could not update status: " + ((res && res.error) || "Unknown error")); return; }
-    setAppts(prev => prev.map(a => a.id===apptId ? {...a, status} : a));
-    setRangeAppts(prev => prev.map(a => a.id===apptId ? {...a, status} : a));
+    const cleared = apptClearedStamps(status);
+    setAppts(prev => prev.map(a => a.id===apptId ? {...a, status, ...cleared} : a));
+    setRangeAppts(prev => prev.map(a => a.id===apptId ? {...a, status, ...cleared} : a));
     setSelectedAppt(null);
     if (status === "Completed") {
       checkClinicalSheet(appts.find(a => a.id === apptId) || rangeAppts.find(a => a.id === apptId));
@@ -6705,6 +6785,11 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
                   ? openCompletionOutcome(a) : updateStatus(a.id, action.next),
                 style:{ padding:"8px 16px", fontSize:13.5, border:"none", borderRadius:6, cursor:"pointer", background:"#059669", color:"#fff", fontWeight:700 } },
                 action.label),
+              APPT_UNDO_ACTION[a.status] && React.createElement("button", {
+                onClick: () => { const u = APPT_UNDO_ACTION[a.status];
+                                 if (window.confirm(u.confirm)) updateStatus(a.id, u.back); },
+                style:{ padding:"8px 16px", fontSize:13.5, border:`1px solid ${BORDER}`, borderRadius:6, cursor:"pointer", background:"#fff", color:"#444444", fontWeight:700 } },
+                APPT_UNDO_ACTION[a.status].label),
               (a.status!=="Cancelled" && a.status!=="Completed") && React.createElement("button", { onClick:()=>setPopupMode("cancel"),
                 style:{ padding:"8px 16px", fontSize:13.5, border:`1px solid #e24b4a`, borderRadius:6, cursor:"pointer", background:"#fff", color:"#e24b4a", fontWeight:700 } },
                 "Cancel")
@@ -7488,14 +7573,31 @@ function Daysheet({ globalPat, setGlobalPat }) {
   };
   useEffect(() => { load(); }, [visitDate]);
 
+  // Calling a visit off from the day sheet, with the reason recorded —
+  // otherwise a patient who never came sits there looking booked all day.
+  const cancelFromDaysheet = async (a) => {
+    const reason = window.prompt(
+      "Why is this appointment being cancelled?\n\n" +
+      CANCEL_REASONS.map((r, i) => (i + 1) + ". " + r).join("\n") +
+      "\n\nType the number, or leave blank to keep it as it is.", "1");
+    if (reason === null || !String(reason).trim()) return;
+    const pick = CANCEL_REASONS[parseInt(reason, 10) - 1];
+    if (!pick) { setStatusErr("That is not one of the reasons, so nothing was changed."); return; }
+    await updateStatus(a.id, "Cancelled", pick);
+  };
+
   // A discarded result meant a failed check-in/in-chair/check-out still moved
   // the patient along on screen while the sheet kept the old status — the
   // Daysheet and the record then disagree for the rest of the day.
-  const updateStatus = async (apptId, status) => {
+  const updateStatus = async (apptId, status, cancelReason) => {
     setStatusErr("");
-    const res = await api("updateAppointmentStatus", { apptId, status });
+    const res = await api("updateAppointmentStatus",
+      cancelReason ? { apptId, status, cancelReason } : { apptId, status });
     if (!res || !res.success) { setStatusErr("Could not update status: " + ((res && res.error) || "Unknown error")); return; }
-    setAppts(prev => prev.map(a => a.id===apptId ? {...a, status} : a));
+    // The stamps the sheet has just cleared are cleared here too. Without
+    // this the row keeps showing a check-in time for a patient who has been
+    // put back to Scheduled, and the screen contradicts the record.
+    setAppts(prev => prev.map(a => a.id===apptId ? {...a, status, ...apptClearedStamps(status)} : a));
   };
 
   let filtered = appts.filter(a => a.status !== "Cancelled");
@@ -7563,6 +7665,7 @@ function Daysheet({ globalPat, setGlobalPat }) {
             )),
             React.createElement("tbody", null, filtered.map((a,i) => {
               const action = APPT_NEXT_ACTION[a.status];
+              const undo = APPT_UNDO_ACTION[a.status];
               return React.createElement("tr", { key:i, style:{ borderBottom:`1px solid ${BORDER}`, background:i%2===0?"#fff":BGS } },
                 React.createElement("td", { style:{ padding:"7px 10px" } }, i+1),
                 React.createElement("td", { style:{ padding:"7px 10px", fontWeight:700, color:T } }, a.patientName||"—"),
@@ -7573,9 +7676,24 @@ function Daysheet({ globalPat, setGlobalPat }) {
                 React.createElement("td", { style:{ padding:"7px 10px" } }, a.chair||"—"),
                 React.createElement("td", { style:{ padding:"7px 10px", fontWeight:700, color:T } }, a.time||"—"),
                 React.createElement("td", { style:{ padding:"7px 10px" } },
-                  action ? React.createElement("button", { onClick:()=>updateStatus(a.id, action.next),
-                    style:{ padding:"5px 12px", fontSize:12, border:"none", borderRadius:6, cursor:"pointer", background:"#059669", color:"#fff", fontWeight:600 } },
-                    action.label) : React.createElement("span", { style:{ fontSize:12, color:STATUS_COL[a.status]||"#888", fontWeight:700 } }, hhmm(a.checkinTime)||a.status)
+                  React.createElement("div", { style:{ display:"flex", gap:6, alignItems:"center", flexWrap:"wrap" } },
+                    action ? React.createElement("button", { onClick:()=>updateStatus(a.id, action.next),
+                      style:{ padding:"5px 12px", fontSize:12, border:"none", borderRadius:6, cursor:"pointer", background:"#059669", color:"#fff", fontWeight:600 } },
+                      action.label) : React.createElement("span", { style:{ fontSize:12, color:STATUS_COL[a.status]||"#888", fontWeight:700 } }, hhmm(a.checkinTime)||a.status),
+                    // The way back, where there is one. A check-in pressed by
+                    // mistake had to be undone from the Appointments screen
+                    // before this, which is not where anybody notices it.
+                    undo && React.createElement("button", {
+                      onClick: () => { if (window.confirm(undo.confirm)) updateStatus(a.id, undo.back); },
+                      title: undo.confirm,
+                      style:{ padding:"5px 10px", fontSize:12, border:`1px solid ${BORDER}`, borderRadius:6, cursor:"pointer", background:"#fff", color:"#444444", fontWeight:600 } },
+                      "Undo"),
+                    // And calling the visit off outright, with a reason, so a
+                    // patient who never came is not left looking booked.
+                    (a.status !== "Cancelled" && a.status !== "Completed") && React.createElement("button", {
+                      onClick: () => cancelFromDaysheet(a),
+                      style:{ padding:"5px 10px", fontSize:12, border:"1px solid #e24b4a", borderRadius:6, cursor:"pointer", background:"#fff", color:"#e24b4a", fontWeight:600 } },
+                      "Cancel"))
                 ),
                 React.createElement("td", { style:{ padding:"7px 10px" } }, a.engagedTime||"—"),
                 React.createElement("td", { style:{ padding:"7px 10px" } }, a.checkoutTime||"—")
