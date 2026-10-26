@@ -19,11 +19,27 @@ const eq = (name, got, want) =>
   checks.push({ name, ok: JSON.stringify(got) === JSON.stringify(want), got, want });
 
 // ── 2. one click to the procedures already done ─────────────────────────
-ok('Procedures Done is offered from the active patient box',
-   /\{ id:"procedures",\s+label:"🗂 Procedures Done"\s+\}/.test(HTML));
-ok('and from the Records page',
-   HTML.slice(HTML.indexOf('const RECORDS_MENU_ITEMS'),
-              HTML.indexOf('function RecordsPicker')).indexOf('"procedures"') >= 0);
+// Procedures done, progress notes and the fee sheet are three TABS of one
+// screen. Listing them separately put two doors on the same room, which is
+// exactly what they looked like. One entry each now, named the same
+// everywhere, landing on the procedures.
+const FOLDER = HTML.slice(HTML.indexOf('const FOLDER_MENU_ITEMS'),
+                          HTML.indexOf('// Shared cache + in-flight dedup'));
+const RECORDS = HTML.slice(HTML.indexOf('const RECORDS_MENU_ITEMS'),
+                           HTML.indexOf('function RecordsPicker'));
+ok('the active patient box offers it', /id:"procedures"/.test(FOLDER), FOLDER);
+ok('and the Records page', /id:"procedures"/.test(RECORDS), RECORDS);
+ok('the folder no longer has a second door to the same screen',
+   (FOLDER.match(/id:"procedures"/g) || []).length === 1 &&
+   FOLDER.indexOf('id:"feesheet"') < 0, FOLDER);
+ok('nor does Records',
+   (RECORDS.match(/id:"procedures"/g) || []).length === 1 &&
+   RECORDS.indexOf('id:"progress"') < 0, RECORDS);
+ok('and the screen is called the same thing in all three places',
+   (HTML.match(/Procedures, Notes & Fees/g) || []).length >= 3,
+   (HTML.match(/Procedures, Notes & Fees/g) || []).length);
+ok('Patient Search points at it too, rather than relying on a default tab',
+   /page: "procedures"/.test(HTML));
 ok('it opens Treatment Progress already on the right tab',
    /else if \(id === "procedures"\) \{ setProgressInitialTab\("procedure"\); setPage\("progress"\); \}/.test(HTML));
 ok('which is the tab the procedures live on',

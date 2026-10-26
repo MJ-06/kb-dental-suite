@@ -7742,12 +7742,13 @@ function Daysheet({ globalPat, setGlobalPat, openPatientAt }) {
 const FOLDER_MENU_ITEMS = [
   { id:"careplan",         label:"🦷 Care Plan"           },
   { id:"treatmentplan",    label:"📄 Treatment Plan"      },
-  // Straight to what has already been done. It used to be Records, then
-  // Treatment Progress, then the Procedure Done tab -- three screens deep for
-  // the thing a doctor looks up most often, in front of the patient.
-  { id:"procedures",       label:"🗂 Procedures Done"     },
   { id:"records",          label:"🗃 Records"             },
-  { id:"feesheet",         label:"🧾 Procedure & Fee Sheet" },
+  // One entry, not two. Procedures done, progress notes and the fee sheet
+  // are three TABS of one screen, and listing them separately here put two
+  // doors on the same room -- which is what they looked like, because they
+  // were. The name says what is behind it so nobody has to find out by
+  // opening it; it lands on the procedures, and the other two are a tab away.
+  { id:"procedures",       label:"📋 Procedures, Notes & Fees" },
   { id:"prescription",     label:"💊 Prescription"        },
   { id:"documents",        label:"📎 Documents"           },
   { id:"feecollection",    label:"💰 Fee Collection"      },
@@ -7842,8 +7843,11 @@ function FolderPicker({ globalPat, onNavigate }) {
 // each destination (Treatment Progress, Clinical Records, Daily Register)
 // already has its own UHID search/loader built in.
 const RECORDS_MENU_ITEMS = [
-  { id:"procedures",       label:"🗂 Procedures Done"     },
-  { id:"progress",         label:"📝 Treatment Progress"  },
+  // The same one screen as the folder's, named the same way. "Treatment
+  // Progress" already opened on the Procedure Done tab -- the page defaults
+  // to it -- so nothing here was ever more than one click from the
+  // procedures. The name simply did not say so.
+  { id:"procedures",       label:"📋 Procedures, Notes & Fees" },
   { id:"clinical_records", label:"📁 Clinical Records"    },
   { id:"daily_register",   label:"📋 Daily Register"      },
 ];
@@ -8175,10 +8179,14 @@ function Dashboard({
     page: "registration",
     color: "#7C3AED"
   }, {
-    icon: "📝",
-    label: "Treatment Progress",
-    desc: "Record today\'s procedure and payment",
-    page: "progress",
+    icon: "📋",
+    // The one screen, called the one thing everywhere. It was "Treatment
+    // Progress" here, "Procedure & Fee Sheet" in the folder and "Treatment
+    // Progress" again in Records -- three names and two doors for a single
+    // page with three tabs.
+    label: "Procedures, Notes & Fees",
+    desc: "What has been done, today\'s notes, and the fee sheet",
+    page: "procedures",
     color: "#059669"
   }].map(c => /*#__PURE__*/React.createElement("button", {
     key: c.page,
