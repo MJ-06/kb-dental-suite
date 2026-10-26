@@ -316,10 +316,61 @@ function getPatientDocuments(p) {
 // and returns a shareable link. WhatsApp can't accept a file from a wa.me
 // link — only text — so sharing a PDF means sharing its Drive URL, and that
 // URL has to exist server-side before the message can be composed.
+var PATIENT_DOCS_HEADERS = ["ID", "UHID", "File Name", "Mime Type", "Category",
+                            "Drive File ID", "URL", "Uploaded At", "Doc Key"];
+
+// Where the document index keeps its dedupe key, adding the column to books
+// that predate it rather than assuming it is there.
+function patientDocsKeyCol_(sh) {
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(PATIENT_DOCS_HEADERS);
+    return PATIENT_DOCS_HEADERS.length - 1;
+  }
+  var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].map(String);
+  var at = headers.indexOf("Doc Key");
+  if (at >= 0) return at;
+  at = headers.length;
+  sh.getRange(1, at + 1).setValue("Doc Key");
+  return at;
+}
+
+// Has this exact document already been filed for this patient?
+//
+// Reprinting a prescription must not file a second copy of it. The key is a
+// fingerprint of the document's own content, so a REPRINT is recognised while
+// a prescription that has actually been changed is not -- which a flag on the
+// form could not manage, and which would not survive the form being reloaded.
+function findDocByKey_(sh, uhid, key) {
+  if (!key || sh.getLastRow() < 2) return null;
+  var keyCol = patientDocsKeyCol_(sh);
+  var data = sh.getDataRange().getValues();
+  var headers = data[0].map(String);
+  var idCol = headers.indexOf("ID"), uhidCol = headers.indexOf("UHID"),
+      nameCol = headers.indexOf("File Name");
+  var want = String(uhid).trim().toUpperCase();
+  for (var i = 1; i < data.length; i++) {
+    if (String(data[i][uhidCol] || "").trim().toUpperCase() !== want) continue;
+    if (String(data[i][keyCol] || "").trim() !== String(key).trim()) continue;
+    return { id: idCol >= 0 ? data[i][idCol] : "", fileName: nameCol >= 0 ? data[i][nameCol] : "" };
+  }
+  return null;
+}
+
 function createDocumentPDF(p) {
   var uhid = String(p.uhid || "").trim();
   if (!uhid) return { success: false, error: "UHID required" };
   if (!p.html) return { success: false, error: "No document content received" };
+
+  // Checked before anything is made, so a reprint costs neither a PDF nor a
+  // file in the patient's folder.
+  var key = String(p.dedupeKey || "").trim();
+  var docsSheet = getSheet(PATIENT_DOCS_SHEET);
+  if (key) {
+    var already = findDocByKey_(docsSheet, uhid, key);
+    if (already) {
+      return { success: true, duplicate: true, id: already.id, fileName: already.fileName };
+    }
+  }
 
   var category = p.category || "Progress Notes";
   var folder = getPatientDocsFolder_(uhid, p.patientName, category);
@@ -335,10 +386,13 @@ function createDocumentPDF(p) {
 
   // Also index it alongside uploaded documents so it shows up in the
   // patient's Documents tab instead of only existing in Drive.
-  var sh = getSheet(PATIENT_DOCS_SHEET);
-  if (sh.getLastRow() === 0) sh.appendRow(["ID", "UHID", "File Name", "Mime Type", "Category", "Drive File ID", "URL", "Uploaded At"]);
+  var sh = docsSheet;
+  var keyCol = patientDocsKeyCol_(sh);
   var id = Utilities.getUuid();
-  sh.appendRow([id, uhid, baseName + ".pdf", "application/pdf", category, file.getId(), "", new Date().toISOString()]);
+  var row = [id, uhid, baseName + ".pdf", "application/pdf", category, file.getId(), "", new Date().toISOString()];
+  while (row.length <= keyCol) row.push("");
+  row[keyCol] = key;
+  sh.appendRow(row);
 
   // Returned inline so the caller can save/attach it directly — no public link
   // is created, so patient-facing sharing is done by attaching the file itself.

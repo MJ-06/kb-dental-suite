@@ -45,8 +45,18 @@ ok('opening a patient from a list does not go via Patient Search',
    /const openPatientAt = \(patient, dest\) => \{[\s\S]*?setGlobalPat\(patient\);[\s\S]*?navigateFromSearch\(dest \|\| "clinical_records"\);/.test(HTML));
 ok('a row with no UHID is not made clickable, since there is nobody to open',
    /\(a\.uhid && openPatientAt\)/.test(HTML));
-ok('the name opens the folder',
-   /openPatientAt\(\{ uhid:a\.uhid, name:a\.patientName\|\|"", mobile:a\.mobile\|\|"" \}, "clinical_records"\)/.test(HTML));
+// The folder, not Clinical Records -- that is the forms screen, and it is
+// where the name went at first.
+ok('the name opens the patient\'s folder',
+   /openPatientAt\(\{ uhid:a\.uhid, name:a\.patientName\|\|"", mobile:a\.mobile\|\|"" \}, "folder_picker"\)/.test(HTML));
+// Just the day sheet's own name cell, not the whole screen -- Appointments
+// has its own unrelated jump to Clinical Records.
+ok('and not the forms screen',
+   HTML.slice(HTML.indexOf("// The name opens the patient's folder."),
+              HTML.indexOf('"Procedures"))')).indexOf('"clinical_records"') < 0);
+ok('the folder is the patient\'s own set of places to go',
+   /function FolderPicker\(\{ globalPat, onNavigate \}\)/.test(HTML) &&
+   /FOLDER_MENU_ITEMS\.map/.test(HTML));
 ok('and there is a second click straight to what has been done',
    /openPatientAt\(\{ uhid:a\.uhid, name:a\.patientName\|\|"", mobile:a\.mobile\|\|"" \}, "procedures"\)/.test(HTML));
 
@@ -116,11 +126,26 @@ ok('and draws no letterhead, because the pad already has one',
     keepACopy();
   }));
   eq('it asks for the document to be kept', sent.type, 'KB_SAVE_PDF');
+  ok('with a fingerprint of the document, so a reprint is recognisable',
+     !!sent.dedupeKey, JSON.stringify(sent.dedupeKey));
   eq('against the right patient', sent.uhid, 'KB0001');
   eq('with their name', sent.patientName, 'Asha Verma');
   ok('and sends the kept version, not the one meant for the pad',
      /margin:14mm/.test(sent.html), sent.html.slice(0, 100));
   ok('nothing threw', errors.length === 0, errors.join(' | '));
+
+  // The fingerprint must change when the prescription does, and not when it
+  // is merely printed again.
+  const keys = await page.evaluate(() => {
+    const a = docKey('KB1|' + buildCasePaperHTML(true));
+    const again = docKey('KB1|' + buildCasePaperHTML(true));
+    document.getElementById('notes').value = 'Review in one week';
+    const edited = docKey('KB1|' + buildCasePaperHTML(true));
+    return { a, again, edited };
+  });
+  eq('printing the same prescription twice gives the same fingerprint', keys.again, keys.a);
+  ok('changing it gives a different one', keys.edited !== keys.a,
+     JSON.stringify(keys));
 
   fs.unlinkSync(file);
   await browser.close();
