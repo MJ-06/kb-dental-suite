@@ -2465,7 +2465,7 @@ function saveToDailyRegister(p) {
 // below) — it only records which stage sequence numbers this appointment
 // PLANNED to cover and which it actually COMPLETED.
 var APPOINTMENT_HEADERS = [
-  "Date","UHID","Patient Name","Time","Type","Doctor","Chair",
+  "Date","UHID","Patient Name","Time","Type","SubType","Doctor","Chair",
   "Mobile","Notes","Status","CheckinTime","EngagedTime","CheckoutTime","CancelReason","ID","Saved At",
   "CaseId","ProcedureCode","ProcedureName","FamilyCode","PlannedStages","CompletedStages","VisitCounter"
 ];
@@ -2509,6 +2509,7 @@ function getAppointments(p) {
         id: row[col("ID")], date: rowDate, uhid: row[col("UHID")],
         patientName: row[col("Patient Name")], time: fmtTime(row[col("Time")]) || String(row[col("Time")]||""),
         type: row[col("Type")],
+        subType: col("SubType") >= 0 ? String(row[col("SubType")] || "") : "",
         doctor: row[col("Doctor")], chair: row[col("Chair")] || "",
         mobile: row[col("Mobile")], notes: row[col("Notes")], status: row[col("Status")],
         // Sheets turns an "HH:MM" write into a time-of-day cell, which reads
@@ -2561,7 +2562,9 @@ function saveAppointment(p) {
   var id = "APT-" + Date.now();
   var values = {
     "Date": p.date, "UHID": p.uhid, "Patient Name": p.patientName, "Time": p.time,
-    "Type": p.type, "Doctor": p.doctor, "Chair": p.chair || "", "Mobile": p.mobile || "",
+    // Which step of the reason, where the reason has steps. Blank for a
+    // reason that is a single visit.
+    "Type": p.type, "SubType": p.subType || "", "Doctor": p.doctor, "Chair": p.chair || "", "Mobile": p.mobile || "",
     "Notes": p.notes || "", "Status": p.status || "Scheduled",
     "CheckinTime": "", "EngagedTime": "", "CheckoutTime": "", "CancelReason": "",
     "ID": id, "Saved At": new Date().toISOString(),
@@ -2660,7 +2663,7 @@ function updateAppointment(p) {
   for (var i = 1; i < data.length; i++) {
     if (String(data[i][col("ID")]).trim() === apptId) {
       var updates = {
-        "Date": p.date, "Time": p.time, "Type": p.type, "Doctor": p.doctor,
+        "Date": p.date, "Time": p.time, "Type": p.type, "SubType": p.subType, "Doctor": p.doctor,
         "Chair": p.chair, "Notes": p.notes,
         // Only sent when actually attaching a UHID — a telephone booking made
         // before the patient existed in the system is saved with no UHID, and
@@ -3410,15 +3413,35 @@ var DEFAULT_APPT_REASONS = [
   "Restoration","Denture","Whitening","Review","Other"
 ];
 
+// A reason and the steps it breaks into.
+//
+// "RCT" is not one appointment: access opening, biomechanical preparation
+// and obturation need different time, different trays and a different chair
+// set-up, and the desk could only ever write "RCT". The steps live beside the
+// reason so booking can say which one.
+//
+// reasons stays a flat list of names, because everything that reads it only
+// wants the names; the steps come alongside rather than changing its shape.
 function getReasonsList() {
   var sh = getSheet("Appointment Reasons");
   var data = sh.getDataRange().getValues();
-  var reasons = [];
+  var reasons = [], steps = [];
   for (var i = 1; i < data.length; i++) {
-    if (data[i][0]) reasons.push(data[i][0]);
+    if (!data[i][0]) continue;
+    var name = String(data[i][0]).trim();
+    reasons.push(name);
+    steps.push({
+      name: name,
+      // Column added after the fact, so a book that has not got it reads as
+      // "this reason has no steps" rather than failing.
+      steps: String(data[i][1] === undefined || data[i][1] === null ? "" : data[i][1]).trim()
+    });
   }
-  if (reasons.length === 0) reasons = DEFAULT_APPT_REASONS.slice();
-  return { success: true, reasons: reasons };
+  if (reasons.length === 0) {
+    reasons = DEFAULT_APPT_REASONS.slice();
+    steps = reasons.map(function (r) { return { name: r, steps: "" }; });
+  }
+  return { success: true, reasons: reasons, reasonSteps: steps };
 }
 
 function saveReasonsList(p) {
@@ -3426,8 +3449,17 @@ function saveReasonsList(p) {
   if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Appointment Reasons");
   sh.clearContents();
-  sh.appendRow(["Reason", "Updated At"]);
-  arr.forEach(function(r) { sh.appendRow([r, new Date().toISOString()]); });
+  sh.appendRow(["Reason", "Steps", "Updated At"]);
+  var now = new Date().toISOString();
+  arr.forEach(function (r) {
+    // Either shape is accepted: a plain name, as this list has always been
+    // saved, or a name with its steps.
+    if (r && typeof r === "object") {
+      sh.appendRow([String(r.name || "").trim(), String(r.steps || "").trim(), now]);
+    } else {
+      sh.appendRow([String(r).trim(), "", now]);
+    }
+  });
   return { success: true };
 }
 

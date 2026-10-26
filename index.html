@@ -6120,6 +6120,23 @@ const DOCTOR_COL = ["#0078B4", "#7C3AED", "#059669", "#D97706", "#DB2777"];
 const WEEK_DAY_LBL = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
 
 const CANCEL_REASONS = ["Cancelled by Patient","Cancelled by Doctor","Cancelled by Clinic","No Show"];
+// The steps a reason breaks into, from Master -> Clinic -> Appointment
+// Reasons. "RCT" is not one appointment: access opening, biomechanical
+// preparation and obturation need different time, a different tray and a
+// different chair set-up, and the desk could only ever write "RCT".
+//
+// A reason with no steps is a single visit and nothing extra is asked.
+function stepsForReason(reasonSteps, reason) {
+  const hit = (reasonSteps || []).find(x => String(x && x.name || "").trim() === String(reason || "").trim());
+  if (!hit) return [];
+  return String(hit.steps || "").split(",").map(s => s.trim()).filter(Boolean);
+}
+// What the day sheet and the popup show: the reason, and the step when there
+// is one.
+function reasonWithStep(type, subType) {
+  const a = String(type || "").trim(), b = String(subType || "").trim();
+  return b ? (a ? a + " \u00b7 " + b : b) : (a || "\u2014");
+}
 // Which action button to show for the current status, and what the next status becomes
 const APPT_NEXT_ACTION = { Scheduled:{ label:"Check In", next:"Checked In" }, "Checked In":{ label:"Engage", next:"In Chair" }, "In Chair":{ label:"Check Out", next:"Completed" } };
 // And the way back. Check In is one click and the patient may simply not
@@ -6309,6 +6326,8 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
   const [fDate, setFDate] = useState(selDate);
   const [fTime, setFTime] = useState(() => slotForNow(TIME_SLOTS, selDate));
   const [fReason, setFReason] = useState("");
+  const [fSubReason, setFSubReason] = useState("");
+  const [reasonSteps, setReasonSteps] = useState([]);
   const [fDoctor, setFDoctor] = useState(doctors[0] || "");
   const [fChair, setFChair] = useState("");
   const [fNotes, setFNotes] = useState("");
@@ -6354,7 +6373,10 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
   }, [fReason]);
 
   useEffect(() => {
-    api("getReasonsList").then(res => { if (res.success && res.reasons?.length) { setReasons(res.reasons); setFReason(prev => prev || res.reasons[0]); } });
+    api("getReasonsList").then(res => {
+      if (res.success && res.reasons?.length) { setReasons(res.reasons); setFReason(prev => prev || res.reasons[0]); }
+      if (res.success && res.reasonSteps) setReasonSteps(res.reasonSteps);
+    });
     api("getChairsList").then(res => { if (res.success && res.chairs?.length) { setChairs(res.chairs); setFChair(prev => res.chairs.includes(prev) ? prev : res.chairs[0]); } });
     api("getProcedureLibrary").then(res => { if (res.success && res.library) setProcedureLibrary(res.library); });
     loadTodaySidebar();
@@ -6497,7 +6519,7 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
 
   const resetForm = () => {
     setPatientMode("established"); setFUhid(""); setFFirstName(""); setFLastName(""); setFName("");
-    setFMobile(""); setFEmail(""); setFAge(""); setFGender(""); setFReason(reasons[0]||"");
+    setFMobile(""); setFEmail(""); setFAge(""); setFGender(""); setFReason(reasons[0]||""); setFSubReason("");
     setFDate(selDate);
     setFTime(slotForNow(TIME_SLOTS, selDate));
     setFNotes(""); setFErrors({}); setPatQuery(""); setPatResults([]); setEditingId(null);
@@ -6527,6 +6549,7 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
     setFMobile(a.mobile||""); setFDate(a.date||selDate);
     setFTime(a.time || slotForNow(TIME_SLOTS, a.date||selDate));
     setFReason(a.type||reasons[0]||"");
+    setFSubReason(a.subType||"");
     setFDoctor(a.doctor||doctors[0]||""); setFChair(a.chair||chairs[0]); setFNotes(a.notes||"");
     setFErrors({});
     // Editing a case-linked appointment keeps it linked — fetch the case's
@@ -6610,7 +6633,7 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
 
     const payload = {
       date: fDate, uhid: fUhid, patientName: finalName,
-      time: fTime, type: fReason, doctor: fDoctor, chair: fChair,
+      time: fTime, type: fReason, subType: fSubReason, doctor: fDoctor, chair: fChair,
       mobile: fMobile, notes: fNotes, status: "Scheduled",
       ...caseFields
     };
@@ -6796,6 +6819,8 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
             ),
             React.createElement("div", { style:{ fontSize:12.5, color:"#444444" } },
               "Status: ", React.createElement("span", { style:{ fontWeight:700, color:STATUS_COL[a.status]||"#888" } }, a.status||"Scheduled")),
+            React.createElement("div", { style:{ fontSize:12.5, color:"#444444", marginTop:4 } },
+              "For: ", React.createElement("span", { style:{ fontWeight:700 } }, reasonWithStep(a.type, a.subType))),
             a.checkinTime && React.createElement("div", { style:{ fontSize:12, color:"#444444", marginTop:4 } }, "Checked in: "+hhmm(a.checkinTime)),
             a.engagedTime && React.createElement("div", { style:{ fontSize:12, color:"#444444" } }, "Engaged: "+a.engagedTime),
             a.checkoutTime && React.createElement("div", { style:{ fontSize:12, color:"#444444" } }, "Checked out: "+a.checkoutTime),
@@ -7214,11 +7239,26 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
               React.createElement("button", { onClick:()=>setNewReasonMode(false), style:{ padding:"0 10px", border:`1px solid ${BORDER}`, borderRadius:6, background:"#fff", cursor:"pointer" } }, "✕")
             )
           : React.createElement("div", { style:{ display:"flex", gap:6 } },
-              React.createElement("select", { style:{...inp, flex:1}, value:fReason, onChange:e=>setFReason(e.target.value) },
+              React.createElement("select", { style:{...inp, flex:1}, value:fReason,
+                // Changing the reason drops a step belonging to the old one,
+                // so an RCT obturation cannot be left attached to a cleaning.
+                onChange:e=>{ setFReason(e.target.value); setFSubReason(""); } },
                 reasons.map(r => React.createElement("option", { key:r, value:r }, r))),
               React.createElement("button", { onClick:()=>setNewReasonMode(true),
                 style:{ width:36, border:`1px solid ${T}`, borderRadius:6, background:"#fff", color:T, cursor:"pointer", fontWeight:700, fontSize:16 } }, "+")
             )
+      ),
+
+      // Which step of it. Only asked where the reason actually has steps --
+      // a cleaning is a cleaning.
+      stepsForReason(reasonSteps, fReason).length > 0 && React.createElement("div", { style:{ marginBottom:14 } },
+        React.createElement(Lbl, { c:"Step" }),
+        React.createElement("select", { style:inp, value:fSubReason, onChange:e=>setFSubReason(e.target.value) },
+          React.createElement("option", { value:"" }, "\u2014 which step \u2014"),
+          stepsForReason(reasonSteps, fReason).map(st =>
+            React.createElement("option", { key:st, value:st }, st))),
+        React.createElement("div", { style:{ fontSize:12.5, color:"#444444", marginTop:4 } },
+          "So the chair and tray can be set up before the patient arrives.")
       ),
 
       // Multi-visit treatment tracking — one dropdown, optional, blank by
@@ -7329,6 +7369,8 @@ function QuickApptModal({ show, defaultDate, onClose, onSaved }) {
   const [fTime, setFTime] = React.useState(() => slotForNow(TIME_SLOTS, defaultDate));
   const [reasons, setReasons] = React.useState(APPT_TYPES);
   const [fReason, setFReason] = React.useState(APPT_TYPES[0]||"");
+  const [fSubReason, setFSubReason] = React.useState("");
+  const [reasonSteps, setReasonSteps] = React.useState([]);
   const doctors = useDoctors();
   const [fDoctor, setFDoctor] = React.useState(doctors[0]||"");
   const [chairs, setChairs] = React.useState([]);
@@ -7348,6 +7390,7 @@ function QuickApptModal({ show, defaultDate, onClose, onSaved }) {
   const resetForm = () => {
     setPatientMode("established"); setFUhid(""); setFFirstName(""); setFLastName(""); setFName("");
     setFMobile(""); setFEmail(""); setFAge(""); setFGender(""); setFReason(reasons[0]||"");
+    setFSubReason("");
     setFDate(defaultDate); setFTime(slotForNow(TIME_SLOTS, defaultDate));
     setFDoctor(doctors[0]||""); setFChair(chairs[0]||"");
     setFNotes(""); setFErrors({}); setPatQuery(""); setPatResults([]);
@@ -7356,7 +7399,10 @@ function QuickApptModal({ show, defaultDate, onClose, onSaved }) {
   React.useEffect(() => {
     if (!show) return;
     resetForm();
-    api("getReasonsList").then(res => { if (res.success && res.reasons?.length) { setReasons(res.reasons); setFReason(res.reasons[0]); } });
+    api("getReasonsList").then(res => {
+      if (res.success && res.reasons?.length) { setReasons(res.reasons); setFReason(res.reasons[0]); }
+      if (res.success && res.reasonSteps) setReasonSteps(res.reasonSteps);
+    });
     api("getChairsList").then(res => { if (res.success && res.chairs?.length) { setChairs(res.chairs); setFChair(res.chairs[0]); } });
   }, [show]);
 
@@ -7405,7 +7451,7 @@ function QuickApptModal({ show, defaultDate, onClose, onSaved }) {
     setSaving(true);
     const apptPayload = {
       date: fDate, uhid: fUhid, patientName: finalName,
-      time: fTime, type: fReason, doctor: fDoctor, chair: fChair,
+      time: fTime, type: fReason, subType: fSubReason, doctor: fDoctor, chair: fChair,
       mobile: fMobile, notes: fNotes, status: "Scheduled",
       // Same as the Daily Register: the patient is at the desk, so this is a
       // record of a visit rather than a booking, and a closed day does not
@@ -7507,11 +7553,20 @@ function QuickApptModal({ show, defaultDate, onClose, onSaved }) {
             React.createElement("button", { onClick:()=>setNewReasonMode(false), style:{ padding:"0 10px", border:`1px solid ${BORDER}`, borderRadius:6, background:"#fff", cursor:"pointer" } }, "✕")
           )
         : React.createElement("div", { style:{ display:"flex", gap:6 } },
-            React.createElement("select", { style:{...inp, flex:1}, value:fReason, onChange:e=>setFReason(e.target.value) },
+            React.createElement("select", { style:{...inp, flex:1}, value:fReason,
+              onChange:e=>{ setFReason(e.target.value); setFSubReason(""); } },
               reasons.map(r => React.createElement("option", { key:r, value:r }, r))),
             React.createElement("button", { onClick:()=>setNewReasonMode(true),
               style:{ width:36, border:`1px solid ${T}`, borderRadius:6, background:"#fff", color:T, cursor:"pointer", fontWeight:700, fontSize:16 } }, "+")
           )
+    ),
+
+    stepsForReason(reasonSteps, fReason).length > 0 && React.createElement("div", { style:{ marginBottom:14, maxWidth:400 } },
+      React.createElement(Lbl, { c:"Step" }),
+      React.createElement("select", { style:inp, value:fSubReason, onChange:e=>setFSubReason(e.target.value) },
+        React.createElement("option", { value:"" }, "\u2014 which step \u2014"),
+        stepsForReason(reasonSteps, fReason).map(st =>
+          React.createElement("option", { key:st, value:st }, st)))
     ),
 
     React.createElement("div", { style:{ marginBottom:14, maxWidth:400 } },
@@ -7691,7 +7746,9 @@ function Daysheet({ globalPat, setGlobalPat, openPatientAt }) {
                     : (a.patientName||"—")),
                 React.createElement("td", { style:{ padding:"7px 10px" } }, a.uhid||"—"),
                 React.createElement("td", { style:{ padding:"7px 10px" } }, "F/Up"),
-                React.createElement("td", { style:{ padding:"7px 10px" } }, a.type||"—"),
+                // The step beside the reason: "RCT · Obturation" tells the
+                // nurse what to set up, where "RCT" alone does not.
+                React.createElement("td", { style:{ padding:"7px 10px" } }, reasonWithStep(a.type, a.subType)),
                 React.createElement("td", { style:{ padding:"7px 10px" } }, a.doctor||"—"),
                 React.createElement("td", { style:{ padding:"7px 10px" } }, a.chair||"—"),
                 React.createElement("td", { style:{ padding:"7px 10px", fontWeight:700, color:T } }, a.time||"—"),
@@ -11135,6 +11192,11 @@ function TreatmentProgress({ globalPat, setGlobalPat, initialTab }) {
       };
       setPat(p); setGlobalPat(p); setNotFound(false);
       loadEntries(p);
+      // The receipts too. Looking a patient up by UHID on this screen loaded
+      // their procedures and nothing else, so the Procedure & Fee Sheet had
+      // no payments to show and said there were none in Finance -- which
+      // reads as "this patient has paid nothing", not "nobody asked".
+      loadFeeEntries(p);
     } else {
       setNotFound(true); setPat(null);
     }
@@ -25464,7 +25526,15 @@ function MedicineListEditor({ items, onAdd, onRemove }) {
 // form reads this to fill its brand dropdown and, once a brand is chosen, to
 // offer that brand's sizes — so the catalogue is maintained here by the
 // clinic rather than being fixed in the app.
-function ImplantBrandListEditor({ items, onAdd, onRemove, onEdit }) {
+function ImplantBrandListEditor({ items, onAdd, onRemove, onEdit,
+                                 nameLabel, sizesLabel, namePlaceholder, sizesPlaceholder,
+                                 blurb, emptyNote }) {
+  const L = {
+    name: nameLabel || "Brand",
+    sizes: sizesLabel || "Sizes",
+    namePh: namePlaceholder || "Brand (e.g. Straumann)",
+    sizesPh: sizesPlaceholder || "Sizes, comma separated"
+  };
   const [name, setName] = React.useState("");
   const [sizes, setSizes] = React.useState("");
   // Editing used to happen on blur, with no button and no brand-name field:
@@ -25494,21 +25564,22 @@ function ImplantBrandListEditor({ items, onAdd, onRemove, onEdit }) {
 
   return React.createElement("div", null,
     React.createElement("div", { style:{ fontSize:13, color:"#383838", marginBottom:10, lineHeight:1.5 } },
-      "Sizes are separated by commas — e.g. ",
-      React.createElement("code", { style:{ background:BGS, padding:"1px 5px", borderRadius:4 } }, "3.5 × 10 mm, 4.3 × 11.5 mm"),
-      ". A size that is not listed can still be typed straight into the form, so this list never blocks a case."),
+      blurb || React.createElement(React.Fragment, null,
+        "Sizes are separated by commas — e.g. ",
+        React.createElement("code", { style:{ background:BGS, padding:"1px 5px", borderRadius:4 } }, "3.5 × 10 mm, 4.3 × 11.5 mm"),
+        ". A size that is not listed can still be typed straight into the form, so this list never blocks a case.")),
     React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 2fr auto", gap:8, marginBottom:14 } },
-      React.createElement("input", { style:inp, value:name, placeholder:"Brand (e.g. Straumann)", onChange:e=>setName(e.target.value), onKeyDown:e=>e.key==="Enter"&&add() }),
-      React.createElement("input", { style:inp, value:sizes, placeholder:"Sizes, comma separated", onChange:e=>setSizes(e.target.value), onKeyDown:e=>e.key==="Enter"&&add() }),
+      React.createElement("input", { style:inp, value:name, placeholder:L.namePh, onChange:e=>setName(e.target.value), onKeyDown:e=>e.key==="Enter"&&add() }),
+      React.createElement("input", { style:inp, value:sizes, placeholder:L.sizesPh, onChange:e=>setSizes(e.target.value), onKeyDown:e=>e.key==="Enter"&&add() }),
       React.createElement("button", { onClick:add, style:{ padding:"0 18px", fontSize:13, border:"none", borderRadius:7, cursor:"pointer", background:T, color:"#fff", fontWeight:700 } }, "+ Add")
     ),
     items.length===0
       ? React.createElement("div", { style:{ background:BGS, borderRadius:8, padding:24, textAlign:"center", color:"#5a5a5a", fontSize:14, border:`1px dashed ${BORDER}` } },
-          "No implant brands yet — the form falls back to its built-in list until one is added.")
+          emptyNote || "No implant brands yet — the form falls back to its built-in list until one is added.")
       : React.createElement("div", { style:{ background:"#fff", border:`1px solid ${BORDER}`, borderRadius:8, overflow:"hidden" } },
           React.createElement("table", { style:{ width:"100%", borderCollapse:"collapse", fontSize:13.5 } },
             React.createElement("thead", null, React.createElement("tr", { style:{ background:BGS } },
-              ["Brand","Sizes",""].map(x=>React.createElement("th", { key:x, style:{ textAlign:"left", padding:"8px 12px" } }, x))
+              [L.name, L.sizes, ""].map(x=>React.createElement("th", { key:x||"act", style:{ textAlign:"left", padding:"8px 12px" } }, x))
             )),
             React.createElement("tbody", null, items.map((it,i)=> editAt===i
               ? React.createElement("tr", { key:i, style:{ borderTop:`1px solid ${BORDER}`, background:"#f5f9ff" } },
@@ -26621,7 +26692,10 @@ function Master() {
       if (dur.success) setMedDurations(dur.durations || []);
       if (instr.success) setMedInstructions(instr.instructions || []);
       if (mn.success) setMedNotes(mn.medNotes || []);
-      if (ar.success) setApptReasons(ar.reasons || []);
+      // The reasons WITH their steps, so the editor has both to show. An
+      // older book that has only names still loads: reasonSteps is built from
+      // them with no steps.
+      if (ar.success) setApptReasons(ar.reasonSteps || (ar.reasons || []).map(r => ({ name: r, steps: "" })));
       if (cp.success && cp.profile) setClinicProfile(cp.profile);
       if (dc.success) setDocCategories(dc.categories || []);
       if (pl.success) { setProcedureLibrary(pl.library || []); setProcedureFamilies(pl.families || []); }
@@ -26673,6 +26747,8 @@ function Master() {
   const saveMedDurations = (arr) => persist("saveMedicineDurationsList", { durations: JSON.stringify(arr) }, arr, setMedDurations, medDurations);
   const saveMedInstructions = (arr) => persist("saveMedicineInstructionsList", { instructions: JSON.stringify(arr) }, arr, setMedInstructions, medInstructions);
   const saveMedNotes = (arr) => persist("saveMedicineNotesList", { medNotes: JSON.stringify(arr) }, arr, setMedNotes, medNotes);
+  // Saved as {name, steps} now. The backend still accepts a plain list, so a
+  // book written by an older copy of the app goes on loading.
   const saveApptReasons = (arr) => persist("saveReasonsList", { reasons: JSON.stringify(arr) }, arr, setApptReasons, apptReasons);
   const saveDocCategories = (arr) => persist("saveDocumentCategoriesList", { categories: JSON.stringify(arr) }, arr, setDocCategories, docCategories);
   const saveProcedureLibrary = (arr) => persist("saveProcedureLibrary", { library: JSON.stringify(arr) }, arr, setProcedureLibrary, procedureLibrary);
@@ -26811,8 +26887,15 @@ function Master() {
       onRemove:(i)=>saveMedNotes(medNotes.filter((_,idx)=>idx!==i)),
       onEdit:(i,v)=>saveMedNotes(medNotes.map((x,idx)=>idx===i?v:x))
     }),
-    apptReasons: () => React.createElement(SimpleListEditor, {
-      items:apptReasons, placeholder:"New appointment reason...",
+    // A reason and the steps it breaks into -- the same shape as implant
+    // brands and their sizes, and the same editor.
+    apptReasons: () => React.createElement(ImplantBrandListEditor, {
+      items:apptReasons,
+      nameLabel:"Reason", sizesLabel:"Steps",
+      namePlaceholder:"Reason (e.g. RCT)",
+      sizesPlaceholder:"Steps, comma separated",
+      blurb:"A reason that takes more than one visit can list its steps, separated by commas \u2014 Access opening, BMP, Obturation. Booking then asks which step, so the chair and tray can be set up before the patient arrives. Leave the steps empty for a reason that is one visit.",
+      emptyNote:"No appointment reasons yet \u2014 booking falls back to its built-in list until one is added.",
       onAdd:(v)=>saveApptReasons([...apptReasons, v]),
       onRemove:(i)=>saveApptReasons(apptReasons.filter((_,idx)=>idx!==i)),
       onEdit:(i,v)=>saveApptReasons(apptReasons.map((x,idx)=>idx===i?v:x))

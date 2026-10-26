@@ -35,9 +35,14 @@ ok("a list given no onEdit still shows Remove and simply has no Edit",
 // ── every list that should have it, does ──────────────────────────────────
 const sites = [...HTML.matchAll(/    (\w+): \(\) => React\.createElement\(SimpleListEditor, \{([\s\S]*?)\n    \}\),/g)]
   .map(m => ({ tab: m[1], hasEdit: /onEdit:/.test(m[2]) }));
-eq("all ten plain lists are accounted for", sites.length, 10);
-ok("Appointment Reasons can be edited — the one that was asked for",
-   sites.find(s => s.tab === "apptReasons").hasEdit);
+eq("all nine plain lists are accounted for", sites.length, 9);
+// Appointment Reasons left this editor: a reason now carries the steps it
+// breaks into, so it is edited as a name plus a comma-separated list — the
+// same shape, and the same editor, as implant brands and their sizes.
+ok("Appointment Reasons is no longer a plain list",
+   !sites.find(s => s.tab === "apptReasons"), JSON.stringify(sites.map(s => s.tab)));
+ok("and is edited with its steps instead, still with an Edit",
+   /apptReasons: \(\) => React\.createElement\(ImplantBrandListEditor[\s\S]{0,1400}onEdit:/.test(HTML));
 
 const without = sites.filter(s => !s.hasEdit).map(s => s.tab);
 // Panels is deliberately left alone. A panel's NAME is the key: registrations
