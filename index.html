@@ -10909,6 +10909,42 @@ function buildProcedureFeeSheetHTML(pat, procedures, receipts) {
   </body></html>`;
 }
 
+// The Payment and Amount columns of the progress notes, filled from Finance.
+//
+// They were always empty, and could not be anything else: getTreatmentProgress
+// reads the Daily Register, which records the MODE of payment but has no
+// amount column at all, and hands back amountReceived as "" every time. The
+// money is in the receipts -- which is why the Procedure & Fee Sheet, which
+// reads those, showed it while this tab did not.
+//
+// A day's receipts are attached to the FIRST entry of that day, not to each
+// of them: two procedures in one visit are one payment, and putting it on
+// both would make the column add up to twice what the patient paid.
+function entriesWithPayments(entries, receipts) {
+  const byDate = {};
+  (receipts || []).forEach(r => {
+    const d = String(r && r.date || "").slice(0, 10);
+    if (!d) return;
+    if (!byDate[d]) byDate[d] = { amount: 0, modes: [] };
+    byDate[d].amount += Number(r.fee) || 0;
+    const m = String(r.mode || "").trim();
+    if (m && byDate[d].modes.indexOf(m) < 0) byDate[d].modes.push(m);
+  });
+  const taken = {};
+  return (entries || []).map(e => {
+    const d = String(e && e.date || "").slice(0, 10);
+    const pay = (d && !taken[d]) ? byDate[d] : null;
+    if (!pay) return e;
+    taken[d] = true;
+    return Object.assign({}, e, {
+      amountReceived: pay.amount,
+      // What the register says, where it says anything -- it is the entry's
+      // own record. The receipt's mode only fills a blank.
+      paymentMode: String(e.paymentMode || "").trim() || pay.modes.join(", ")
+    });
+  });
+}
+
 function buildProgressNotesHTML(pat, entries) {
   const logo = window.LOGO_B64;
   const dateStr = fmtDMY(new Date());
@@ -11203,13 +11239,13 @@ function TreatmentProgress({ globalPat, setGlobalPat, initialTab }) {
   };
 
   const doPrint = (which) => {
-    const h = which === "progress" ? buildProgressNotesHTML(pat, entries) : buildProcedureDoneHTML(pat, entries);
+    const h = which === "progress" ? buildProgressNotesHTML(pat, progressRows) : buildProcedureDoneHTML(pat, entries);
     const w = window.open("", "_blank");
     w.document.write(h); w.document.close();
     setTimeout(() => w.print(), 600);
   };
   const doPreview = (which) => {
-    setPreviewHTML(which === "progress" ? buildProgressNotesHTML(pat, entries) : buildProcedureDoneHTML(pat, entries));
+    setPreviewHTML(which === "progress" ? buildProgressNotesHTML(pat, progressRows) : buildProcedureDoneHTML(pat, entries));
     setPreview(true);
   };
 
@@ -11223,7 +11259,7 @@ function TreatmentProgress({ globalPat, setGlobalPat, initialTab }) {
     const mobile = String(pat.mobile || pat.whatsapp || "").replace(/\D/g, "").slice(-10);
     if (!mobile) { alert("This patient has no mobile number saved, so the PDF can't be sent on WhatsApp. You can still use Print."); return; }
     setPdfBusy(true);
-    const html = which === "progress" ? buildProgressNotesHTML(pat, entries) : buildProcedureDoneHTML(pat, entries);
+    const html = which === "progress" ? buildProgressNotesHTML(pat, progressRows) : buildProcedureDoneHTML(pat, entries);
     const docName = which === "progress" ? "Treatment Progress Notes" : "Procedure Done";
     const res = await apiPost("createDocumentPDF", {
       uhid: pat.uhid, patientName: pat.name || "", html, docName, category: "Progress Notes"
@@ -11244,7 +11280,10 @@ function TreatmentProgress({ globalPat, setGlobalPat, initialTab }) {
     alert("The PDF has been downloaded to this computer.\n\nWhatsApp will open with a message ready — attach the downloaded PDF before sending.");
   };
 
-  const totalAmt = entries.reduce((s, e) => s + (e.amountReceived ? Number(e.amountReceived) : 0), 0);
+  // The rows the progress notes show: the register's entries with the money
+  // from Finance put against them.
+  const progressRows = React.useMemo(() => entriesWithPayments(entries, receipts), [entries, receipts]);
+  const totalAmt = progressRows.reduce((s, e) => s + (e.amountReceived ? Number(e.amountReceived) : 0), 0);
 
   // ── Procedure Done View ───────────────────────────────
   const ProcedureView = () => React.createElement("div", null,
@@ -11312,7 +11351,7 @@ function TreatmentProgress({ globalPat, setGlobalPat, initialTab }) {
         }, pdfBusy ? "⏳ Creating PDF..." : "📤 WhatsApp PDF")
       )
     ),
-    entries.length === 0
+    progressRows.length === 0
       ? React.createElement("div", { style:{ background:BGS, borderRadius:8, padding:"28px", textAlign:"center", color:"#5a5a5a", fontSize:14, border:`1px dashed ${BORDER}` } },
           "No entries yet."
         )
@@ -11321,7 +11360,7 @@ function TreatmentProgress({ globalPat, setGlobalPat, initialTab }) {
             React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"36px 90px 60px 130px 1fr 80px 80px", background:T, color:"#fff", padding:"7px 10px", fontSize:10, fontWeight:700, gap:6 } },
               ["S.No.", "Date", "Tooth", "Treatment", "Clinical Notes", "Payment", "Amount"].map((h,i) => React.createElement("div", { key:i, style:{ textAlign:i>=5?"right":"left" } }, h))
             ),
-            entries.map((e, i) => {
+            progressRows.map((e, i) => {
               const d = e.date ? fmtDMY(e.date) : "—";
               const amt = e.amountReceived ? Number(e.amountReceived) : 0;
               return React.createElement("div", {
