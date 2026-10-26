@@ -1,9 +1,14 @@
-// "RCT" is not one appointment. Access opening, biomechanical preparation and
-// obturation need different time, a different tray and a different chair
-// set-up, and the desk could only ever write "RCT" — so nothing could be
-// prepared before the patient arrived.
+// An appointment should say which step of the treatment it is — "RCT ·
+// Access opening", not just "RCT" — so the chair and tray can be set up
+// before the patient arrives.
 //
-// A reason now carries the steps it breaks into, and booking asks which one.
+// The form already knows. Picking the Procedure attaches the patient's
+// treatment case and the panel beside it reads "CURRENT: <stage>". Asking a
+// second time, with a dropdown of steps kept in Master, was asking staff to
+// repeat what the screen had already worked out, and gave two places to edit
+// the same list of stages and two to disagree.
+//
+// So the stage is taken from the case, and nothing extra is asked.
 const fs = require("fs");
 const path = require("path");
 const REPO = path.resolve(__dirname, "..");
@@ -18,54 +23,43 @@ const eq = (name, got, want) =>
   ok(name, JSON.stringify(got) === JSON.stringify(want),
      "got " + JSON.stringify(got) + ", want " + JSON.stringify(want));
 
-// ── the two rules, run ───────────────────────────────────────────────────
-function fn(marker) {
-  const i = HTML.indexOf(marker);
-  return new Function(HTML.slice(i, HTML.indexOf("\n}", i) + 2) +
-    "\nreturn " + marker.replace("function ", "").replace(/\(.*/, "") + ";")();
-}
-const stepsForReason = fn("function stepsForReason(");
-const reasonWithStep = fn("function reasonWithStep(");
+// ── nothing extra is asked ───────────────────────────────────────────────
+ok("there is no second dropdown of steps to fill in",
+   HTML.indexOf('c:"Step"') < 0 && HTML.indexOf('c: "Step"') < 0);
+ok("nor a list of them kept beside the reasons",
+   HTML.indexOf("stepsForReason") < 0 && HTML.indexOf("reasonSteps") < 0);
+ok("and appointment reasons are a plain list again",
+   /apptReasons: \(\) => React\.createElement\(SimpleListEditor/.test(HTML));
+ok("so the stages live in one place only — the procedure library",
+   /procedureLibrary: \(\) => React\.createElement\(ProcedureLibraryEditor/.test(HTML));
 
-const MASTER = [
-  { name: "RCT", steps: "Access opening, BMP, Obturation" },
-  { name: "Cleaning", steps: "" },
-  { name: "Crown", steps: "Preparation , Trial,Cementation " }
-];
-eq("a reason that takes several visits lists them",
-   stepsForReason(MASTER, "RCT"), ["Access opening", "BMP", "Obturation"]);
-eq("spacing in the master list does not matter",
-   stepsForReason(MASTER, "Crown"), ["Preparation", "Trial", "Cementation"]);
-eq("a one-visit reason has none", stepsForReason(MASTER, "Cleaning"), []);
-eq("a reason nobody has set up has none", stepsForReason(MASTER, "Whitening"), []);
-eq("and no master at all does not throw", stepsForReason(null, "RCT"), []);
-eq("an empty step is not a step", stepsForReason([{ name: "X", steps: "A,,B," }], "X"), ["A", "B"]);
+// ── the stage comes from the case the form already picked ────────────────
+const save = HTML.slice(HTML.indexOf("    let stageName = \"\";"),
+                        HTML.indexOf("const res = editingId"));
+ok("the booking takes the stage from the case", /stageName = String\(cs\.currentStageName \|\| ""\)\.trim\(\);/.test(save), save.slice(0, 400));
+ok("and sends it as the appointment's sub-type",
+   /type: fReason, subType: stageName,/.test(save), save.slice(-400));
+ok("a booking with no procedure attached sends no stage, rather than a guess",
+   /let stageName = "";/.test(save) && save.indexOf('stageName = String') > save.indexOf('let stageName = ""'));
+// The case is started first where it is new, so the stage read is the real
+// one rather than the blank of a case that does not exist yet.
+ok("the case is started before its stage is read",
+   save.indexOf("startTreatmentCase") < save.indexOf("stageName = String(cs.currentStageName"));
+ok("the walk-in form sends none, because it tracks no case",
+   !/subType/.test(HTML.slice(HTML.indexOf("function QuickApptModal"), HTML.indexOf("function Daysheet"))));
 
+// ── it is shown where staff read it ──────────────────────────────────────
+const i = HTML.indexOf("function reasonWithStep(");
+const reasonWithStep = new Function(HTML.slice(i, HTML.indexOf("\n}", i) + 2) + "\nreturn reasonWithStep;")();
 eq("the day sheet shows the reason and the step",
-   reasonWithStep("RCT", "Obturation"), "RCT · Obturation");
-eq("just the reason where there is no step", reasonWithStep("Cleaning", ""), "Cleaning");
+   reasonWithStep("RCT", "Access opening"), "RCT · Access opening");
+eq("just the reason where the visit is not part of a case",
+   reasonWithStep("Cleaning", ""), "Cleaning");
 eq("and a dash where there is neither", reasonWithStep("", ""), "—");
 eq("a step with no reason still reads", reasonWithStep("", "BMP"), "BMP");
+eq("whitespace is not mistaken for a step", reasonWithStep("RCT", "   "), "RCT");
 
-// ── booking asks for it ──────────────────────────────────────────────────
-ok("both booking forms ask which step",
-   (HTML.match(/stepsForReason\(reasonSteps, fReason\)\.length > 0/g) || []).length === 2);
-ok("only where the reason has steps, so a cleaning is not interrogated",
-   /stepsForReason\(reasonSteps, fReason\)\.length > 0 &&/.test(HTML));
-ok("nothing is preselected, so an unanswered step stays unanswered",
-   /which step/.test(HTML));
-ok("changing the reason drops a step belonging to the old one",
-   (HTML.match(/setFReason\(e\.target\.value\); setFSubReason\(""\);/g) || []).length === 2);
-ok("both forms send it", (HTML.match(/type: fReason, subType: fSubReason/g) || []).length === 2);
-ok("editing a booking shows the step it already has",
-   /setFSubReason\(a\.subType\|\|""\);/.test(HTML));
-ok("and both forms clear it when reset",
-   (HTML.match(/setFSubReason\(""\)/g) || []).length >= 4);
-ok("the desk is told why it is being asked",
-   /So the chair and tray can be set up before the patient arrives\./.test(HTML));
-
-// ── it is shown where staff read it ─────────────────────────────────────
-ok("the day sheet shows it", /reasonWithStep\(a\.type, a\.subType\)\)/.test(HTML));
+ok("the day sheet uses it", /reasonWithStep\(a\.type, a\.subType\)\)/.test(HTML));
 ok("and the appointment itself", /"For: ", React\.createElement/.test(HTML));
 
 // ── the clinic book keeps it ─────────────────────────────────────────────
@@ -78,37 +72,10 @@ ok("an edited booking updates it", /"Type": p\.type, "SubType": p\.subType,/.tes
 ok("and reading a day gives it back",
    /subType: col\("SubType"\) >= 0 \? String\(row\[col\("SubType"\)\] \|\| ""\) : ""/.test(GS));
 
-// ── the master keeps reason and steps together ───────────────────────────
-const getR = GS.slice(GS.indexOf("function getReasonsList()"),
-                      GS.indexOf("\n}", GS.indexOf("function getReasonsList()")));
-ok("the reasons come back as names, as everything reading them expects",
-   /reasons: reasons/.test(getR));
-ok("with the steps alongside rather than instead",
-   /reasonSteps: steps/.test(getR));
-ok("a book with no steps column reads as no steps, not as a failure",
-   /data\[i\]\[1\] === undefined \|\| data\[i\]\[1\] === null \? "" : data\[i\]\[1\]/.test(getR));
-const saveR = GS.slice(GS.indexOf("function saveReasonsList(p)"),
-                       GS.indexOf("\n}", GS.indexOf("function saveReasonsList(p)")));
-ok("saving accepts a reason with its steps",
-   /if \(r && typeof r === "object"\)/.test(saveR));
-ok("and a plain name, as this list has always been saved",
-   /sh\.appendRow\(\[String\(r\)\.trim\(\), "", now\]\)/.test(saveR));
-ok("the list is parsed before the tab is cleared, so a bad payload empties nothing",
-   saveR.indexOf("parseList_") < saveR.indexOf("clearContents"));
-
-// ── Master edits them ────────────────────────────────────────────────────
-ok("Master edits a reason and its steps together",
-   /apptReasons: \(\) => React\.createElement\(ImplantBrandListEditor/.test(HTML));
-ok("reusing the one editor rather than a second copy of it",
-   (HTML.match(/function ImplantBrandListEditor/g) || []).length === 1);
-ok("with its own wording, not an implant's",
-   /nameLabel:"Reason", sizesLabel:"Steps"/.test(HTML));
-ok("and the editor still says brand and sizes where it is an implant",
-   /nameLabel \|\| "Brand"/.test(HTML) && /sizesLabel \|\| "Sizes"/.test(HTML));
-ok("Master loads the steps, not only the names",
-   /setApptReasons\(ar\.reasonSteps \|\|/.test(HTML));
-ok("and an older book with only names still loads",
-   /\(ar\.reasons \|\| \[\]\)\.map\(r => \(\{ name: r, steps: "" \}\)\)/.test(HTML));
+// ── the stage the case reports is the one the form shows ─────────────────
+// The panel reads CURRENT off the same field, so the two cannot drift.
+ok("the panel on screen reads the same field",
+   /"CURRENT: " \+ \(displayCase\.currentStageName \|\| "—"\)/.test(HTML));
 
 console.log("==============================================================================");
 console.log("  " + pass + " passed, " + fail + " failed");
