@@ -10920,18 +10920,29 @@ function buildProcedureFeeSheetHTML(pat, procedures, receipts) {
 // A day's receipts are attached to the FIRST entry of that day, not to each
 // of them: two procedures in one visit are one payment, and putting it on
 // both would make the column add up to twice what the patient paid.
+//
+// A payment on a day with no procedure recorded gets a row of its own. That
+// happens in the clinic -- a patient pays for an implant on the 15th and the
+// surgery is written up on the 16th -- and matching on the date alone used to
+// drop those receipts, so the column totalled less than the patient had
+// actually paid. A money column that quietly leaves a payment out is worse
+// than an empty one. Every receipt appears exactly once, so this column and
+// the Procedure & Fee Sheet agree.
 function entriesWithPayments(entries, receipts) {
   const byDate = {};
   (receipts || []).forEach(r => {
     const d = String(r && r.date || "").slice(0, 10);
     if (!d) return;
-    if (!byDate[d]) byDate[d] = { amount: 0, modes: [] };
+    if (!byDate[d]) byDate[d] = { amount: 0, modes: [], services: [] };
     byDate[d].amount += Number(r.fee) || 0;
     const m = String(r.mode || "").trim();
     if (m && byDate[d].modes.indexOf(m) < 0) byDate[d].modes.push(m);
+    const sv = String(r.service || "").trim();
+    if (sv && byDate[d].services.indexOf(sv) < 0) byDate[d].services.push(sv);
   });
+
   const taken = {};
-  return (entries || []).map(e => {
+  const rows = (entries || []).map(e => {
     const d = String(e && e.date || "").slice(0, 10);
     const pay = (d && !taken[d]) ? byDate[d] : null;
     if (!pay) return e;
@@ -10943,6 +10954,34 @@ function entriesWithPayments(entries, receipts) {
       paymentMode: String(e.paymentMode || "").trim() || pay.modes.join(", ")
     });
   });
+
+  // The receipts no visit claimed.
+  Object.keys(byDate).forEach(d => {
+    if (taken[d]) return;
+    const pay = byDate[d];
+    rows.push({
+      date: d,
+      toothNo: "",
+      treatmentRendered: pay.services.join(", "),
+      clinicalNotes: "Payment received \u2014 no procedure recorded in the register on this day.",
+      paymentMode: pay.modes.join(", "),
+      amountReceived: pay.amount,
+      paymentOnly: true
+    });
+  });
+
+  // Back into date order, keeping entries that share a date in the order the
+  // register gave them.
+  return rows
+    .map((r, i) => ({ r, i }))
+    .sort((a, b) => {
+      const da = String(a.r.date || ""), db = String(b.r.date || "");
+      if (da && db && da !== db) return da < db ? -1 : 1;
+      if (!da && db) return 1;
+      if (da && !db) return -1;
+      return a.i - b.i;
+    })
+    .map(x => x.r);
 }
 
 function buildProgressNotesHTML(pat, entries) {
@@ -11333,7 +11372,12 @@ function TreatmentProgress({ globalPat, setGlobalPat, initialTab }) {
     React.createElement("div", { style:{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:12, flexWrap:"wrap", gap:8 } },
       React.createElement("div", { style:{ fontSize:13, color:"#2e2e2e" } },
         entries.length + " visit" + (entries.length !== 1 ? "s" : "") + " · Total Received: ",
-        React.createElement("strong", { style:{ color:"#059669", fontSize:14 } }, "₹"+totalAmt.toLocaleString("en-IN"))
+        React.createElement("strong", { style:{ color:"#059669", fontSize:14 } }, "₹"+totalAmt.toLocaleString("en-IN")),
+        // Said out loud rather than left to be noticed: the total only agrees
+        // with the fee sheet because these are counted too.
+        progressRows.some(r => r.paymentOnly) && React.createElement("span", { style:{ color:"#444444" } },
+          " · includes " + progressRows.filter(r => r.paymentOnly).length +
+          " payment(s) on days with no procedure recorded")
       ),
       React.createElement("div", { style:{ display:"flex", gap:8 } },
         React.createElement("button", {
@@ -11365,7 +11409,8 @@ function TreatmentProgress({ globalPat, setGlobalPat, initialTab }) {
               const amt = e.amountReceived ? Number(e.amountReceived) : 0;
               return React.createElement("div", {
                 key:i,
-                style:{ display:"grid", gridTemplateColumns:"36px 90px 60px 130px 1fr 80px 80px", gap:6, padding:"8px 10px", borderTop:`0.5px solid ${BORDER}`, alignItems:"start", background:i%2===0?"#fff":BGS }
+                style:{ display:"grid", gridTemplateColumns:"36px 90px 60px 130px 1fr 80px 80px", gap:6, padding:"8px 10px", borderTop:`0.5px solid ${BORDER}`, alignItems:"start",
+                  background: e.paymentOnly ? "#f0fdf4" : (i%2===0?"#fff":BGS) }
               },
                 React.createElement("div", { style:{ fontSize:12, fontWeight:700, color:T, textAlign:"center" } }, i+1),
                 React.createElement("div", { style:{ fontSize:12, color:"#2e2e2e" } }, d),

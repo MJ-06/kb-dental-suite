@@ -63,9 +63,14 @@ eq("each visit shows its own day's payment",
    out.map(e => e.amountReceived), [2000, 1500]);
 
 // A visit with nothing paid stays blank rather than borrowing another day's.
+// The rows are in date order now, so the visit is found by its date rather
+// than by position -- the payment's own row comes first here.
 out = entriesWithPayments([E("2026-10-21", "Check-up")], [R("2026-10-20", 2000, "Cash")]);
-eq("a visit with no payment that day shows none", out[0].amountReceived, "");
-ok("and does not borrow another day's", !out[0].paymentMode);
+const visit = out.find(e => e.date === "2026-10-21");
+eq("a visit with no payment that day shows none", visit.amountReceived, "");
+ok("and does not borrow another day's", !visit.paymentMode);
+ok("while the payment itself is still accounted for",
+   out.some(e => e.paymentOnly && e.amountReceived === 2000), JSON.stringify(out));
 
 // The register's own mode wins; the receipt only fills a blank.
 out = entriesWithPayments([Object.assign(E("2026-10-20", "RCT"), { paymentMode: "Cash in hand" })],
@@ -73,9 +78,12 @@ out = entriesWithPayments([Object.assign(E("2026-10-20", "RCT"), { paymentMode: 
 eq("what the register recorded is kept", out[0].paymentMode, "Cash in hand");
 eq("while the amount is still filled in", out[0].amountReceived, 3000);
 
-// A payment with no procedure recorded that day is not invented onto one.
+// A payment with no procedure is given a row of its own rather than dropped:
+// losing it made the column total less than the patient had paid.
 out = entriesWithPayments([], [R("2026-10-20", 3000, "UPI")]);
-eq("no entries means no rows", out, []);
+eq("a payment with no visit at all is still shown", out.length, 1);
+eq("for what was paid", out[0].amountReceived, 3000);
+ok("and marked as a payment rather than a procedure", out[0].paymentOnly);
 
 // Timestamps and odd shapes must not break it.
 out = entriesWithPayments([E("2026-10-20", "RCT")], [R("2026-10-20T10:30:00.000Z", 3000, "UPI")]);
@@ -84,7 +92,8 @@ eq("no receipts at all leaves the entries as they were",
    entriesWithPayments([E("2026-10-20", "RCT")], []).map(e => e.amountReceived), [""]);
 eq("and neither list being there does not throw", entriesWithPayments(null, null), []);
 out = entriesWithPayments([E("", "RCT")], [R("2026-10-20", 3000, "UPI")]);
-eq("an entry with no date is left alone", out[0].amountReceived, "");
+eq("an entry with no date is given no money",
+   out.find(e => e.treatmentRendered === "RCT").amountReceived, "");
 
 // The entries handed in are not altered — the register's own record stands.
 const original = [E("2026-10-20", "RCT")];
@@ -108,6 +117,62 @@ ok("the procedure sheet still gets the plain entries",
 // to put in those columns.
 ok("looking a patient up by UHID loads their receipts too",
    /loadEntries\(p\);\s*\n\s*\/\/ The receipts too\./.test(HTML));
+
+
+// ── a payment on a day with no procedure ─────────────────────────────────
+// The clinic hit this: ₹65,000 paid on the 15th, the implant surgery written
+// up on the 16th. Matching on the date alone dropped that receipt, and the
+// column totalled ₹1,05,000 against the fee sheet's ₹1,70,000.
+const VISITS = [E("2026-07-14", "Consultation"), E("2026-09-16", "Implant Surgery"),
+                E("2026-09-23", "Restoration")];
+const PAID = [R("2026-07-14", 20000, "UPI"), R("2026-09-15", 65000, "UPI"),
+              R("2026-09-23", 85000, "Card")];
+out = entriesWithPayments(VISITS, PAID);
+eq("every payment is somewhere, so nothing is lost",
+   out.reduce((s, e) => s + (Number(e.amountReceived) || 0), 0), 170000);
+eq("which is what the fee sheet totals",
+   PAID.reduce((s, r) => s + r.fee, 0), 170000);
+eq("the payment with no procedure gets a row of its own",
+   out.filter(e => e.paymentOnly).length, 1);
+const only = out.find(e => e.paymentOnly);
+eq("on the day it was actually paid", only.date, "2026-09-15");
+eq("for the amount paid", only.amountReceived, 65000);
+ok("saying plainly why it is there",
+   /no procedure recorded in the register on this day/.test(only.clinicalNotes), only.clinicalNotes);
+eq("and the rows stay in date order",
+   out.map(e => e.date),
+   ["2026-07-14", "2026-09-15", "2026-09-16", "2026-09-23"]);
+eq("the visit on the next day is not given that money",
+   out.find(e => e.date === "2026-09-16").amountReceived, "");
+
+// The service on the receipt names the row, so it is not a bare amount.
+eq("the receipt's service names the row",
+   entriesWithPayments([], [Object.assign(R("2026-09-15", 65000, "UPI"), { service: "Implant Surgery" })])[0].treatmentRendered,
+   "Implant Surgery");
+
+// Several unclaimed payments on one day are one row.
+out = entriesWithPayments([], [R("2026-09-15", 40000, "UPI"), R("2026-09-15", 25000, "Cash")]);
+eq("two payments on an unclaimed day make one row", out.length, 1);
+eq("adding up", out[0].amountReceived, 65000);
+eq("with both modes", out[0].paymentMode, "UPI, Cash");
+
+// Entries that share a date keep the register's own order.
+out = entriesWithPayments([E("2026-09-16", "First"), E("2026-09-16", "Second")], []);
+eq("two entries on one day are not reordered",
+   out.map(e => e.treatmentRendered), ["First", "Second"]);
+
+// An entry with no date is not sorted to the front.
+out = entriesWithPayments([E("", "Undated"), E("2026-09-16", "Dated")], []);
+eq("an undated entry goes last rather than first",
+   out.map(e => e.treatmentRendered), ["Dated", "Undated"]);
+
+// ── the screen says so ───────────────────────────────────────────────────
+ok("the count still means visits, not rows",
+   /entries\.length \+ " visit"/.test(HTML));
+ok("and the total says when it includes a payment with no visit",
+   /payment\(s\) on days with no procedure recorded/.test(HTML));
+ok("such a row is marked out on screen",
+   /background: e\.paymentOnly \? "#f0fdf4"/.test(HTML));
 
 console.log("==============================================================================");
 console.log("  " + pass + " passed, " + fail + " failed");
