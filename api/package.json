@@ -15,6 +15,7 @@
     "db:bootstrap": "tsx scripts/bootstrap.ts",
     "db:migrate": "tsx scripts/migrate.ts",
     "db:seed": "tsx scripts/seed-dev.ts",
+    "db:reset-dev": "tsx scripts/reset-dev.ts",
     "test": "vitest run"
   },
   "dependencies": {

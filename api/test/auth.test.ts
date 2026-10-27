@@ -34,22 +34,22 @@ describe("signing in", () => {
     expect(res.statusCode).toBe(401);
   });
 
-  it("locks an account after five wrong passwords, even with the right one after", async () => {
+  it("pauses an account after five wrong passwords, refusing even the right one", async () => {
     for (let i = 0; i < 5; i++) await login("alpha", "a-desk", "wrong", `10.0.1.${i}`);
     const res = await login("alpha", "a-desk", PASSWORD, "10.0.1.9");
     expect(res.statusCode).toBe(401);
-    expect(res.json().error.message).toMatch(/Try again in 15 minutes/);
   });
 
-  it("does not reveal a lock to someone with the wrong password", async () => {
-    const res = await login("alpha", "a-desk", "still wrong", "10.0.1.10");
-    expect(res.json().error.message).toBe("Clinic code, username or password is wrong");
+  it("answers a paused account exactly as a wrong password, so guessing teaches nothing", async () => {
+    const right = await login("alpha", "a-desk", PASSWORD, "10.0.1.10");
+    const wrong = await login("alpha", "a-desk", "still wrong", "10.0.1.11");
+    expect(right.json()).toEqual(wrong.json());
   });
 
-  it("counts parallel guesses, so a burst cannot slip past the lockout", async () => {
+  it("counts parallel guesses, so a burst cannot slip past the pause", async () => {
     await Promise.all(Array.from({ length: 6 }, (_, i) => login("beta", "b-desk", "wrong", `10.0.2.${i}`)));
     const res = await login("beta", "b-desk", PASSWORD, "10.0.2.9");
-    expect(res.json().error.message).toMatch(/locked/);
+    expect(res.statusCode).toBe(401);
   });
 
   it("slows down one address that keeps trying", async () => {

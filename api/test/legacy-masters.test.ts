@@ -1,25 +1,11 @@
 // The Master screen through /exec, the way today's screens call it.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { makeWorld, PASSWORD, type World } from "./setup.js";
+import { exec, execLogin } from "./legacy.js";
+import { makeWorld, type World } from "./setup.js";
 
 let w: World;
 let admin: string;
 let desk: string;
-
-export async function execLogin(world: World, clinic: string, username: string): Promise<string> {
-  const res = await world.app.inject({ url: "/exec", query: { action: "staffLogin", clinic, username, password: PASSWORD } });
-  expect(res.json()).toMatchObject({ success: true });
-  const c = res.cookies.find((x) => x.name === "kb_session")!;
-  return `kb_session=${c.value}`;
-}
-
-export async function exec(world: World, cookie: string, action: string, params: Record<string, unknown> = {}) {
-  const query: Record<string, string> = { action };
-  for (const [k, v] of Object.entries(params)) query[k] = typeof v === "object" ? JSON.stringify(v) : String(v);
-  const res = await world.app.inject({ url: "/exec", query, headers: { cookie } });
-  expect(res.statusCode).toBe(200);
-  return res.json();
-}
 
 beforeAll(async () => {
   w = await makeWorld();

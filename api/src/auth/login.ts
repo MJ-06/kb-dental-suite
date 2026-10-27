@@ -1,10 +1,11 @@
 // Password sign-in, shared by /api/v1/auth/login and the screens' /exec.
 //
-// - One message for every failure, so nobody can learn which clinic codes
-//   or usernames exist, or which accounts are locked.
+// - One message for every failure, locked accounts included, so nobody can
+//   learn which clinic codes or usernames exist, which accounts are locked,
+//   or (during a lock) whether a guess was right.
 // - The user row is locked (FOR UPDATE) before the password is checked, so
 //   parallel guesses queue and each one counts towards the lockout.
-// - A locked account says so only to someone who typed the right password.
+// - While an account is locked no password is checked at all.
 import { sql } from "kysely";
 import { resumeSession, type Actor, type Tx } from "../db/index.js";
 import { burnPasswordCheck, verifyPassword } from "./password.js";
@@ -12,7 +13,8 @@ import { hashToken, newToken, SESSION_TTL_MS } from "./tokens.js";
 
 export const MAX_FAILURES = 5;
 export const LOCK_MINUTES = 15;
-export const WRONG = "Clinic code, username or password is wrong";
+export const WRONG =
+  "Clinic code, username or password is wrong. After 5 wrong tries the account is paused for 15 minutes.";
 
 export type LoginOutcome = { ok: true; token: string; me: Actor } | { ok: false; message: string };
 
@@ -30,14 +32,12 @@ export async function attemptLogin(tx: Tx, clinic: string, username: string, pas
   }
   await sql`SELECT set_config('app.user_id', ${user.id}, true)`.execute(tx);
 
-  const correct = await verifyPassword(password, user.password_hash);
-  const locked = !!user.locked_until && user.locked_until > new Date();
-
-  if (locked) {
-    if (!correct) return { ok: false, message: WRONG };
-    const mins = Math.ceil((user.locked_until!.getTime() - Date.now()) / 60_000);
-    return { ok: false, message: `This account is locked after too many wrong passwords. Try again in ${mins} minute${mins === 1 ? "" : "s"}.` };
+  if (user.locked_until && user.locked_until > new Date()) {
+    await burnPasswordCheck(password); // same time taken, nothing learned
+    return { ok: false, message: WRONG };
   }
+
+  const correct = await verifyPassword(password, user.password_hash);
 
   if (!correct) {
     // One statement decides the count and the lock, from the locked row.

@@ -196,12 +196,13 @@ CREATE TABLE patient_registrations (
   conditions      text[] NOT NULL DEFAULT '{}',
   allergies       text[] NOT NULL DEFAULT '{}',
   medicines       text,
-  habits          text[] NOT NULL DEFAULT '{}',
+  habits          text,       -- as the desk wrote it: "Smoking, Alcohol"
   pregnant        boolean,
   feeding_mother  boolean,
   chief_complaint text,
-  pain_level      smallint CHECK (pain_level BETWEEN 0 AND 10),
-  how_known       text[] NOT NULL DEFAULT '{}',
+  pain_level      text,       -- a number 0-10 today; old records hold text
+  how_known       text,
+  referred_by     text,
   consent_given   boolean NOT NULL DEFAULT false,
   form            jsonb,
   version         integer NOT NULL DEFAULT 1,
