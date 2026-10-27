@@ -1,0 +1,12 @@
+{
+  "name": "kb-dental-migration",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Moves the clinic's sheets into PostgreSQL, once.",
+  "type": "commonjs",
+  "scripts": {
+    "test": "node test/migration.test.js"
+  },
+  "engines": { "node": ">=18" },
+  "dependencies": { "pg": "^8.13.1" }
+}
