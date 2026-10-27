@@ -60,6 +60,9 @@ window.KB_INSTANCES = {
     });
     return;
   }
+  // Served by the clinic's own server, every instance talks to that server
+  // (/exec); which clinic's data it sees is decided by the sign-in, not here.
+  if (window.KB_SCRIPT_URL_OVERRIDE) inst = Object.assign({}, inst, { scriptUrl: window.KB_SCRIPT_URL_OVERRIDE });
   // A configured-but-not-yet-deployed instance must refuse to run rather than
   // fall through to another book's data.
   if (!inst.scriptUrl) {
@@ -29145,8 +29148,14 @@ function StaffLoginGate({ children }) {
   const [checking, setChecking] = useState(true);
   const [needsLogin, setNeedsLogin] = useState(false);
   const [pw, setPw] = useState("");
+  // The clinic code and username are remembered on this device; the password never is.
+  const [clinicCode, setClinicCode] = useState(() => { try { return localStorage.getItem("kb_clinic_code") || ""; } catch (e) { return ""; } });
+  const [username, setUsername] = useState(() => { try { return localStorage.getItem("kb_username") || ""; } catch (e) { return ""; } });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState("");
+  // Named accounts exist only on the clinic's own server; the old Apps
+  // Script backend still signs in with the one shared password.
+  const named = !!window.KB_SCRIPT_URL_OVERRIDE;
 
   const check = React.useCallback(() => {
     api("authStatus").then(res => {
@@ -29161,10 +29170,16 @@ function StaffLoginGate({ children }) {
     setAuthRequiredHandler(() => setNeedsLogin(true));
   }, [check]);
 
+  const ready = pw.trim() && (!named || (clinicCode.trim() && username.trim()));
   const doLogin = async () => {
-    if (!pw.trim()) return;
+    if (!ready) return;
     setBusy(true); setErr("");
-    const res = await api("staffLogin", { password: pw });
+    if (named) {
+      try { localStorage.setItem("kb_clinic_code", clinicCode.trim()); localStorage.setItem("kb_username", username.trim()); } catch (e) {}
+    }
+    const res = await api("staffLogin", named
+      ? { clinic: clinicCode.trim(), username: username.trim(), password: pw }
+      : { password: pw });
     setBusy(false);
     if (res && res.success && res.token) {
       setSessionToken(res.token);
@@ -29178,14 +29193,24 @@ function StaffLoginGate({ children }) {
   return React.createElement("div", { style:{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:BGS, padding:20 } },
     React.createElement("div", { style:{ background:"#fff", border:`1px solid ${BORDER}`, borderRadius:12, padding:"28px 30px", width:"min(380px,100%)", boxShadow:"0 4px 20px rgba(0,0,0,.08)" } },
       React.createElement("div", { style:{ fontSize:17, fontWeight:800, color:T, marginBottom:4 } }, "🔐 Staff Sign In"),
-      React.createElement("div", { style:{ fontSize:13, color:"#444444", marginBottom:18 } }, "Enter the clinic app password to access patient data."),
-      React.createElement("input", { type:"password", value:pw, autoFocus:true, placeholder:"Password",
-        style:{ ...inp, width:"100%", marginBottom:12 },
-        onChange:e=>setPw(e.target.value), onKeyDown:e=>e.key==="Enter"&&doLogin() }),
+      React.createElement("div", { style:{ fontSize:13, color:"#444444", marginBottom:18 } },
+        named ? "Sign in with your own account to access patient data." : "Enter the clinic app password to access patient data."),
+      named && React.createElement("label", { style:{ display:"block", fontSize:12, fontWeight:700, color:"#444444", marginBottom:4 } }, "Clinic code",
+        React.createElement("input", { type:"text", value:clinicCode, autoFocus:!clinicCode, autoComplete:"organization", placeholder:"e.g. kbdental",
+          style:{ ...inp, width:"100%", marginTop:4, marginBottom:12, fontWeight:400 },
+          onChange:e=>setClinicCode(e.target.value), onKeyDown:e=>e.key==="Enter"&&doLogin() })),
+      named && React.createElement("label", { style:{ display:"block", fontSize:12, fontWeight:700, color:"#444444", marginBottom:4 } }, "Username",
+        React.createElement("input", { type:"text", value:username, autoFocus:!!clinicCode && !username, autoComplete:"username", autoCapitalize:"none",
+          style:{ ...inp, width:"100%", marginTop:4, marginBottom:12, fontWeight:400 },
+          onChange:e=>setUsername(e.target.value), onKeyDown:e=>e.key==="Enter"&&doLogin() })),
+      React.createElement("label", { style:{ display:"block", fontSize:12, fontWeight:700, color:"#444444", marginBottom:4 } }, named ? "Password" : null,
+        React.createElement("input", { type:"password", value:pw, autoFocus:!named || (!!clinicCode && !!username), autoComplete:"current-password", placeholder:"Password",
+          style:{ ...inp, width:"100%", marginTop:named ? 4 : 0, marginBottom:12, fontWeight:400 },
+          onChange:e=>setPw(e.target.value), onKeyDown:e=>e.key==="Enter"&&doLogin() })),
       err && React.createElement("div", { style:{ fontSize:13, color:"#c0392b", marginBottom:10, fontWeight:600 } }, "⚠ " + err),
-      React.createElement("button", { onClick:doLogin, disabled:busy||!pw.trim(),
+      React.createElement("button", { onClick:doLogin, disabled:busy||!ready,
         style:{ width:"100%", padding:"10px", fontSize:14, border:"none", borderRadius:8, cursor:busy?"wait":"pointer",
-          background:T, color:"#fff", fontWeight:700, opacity:(busy||!pw.trim())?0.6:1 } },
+          background:T, color:"#fff", fontWeight:700, opacity:(busy||!ready)?0.6:1 } },
         busy ? "Signing in..." : "Sign In")
     )
   );
