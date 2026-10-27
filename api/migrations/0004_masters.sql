@@ -168,7 +168,7 @@ CREATE TABLE signatures (
   id          uuid PRIMARY KEY DEFAULT uuidv7(),
   clinic_id   uuid NOT NULL DEFAULT app_clinic_id() REFERENCES clinics(id),
   owner_name  text NOT NULL,
-  image_data  text NOT NULL CHECK (image_data LIKE 'data:image/%'),
+  image_data  text NOT NULL CHECK (image_data ~ '^data:image/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$'),
   version     integer NOT NULL DEFAULT 1,
   created_at  timestamptz NOT NULL DEFAULT now(),
   updated_at  timestamptz NOT NULL DEFAULT now(),

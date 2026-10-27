@@ -6,10 +6,9 @@
 // parameter is ignored: it no longer grants anything, so a URL copied into
 // a log or a chat cannot sign anyone in.
 import type { FastifyPluginAsync, FastifyRequest } from "fastify";
-import { sql } from "kysely";
 import { can } from "../auth/permissions.js";
-import { burnPasswordCheck, verifyPassword } from "../auth/password.js";
-import { hashToken, newToken, SESSION_COOKIE, SESSION_TTL_MS } from "../auth/tokens.js";
+import { attemptCounter, attemptLogin } from "../auth/login.js";
+import { hashToken, SESSION_COOKIE, SESSION_TTL_MS } from "../auth/tokens.js";
 import { resumeSession } from "../db/index.js";
 import type { AppOptions } from "../app.js";
 import { actions } from "./registry.js";
@@ -17,9 +16,6 @@ import { DeskError, type Params, type Result } from "./types.js";
 
 const BATCH_MAX = 25;
 const AUTH_REQUIRED: Result = { success: false, error: "AUTH_REQUIRED", authRequired: true };
-const MAX_FAILURES = 5;
-const LOCK_MINUTES = 15;
-const WRONG = "Clinic code, username or password is wrong";
 
 export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) => {
   const { db } = opts;
@@ -58,15 +54,7 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
   app.post("/exec", limits, async (req) => handler(req));
 
   // Sign-in attempts per address: 10 a minute, like /api/v1/auth/login.
-  const attempts = new Map<string, number[]>();
-  function tooManyAttempts(ip: string): boolean {
-    const now = Date.now();
-    const recent = (attempts.get(ip) ?? []).filter((t) => now - t < 60_000);
-    recent.push(now);
-    attempts.set(ip, recent);
-    if (attempts.size > 10_000) attempts.clear(); // bounded memory under a flood
-    return recent.length > 10;
-  }
+  const tooManyAttempts = attemptCounter(10);
 
   /** One action in its own transaction. */
   async function run(action: string, params: Params, token: string): Promise<Result> {
@@ -114,43 +102,15 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
     const password = String(p.password ?? "");
     if (!clinic || !username || !password) return { success: false, error: "Enter the clinic code, your username and your password" };
 
-    const outcome = await db.transaction().execute(async (tx) => {
-      const cid = (await sql<{ id: string | null }>`SELECT begin_login(${clinic}) AS id`.execute(tx)).rows[0]?.id;
-      const user = cid
-        ? await tx.selectFrom("app_users").select(["id", "password_hash", "active", "locked_until", "failed_attempts"])
-            .where("username", "=", username).executeTakeFirst()
-        : undefined;
-      if (!user || !user.active) { await burnPasswordCheck(password); return { error: WRONG }; }
-      await sql`SELECT set_config('app.user_id', ${user.id}, true)`.execute(tx);
-      if (user.locked_until && user.locked_until > new Date()) {
-        const mins = Math.ceil((user.locked_until.getTime() - Date.now()) / 60_000);
-        return { error: `Too many wrong passwords. Try again in ${mins} minute${mins === 1 ? "" : "s"}.` };
-      }
-      if (!(await verifyPassword(password, user.password_hash))) {
-        const failures = user.failed_attempts + 1;
-        const lock = failures >= MAX_FAILURES;
-        await tx.updateTable("app_users")
-          .set({ failed_attempts: lock ? 0 : failures, locked_until: lock ? new Date(Date.now() + LOCK_MINUTES * 60_000) : null })
-          .where("id", "=", user.id).execute();
-        return { error: WRONG };
-      }
-      if (user.failed_attempts || user.locked_until) {
-        await tx.updateTable("app_users").set({ failed_attempts: 0, locked_until: null }).where("id", "=", user.id).execute();
-      }
-      const t = newToken();
-      await tx.insertInto("sessions").values({ token_hash: hashToken(t), user_id: user.id, expires_at: new Date(Date.now() + SESSION_TTL_MS) }).execute();
-      await tx.deleteFrom("sessions").where("expires_at", "<=", new Date()).execute();
-      const me = await resumeSession(tx, hashToken(t));
-      return { token: t, me };
-    });
+    const outcome = await db.transaction().execute((tx) => attemptLogin(tx, clinic, username, password));
 
-    if ("error" in outcome) return { success: false, error: outcome.error };
-    req.server.log.info({ user: outcome.me?.username }, "staff signed in");
+    if (!outcome.ok) return { success: false, error: outcome.message };
+    req.server.log.info({ user: outcome.me.username }, "staff signed in");
     // The reply hook below turns this into the cookie; the body carries only
     // a marker the screens treat as "signed in".
     (req as FastifyRequest & { _setSession?: string })._setSession = outcome.token;
     return { success: true, token: "session-cookie", expiresAt: Date.now() + SESSION_TTL_MS,
-      user: { name: outcome.me?.displayName, role: outcome.me?.role } };
+      user: { name: outcome.me.displayName, role: outcome.me.role } };
   }
 
   async function staffLogout(req: FastifyRequest): Promise<Result> {

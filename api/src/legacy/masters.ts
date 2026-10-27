@@ -314,7 +314,9 @@ Object.assign(masters, {
   saveSignature: write("clinical:write", async (p, { tx }) => {
     const doctor = str(p.doctor);
     const data = str(p.signatureDataUrl);
-    if (!data.startsWith("data:image/")) throw new DeskError("The signature did not arrive as an image");
+    // PNG, JPEG or WebP as base64, nothing else: an SVG or a value with a
+    // quote in it could carry script into the pages that print signatures.
+    if (!SIGNATURE_DATA_URL.test(data)) throw new DeskError("The signature did not arrive as an image");
     await sql`INSERT INTO signatures (owner_name, image_data) VALUES (${doctor}, ${data})
               ON CONFLICT (clinic_id, owner_name) DO UPDATE SET image_data = EXCLUDED.image_data`.execute(tx);
     return { success: true };
@@ -334,6 +336,8 @@ Object.assign(masters, {
   saveSettings: write("masters:write", async () =>
     ({ success: false, error: "The finance sheet is no longer used: finance lives in the clinic's database now." }))
 });
+
+const SIGNATURE_DATA_URL = /^data:image\/(png|jpeg|webp);base64,[A-Za-z0-9+/]+={0,2}$/;
 
 const DEFAULT_APPT_REASONS = [
   "Consultation", "Follow Up", "RCT", "Crown Cementation", "Scaling / Cleaning",

@@ -134,6 +134,17 @@ describe("settings", () => {
   });
 });
 
+describe("signatures", () => {
+  it("accepts a PNG and refuses an SVG or anything that is not a plain image", async () => {
+    const png = "data:image/png;base64,iVBORw0KGgo=";
+    expect(await exec(w, admin, "saveSignature", { doctor: "Dr. A", signatureDataUrl: png })).toEqual({ success: true });
+    for (const bad of ["data:image/svg+xml;base64,PHN2Zz4=", 'data:image/png;base64,AA" onerror="alert(1)', "javascript:alert(1)"]) {
+      expect((await exec(w, admin, "saveSignature", { doctor: "Dr. A", signatureDataUrl: bad })).success).toBe(false);
+    }
+    expect((await exec(w, admin, "getSignatures")).signatures).toEqual({ "Dr. A": png });
+  });
+});
+
 describe("roles", () => {
   it("lets reception read the lists but not change them", async () => {
     expect((await exec(w, desk, "getPaymentModesList")).success).toBe(true);

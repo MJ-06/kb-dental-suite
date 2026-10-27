@@ -3,7 +3,7 @@
 // The passwords are generated and written to ~/.kb-pms/dev-logins.txt
 // (owner-only), never printed.
 import { randomBytes } from "node:crypto";
-import { chmodSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 import pg from "pg";
@@ -21,14 +21,20 @@ if (existing.rowCount) {
   process.exit(0);
 }
 
+const file = join(homedir(), ".kb-pms", "dev-logins.txt");
+// Reuse the passwords already handed out, so a reseed does not change them.
+const previous = new Map<string, string>();
+if (existsSync(file)) {
+  for (const m of readFileSync(file, "utf8").matchAll(/username (\S+)\s+password (\S+)/g)) previous.set(m[1]!, m[2]!);
+}
+
 const clinicId = await createClinic(owner, { code: "kbdev", name: "KB Dental (development)" });
 const lines = ["Development logins for http://127.0.0.1:8080 (clinic code: kbdev)"];
 for (const role of ["admin", "doctor", "reception", "accounts"] as Role[]) {
-  const password = randomBytes(9).toString("base64url");
+  const password = previous.get(`dev-${role}`) ?? randomBytes(9).toString("base64url");
   await createUser(owner, clinicId, { username: `dev-${role}`, displayName: `Dev ${role}`, password, role });
   lines.push(`${role.padEnd(10)} username dev-${role}   password ${password}`);
 }
-const file = join(homedir(), ".kb-pms", "dev-logins.txt");
 writeFileSync(file, lines.join("\n") + "\n", { mode: 0o600 });
 chmodSync(file, 0o600);
 console.log(`Clinic kbdev created with 4 accounts. Logins written to ${file}`);

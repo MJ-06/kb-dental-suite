@@ -41,6 +41,17 @@ describe("signing in", () => {
     expect(res.json().error.message).toMatch(/Try again in 15 minutes/);
   });
 
+  it("does not reveal a lock to someone with the wrong password", async () => {
+    const res = await login("alpha", "a-desk", "still wrong", "10.0.1.10");
+    expect(res.json().error.message).toBe("Clinic code, username or password is wrong");
+  });
+
+  it("counts parallel guesses, so a burst cannot slip past the lockout", async () => {
+    await Promise.all(Array.from({ length: 6 }, (_, i) => login("beta", "b-desk", "wrong", `10.0.2.${i}`)));
+    const res = await login("beta", "b-desk", PASSWORD, "10.0.2.9");
+    expect(res.json().error.message).toMatch(/locked/);
+  });
+
   it("slows down one address that keeps trying", async () => {
     const tries = [];
     for (let i = 0; i < 12; i++) tries.push(await login("beta", "b-admin", "wrong", "10.9.9.9"));
@@ -50,7 +61,7 @@ describe("signing in", () => {
 
 describe("signing out", () => {
   it("ends the session on the server, not just in the browser", async () => {
-    const cookie = await signIn(w.app, "beta", "b-desk");
+    const cookie = await signIn(w.app, "alpha", "a-admin"); // b-admin is locked by the test above
     await w.app.inject({ method: "POST", url: "/api/v1/auth/logout", headers: { cookie } });
     const res = await w.app.inject({ url: "/api/v1/auth/me", headers: { cookie } });
     expect(res.statusCode).toBe(401);
