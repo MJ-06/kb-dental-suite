@@ -50,11 +50,16 @@ describe("registration", () => {
   });
 
   it("records a panel patient with their panel, and refuses one without", async () => {
+    const admin = await execLogin(w, "alpha", "a-admin");
+    await exec(w, admin, "savePanelsList", { panels: ["CGHS"] });
     const uhid = await quickRegister("Panel Person", { patientType: "Panel", panel: "CGHS", panelCategory: "Pensioner", cardId: "C-1" });
     const row = (await exec(w, desk, "getAllPatients")).patients.find((x: { uhid: string }) => x.uhid === uhid);
     expect(row).toMatchObject({ panel: "CGHS", panelCategory: "Pensioner", cardId: "C-1" });
     const { uhid: u2 } = await exec(w, desk, "getNextUHID");
     expect((await exec(w, desk, "saveRegistration", { uhid: u2, name: "No Panel", patientType: "Panel" })).success).toBe(false);
+    // The desk cannot invent a panel; that is Master's job.
+    const res = await exec(w, desk, "saveRegistration", { uhid: u2, name: "New Panel", patientType: "Panel", panel: "MADE UP" });
+    expect(res.error).toMatch(/Add it in Master first/);
   });
 
   it("finds a duplicate by name and date of birth, whatever the spacing or case", async () => {

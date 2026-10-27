@@ -75,11 +75,10 @@ export async function findPatient(tx: Tx, uhid: string): Promise<Row | undefined
 }
 
 async function panelId(tx: Tx, name: string): Promise<string> {
-  const found = await sql<{ id: string }>`SELECT id FROM panels WHERE upper(name) = ${name.toUpperCase()}`.execute(tx);
-  if (found.rows[0]) return found.rows[0].id;
-  // A panel named at the desk but missing from Master is added, not dropped:
-  // dropping it is how panel patients ended up filed as private.
-  return (await sql<{ id: string }>`INSERT INTO panels (name) VALUES (${name}) RETURNING id`.execute(tx)).rows[0]!.id;
+  const found = await sql<{ id: string }>`SELECT id FROM panels WHERE upper(name) = ${name.toUpperCase()} AND active`.execute(tx);
+  // Panels are added in Master, by someone allowed to; the desk picks one.
+  if (!found.rows[0]) throw new DeskError(`"${name}" is not one of the clinic's panels. Add it in Master first.`);
+  return found.rows[0].id;
 }
 
 // The demographic fields: [screen's key, column].
