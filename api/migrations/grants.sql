@@ -17,6 +17,10 @@ REVOKE UPDATE, DELETE ON audit_log FROM kb_app;
 -- Counters move only through next_uhid().
 REVOKE DELETE ON uhid_counters FROM kb_app;
 
+-- Receipts are never removed, and their numbers only move through
+-- next_receipt_no(). A mistake is corrected by a new entry, not erased.
+REVOKE DELETE ON receipts, receipt_counters FROM kb_app;
+
 -- The bookkeeping table is the migrator's.
 REVOKE ALL ON schema_migrations FROM kb_app;
 

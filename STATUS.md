@@ -22,7 +22,7 @@ PostgreSQL row level security.
 - `index.html` sign-in asks for clinic code + username + password when the
   page is served by the API, and only the password on the old backend.
 
-## Done (80 tests pass)
+## Done (98 tests pass)
 
 | Module | Legacy actions ported | Notes |
 | --- | --- | --- |
@@ -31,42 +31,35 @@ PostgreSQL row level security.
 | Masters | ~45 get/save list and settings actions, screen passwords, signatures | named lists deactivate entries left out of a save, never delete them |
 | Patients | getNextUHID, checkDuplicate, saveRegistration, getPending, getPatient, getAllPatients, searchPatients, getTodaysBirthdays, patientLookup, patientCompleteRegistration | a save never blanks a field it left empty; each history taken is its own row |
 | Diary | getAppointments, saveAppointment, updateAppointmentStatus, updateAppointment, deleteAppointment, get/save/deleteBlockedSlot, getDailyRegister, saveToDailyRegister, getFollowUps | no overlapping bookings per chair; a cancellation needs a reason |
+| Finance | saveReceipt, getReceipts, getRevenueByPatient, getDailyCollection, getFinanceSummary, getProfitLoss, getExpenses, saveExpense, deleteExpense, getPatientOutstanding, getOutstandingList, plus getTreatmentPlan and saveTreatmentPlan | per-clinic receipt series (`next_receipt_no()`), receipts can't be deleted by the app, expenses are voided not removed, balances measure receipts against the plan estimate total |
 | REST | /api/v1/auth, /patients, /appointments | |
 
 Checked in a browser: sign-in, Master, and quick registration (issued AL1001).
 
 ## Left, in this order
 
-1. **Finance**: getReceipts, saveReceipt, getRevenueByPatient, getDailyCollection,
-   getFinanceSummary (FY runs April to March), getProfitLoss, getExpenses,
-   saveExpense, deleteExpense, getPatientOutstanding, getOutstandingList.
-   Live code is at `apps-script/out/Code.gs` lines 3916-4420 and 5196-5260.
-   - A receipt has up to two payment modes and two amounts.
-   - Receipt numbers come from the Finance sheet's "Receipt No." tab, so a
-     per-clinic receipt series is needed (same design as the UHID counter).
-   - Use the `payments:collect` permission for taking payments.
-2. **Clinical**: getClinicalSheets, saveClinicalSheets, getClinicalRecords, the
+1. **Clinical**: getClinicalSheets, saveClinicalSheets, getClinicalRecords, the
    per-form saves (Pathology, Radiology, RCT, Restoration and the rest),
    care plan, treatment plan, getTreatmentProgress, savePrescription,
    saveConsent, getClinicalNoteTemplates (already ported in masters),
    generateSOAPNotes.
-3. **Treatment cases**: getProcedureLibrary, saveProcedureLibrary,
+2. **Treatment cases**: getProcedureLibrary, saveProcedureLibrary,
    startTreatmentCase, getOpenCase, getCaseState, resolveStageOutcome,
    appendCaseStage.
-4. **Documents**: upload, list, content, delete, createDocumentPDF. Needs
+3. **Documents**: upload, list, content, delete, createDocumentPDF. Needs
    S3-compatible storage with one prefix per clinic, or a local folder for now.
-5. **CRM and chatbot**: getCrmData, saveCrmCollection, queueCrmLead,
+4. **CRM and chatbot**: getCrmData, saveCrmCollection, queueCrmLead,
    getCrmLeadInbox, markCrmLeadsTaken, findAppointmentsByPhone,
    saveChatbotAppointment, chatbotReply. Diya decided the chatbot never looks
    a patient up without a login.
-6. Point the `SCRIPT_URL` in `register.html`, `chatbot.html` and
+5. Point the `SCRIPT_URL` in `register.html`, `chatbot.html` and
    `expense.html` at `window.KB_SCRIPT_URL_OVERRIDE` (only `index.html` does today).
-7. Run every flow in the Flow test report in a browser (Playwright), against
+6. Run every flow in the Flow test report in a browser (Playwright), against
    the new backend, and record works / breaks / conditions in the report.
-8. Data migration from the Sheets. Diya will share view access or .xlsx
+7. Data migration from the Sheets. Diya will share view access or .xlsx
    files; no edit access is needed. Viveyk's `migration/` folder is a
    starting point only.
-9. Hosting, domain, backups (Google Drive is future scope), Windows-service
+8. Hosting, domain, backups (Google Drive is future scope), Windows-service
    or server setup.
 
 To find the actions a screen still lacks, call each one with `apiDirect`
