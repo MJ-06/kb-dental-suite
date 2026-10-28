@@ -22,7 +22,7 @@ PostgreSQL row level security.
 - `index.html` sign-in asks for clinic code + username + password when the
   page is served by the API, and only the password on the old backend.
 
-## Done (129 tests pass)
+## Done (141 tests pass)
 
 | Module | Legacy actions ported | Notes |
 | --- | --- | --- |
@@ -34,26 +34,25 @@ PostgreSQL row level security.
 | Finance | saveReceipt, getReceipts, getRevenueByPatient, getDailyCollection, getFinanceSummary, getProfitLoss, getExpenses, saveExpense, deleteExpense, getPatientOutstanding, getOutstandingList, plus getTreatmentPlan and saveTreatmentPlan | per-clinic receipt series (`next_receipt_no()`), receipts can't be deleted by the app, expenses are voided not removed, balances measure receipts against the plan estimate total |
 | Clinical | getClinicalRecords, the 15 flat form saves (Pathology, Radiology, Radiograph, Local Anesthesia, Intra Oral, Prescription, Scaling, Minor Surgery, TMJoint, Restoration, Orthodontics + Progress, Denture, Pedo, Lab Log), get/saveClinicalSheets, get/saveCarePlan, saveConsent, getTreatmentProgress, generateSOAPNotes | the flat forms are generated from the live code (`api/src/legacy/clinical-forms.ts`, rerun `py api/scripts/gen-clinical-forms.py` from the repo root rather than edit); consents are append only; the narrative needs `ANTHROPIC_API_KEY` in `api/.env`, is capped at 20 per person per 10 min, and uses the clinic's own name (the live prompt said K.B. Dental). It sends the case details to Anthropic, so it stays off until Diya decides |
 | Treatment cases | getProcedureLibrary, saveProcedureLibrary, startTreatmentCase, getOpenCase, getCaseState, resolveStageOutcome, appendCaseStage | each clinic's library starts as a copy of the live standard list (274 rows, `procedure-defaults.json`) and is theirs to edit; stage rules are pure functions in `case-stages.ts`; booking and resolving use `appointments:*` permissions, saving the library needs `masters:write`; an empty library save is refused |
+| Documents | uploadPatientDocument, getPatientDocuments, getPatientDocumentContent, deletePatientDocument, createDocumentPDF | files in a folder on the server (`DOCUMENT_DIR`, default `~/.kb-pms/documents`), one sub-folder per clinic, stored under a random id (a typed name never becomes a path); only safe types keep their type, anything else is stored as an opaque download; delete hides the document and keeps the file; PDFs use the machine's Edge/Chrome (`PDF_BROWSER`), with the page locked down by CSP and a dead proxy, and PDF export is off until that is set. Permissions: list/view `clinical:read`, upload/delete `clinical:write`, PDF `patients:write` (confirm with Viveyk) |
 | REST | /api/v1/auth, /patients, /appointments | |
 
 Checked in a browser: sign-in, Master, and quick registration (issued AL1001).
 
 ## Left, in this order
 
-1. **Documents**: upload, list, content, delete, createDocumentPDF. Needs
-   S3-compatible storage with one prefix per clinic, or a local folder for now.
-2. **CRM and chatbot**: getCrmData, saveCrmCollection, queueCrmLead,
+1. **CRM and chatbot**: getCrmData, saveCrmCollection, queueCrmLead,
    getCrmLeadInbox, markCrmLeadsTaken, findAppointmentsByPhone,
    saveChatbotAppointment, chatbotReply. Diya decided the chatbot never looks
    a patient up without a login.
-3. Point the `SCRIPT_URL` in `register.html`, `chatbot.html` and
+2. Point the `SCRIPT_URL` in `register.html`, `chatbot.html` and
    `expense.html` at `window.KB_SCRIPT_URL_OVERRIDE` (only `index.html` does today).
-4. Run every flow in the Flow test report in a browser (Playwright), against
+3. Run every flow in the Flow test report in a browser (Playwright), against
    the new backend, and record works / breaks / conditions in the report.
-5. Data migration from the Sheets. Diya will share view access or .xlsx
+4. Data migration from the Sheets. Diya will share view access or .xlsx
    files; no edit access is needed. Viveyk's `migration/` folder is a
    starting point only.
-6. Hosting, domain, backups (Google Drive is future scope), Windows-service
+5. Hosting, domain, backups (Google Drive is future scope), Windows-service
    or server setup.
 
 To find the actions a screen still lacks, call each one with `apiDirect`
