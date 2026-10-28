@@ -142,6 +142,6 @@ describe("consent narrative", () => {
     process.env.ANTHROPIC_API_KEY = "test-key";
     vi.stubGlobal("fetch", vi.fn(async () => { throw new Error("socket hang up to 10.0.0.5"); }));
     const res = await exec(w, admin, "generateSOAPNotes", { name: "X" });
-    expect(res).toEqual({ success: false, error: "The narrative writer could not be reached. Try again." });
+    expect(res).toEqual({ success: false, error: "The writer could not be reached. Try again." });
   });
 });

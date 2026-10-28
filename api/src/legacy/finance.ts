@@ -61,8 +61,8 @@ const monthLabel = (key: string) => en(key + "-01", { month: "long", year: "nume
  * take every patient's balance down with it.
  */
 const ESTIMATE_TOTAL = sql<number>`(CASE
-  WHEN regexp_replace(coalesce(estimate->>'total', ''), '[^0-9.\-]', '', 'g') ~ '^[0-9]{1,12}(\.[0-9]{1,4})?$'
-  THEN regexp_replace(coalesce(estimate->>'total', ''), '[^0-9.\-]', '', 'g')::float8
+  WHEN regexp_replace(coalesce(estimate->>'total', ''), '[^0-9.-]', '', 'g') ~ '^[0-9]{1,12}([.][0-9]{1,4})?$'
+  THEN regexp_replace(coalesce(estimate->>'total', ''), '[^0-9.-]', '', 'g')::float8
   ELSE 0 END)`;
 
 export const finance: ActionTable = {

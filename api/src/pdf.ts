@@ -5,6 +5,7 @@
 //   - it is served to the browser from a one-shot loopback address with a
 //     Content-Security-Policy that allows only inline styles and data: images,
 //     so no script runs and nothing is fetched;
+//   - every <meta> element is stripped, so the page cannot redirect itself;
 //   - any other address the page could reach is sent to a dead proxy;
 //   - the browser gets a throw-away profile, a time limit, and at most two
 //     run at once.
@@ -35,11 +36,19 @@ async function fileSettled(path: string, deadline: number): Promise<void> {
   throw new Error("timed out");
 }
 
-export async function htmlToPdf(html: string): Promise<Buffer> {
+/**
+ * Every <meta> element is removed, not just refresh ones: a meta tag is the
+ * one way a page can send the browser somewhere else without a script or a
+ * click, and a tag cannot be written without the literal text "<meta". The
+ * character set is declared in the response header instead.
+ */
+export const withoutMeta = (html: string) => html.replace(/<\s*meta[^>]*>?/gi, "");
+
+export async function htmlToPdf(source: string): Promise<Buffer> {
+  const html = withoutMeta(source);
   const browser = process.env.PDF_BROWSER;
   if (!browser) throw new PdfUnavailable("PDF export is not set up on this server");
-  if (Buffer.byteLength(html) > MAX_HTML_BYTES) throw new PdfUnavailable("That document is too large to turn into a PDF");
-  if (/<meta[^>]+http-equiv\s*=\s*["']?\s*refresh/i.test(html)) throw new PdfUnavailable("That document cannot be turned into a PDF");
+  if (Buffer.byteLength(source) > MAX_HTML_BYTES) throw new PdfUnavailable("That document is too large to turn into a PDF");
   if (running >= 2) throw new PdfUnavailable("The PDF maker is busy. Try again in a moment.");
 
   running++;

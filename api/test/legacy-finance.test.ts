@@ -1,5 +1,7 @@
 // Receipts, collections, expenses, profit and loss and balances through /exec.
+import { sql } from "kysely";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { setTenant } from "../src/db/index.js";
 import { exec, execLogin } from "./legacy.js";
 import { makeWorld, type World } from "./setup.js";
 
@@ -165,6 +167,21 @@ describe("balances", () => {
       expect(res).toMatchObject({ success: false, error: "The estimate total must be an amount of money" });
     }
     expect((await exec(w, admin, "getOutstandingList", {})).success).toBe(true);
+  });
+
+  it("reads a damaged total already in the books as nothing owed, instead of failing the list", async () => {
+    await w.db.transaction().execute(async (tx) => {
+      await setTenant(tx, w.clinicA);
+      const plans = [["BAD1", "12-34"], ["BAD2", "1.2.3"], ["BAD3", "9".repeat(61)], ["GOOD1", "Rs 2,500.50"]]
+        .map(([uhid, total]) => ({ uhid, patient_name: uhid, estimate: { total } }));
+      await sql`INSERT INTO treatment_plans (uhid, patient_name, estimate)
+        SELECT uhid, patient_name, estimate FROM jsonb_to_recordset(${JSON.stringify(plans)}::jsonb)
+          AS t(uhid text, patient_name text, estimate jsonb)`.execute(tx);
+    });
+    const list = await exec(w, admin, "getOutstandingList", {});
+    expect(list.success).toBe(true);
+    expect(list.list.map((x: { uhid: string }) => x.uhid)).toEqual(["GOOD1"]);
+    expect(list.list[0].estimateTotal).toBe(2500.5);
   });
 
   it("keeps the balances of one clinic from another", async () => {

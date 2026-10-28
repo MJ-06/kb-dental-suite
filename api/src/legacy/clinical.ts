@@ -3,6 +3,7 @@
 // progress and the consent narrative writer, answering as the live Apps
 // Script does.
 import { sql } from "kysely";
+import { callLimiter, complete, LlmError } from "../llm.js";
 import { RECORD_FORMS, RECORD_HEADINGS, RECORD_TABS } from "./clinical-forms.js";
 import { read, write, DeskError, type ActionTable, type Params } from "./types.js";
 import { jsonOf, nz, str, uhidOf } from "./util.js";
@@ -35,9 +36,7 @@ const formSaves: ActionTable = Object.fromEntries(
 
 // A narrative a doctor asks for costs money and sends the case details to the
 // language model, so it is capped per person and says plainly when no key is set.
-const SOAP_LIMIT = 20;
-const SOAP_WINDOW_MS = 10 * 60_000;
-const soapCalls = new Map<string, number[]>();
+const soapAllowed = callLimiter(20, 10 * 60_000);
 
 function soapPrompt(clinicName: string, p: Params): string {
   return [
@@ -179,30 +178,18 @@ export const clinical: ActionTable = {
   }, "clinical:read"),
 
   generateSOAPNotes: write("clinical:write", async (p, { tx, actor }) => {
-    const key = process.env.ANTHROPIC_API_KEY;
-    if (!key) return { success: false, error: "ANTHROPIC_API_KEY is not set on the server" };
-
-    const now = Date.now();
-    const recent = (soapCalls.get(actor.userId) ?? []).filter((t) => now - t < SOAP_WINDOW_MS);
-    if (recent.length >= SOAP_LIMIT) return { success: false, error: "Too many narratives requested. Wait a few minutes and try again." };
-    soapCalls.set(actor.userId, [...recent, now]);
-
+    if (!process.env.ANTHROPIC_API_KEY) return { success: false, error: "ANTHROPIC_API_KEY is not set on the server" };
+    if (!soapAllowed(actor.userId)) return { success: false, error: "Too many narratives requested. Wait a few minutes and try again." };
     const clinic = (await sql<{ name: string }>`SELECT name FROM clinic_profile()`.execute(tx)).rows[0]?.name ?? "the clinic";
     try {
-      const res = await fetch(process.env.ANTHROPIC_API_URL ?? "https://api.anthropic.com/v1/messages", {
-        method: "POST",
-        headers: { "content-type": "application/json", "x-api-key": key, "anthropic-version": "2023-06-01" },
-        body: JSON.stringify({
-          model: process.env.SOAP_MODEL ?? "claude-sonnet-5-5", max_tokens: 700,
-          messages: [{ role: "user", content: soapPrompt(clinic, p) }]
-        }),
-        signal: AbortSignal.timeout(30_000)
+      const soap = await complete({
+        model: process.env.SOAP_MODEL ?? "claude-sonnet-5-5", maxTokens: 700,
+        messages: [{ role: "user", content: soapPrompt(clinic, p) }]
       });
-      const data = (await res.json()) as { content?: { text?: string }[]; error?: { message?: string } };
-      const text = data.content?.[0]?.text;
-      return text ? { success: true, soap: text } : { success: false, error: data.error?.message ?? "No content in API response" };
-    } catch {
-      return { success: false, error: "The narrative writer could not be reached. Try again." };
+      return { success: true, soap };
+    } catch (e) {
+      if (e instanceof LlmError) return { success: false, error: e.message };
+      throw e;
     }
   })
 };

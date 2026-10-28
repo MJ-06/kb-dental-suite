@@ -3,7 +3,10 @@ import { existsSync } from "node:fs";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
+import { withoutMeta } from "../src/pdf.js";
 import { exec, execLogin } from "./legacy.js";
 import { makeWorld, type World } from "./setup.js";
 
@@ -115,16 +118,46 @@ describe("generated PDFs", () => {
     expect(first).toMatchObject({ success: true, fileName: expect.stringMatching(/^Progress Notes_.*\.pdf$/) });
     expect(Buffer.from(first.base64, "base64").subarray(0, 5).toString()).toBe("%PDF-");
     const again = await exec(w, desk, "createDocumentPDF", { uhid, html, docName: "Progress Notes", dedupeKey: "k1" });
-    expect(again).toMatchObject({ success: true, duplicate: true, id: first.id });
+    expect(again).toMatchObject({ success: true, duplicate: true, fileName: first.fileName });
+    expect(again.id).toBeUndefined(); // a duplicate reveals no document id to someone who cannot open it
     expect(again.base64).toBeUndefined();
     const listed = (await exec(w, admin, "getPatientDocuments", { uhid })).documents.filter((d: { mimeType: string }) => d.mimeType === "application/pdf");
     expect(listed).toHaveLength(1);
     expect(listed[0]).toMatchObject({ category: "Progress Notes" });
   }, 60_000);
 
-  it.runIf(existsSync(EDGE))("refuses a page that tries to redirect itself", async () => {
+  it.runIf(existsSync(EDGE))("strips a redirect instead of following it", async () => {
     process.env.PDF_BROWSER = EDGE;
-    const res = await exec(w, desk, "createDocumentPDF", { uhid, html: "<meta http-equiv='refresh' content='0;url=http://127.0.0.1:8080/'>" });
-    expect(res).toMatchObject({ success: false, error: "That document cannot be turned into a PDF" });
+    let hits = 0;
+    const target = createServer((_req, res) => { hits++; res.end("secret"); });
+    await new Promise<void>((ok) => target.listen(0, "127.0.0.1", ok));
+    const url = `http://127.0.0.1:${(target.address() as AddressInfo).port}/`;
+    try {
+      const res = await exec(w, desk, "createDocumentPDF", { uhid, html: `<meta http-equiv="refresh" content="0;url=${url}"><p>Visit</p>` });
+      expect(res.success).toBe(true);
+      await new Promise((r) => setTimeout(r, 500));
+      expect(hits).toBe(0);
+    } finally { target.close(); }
+  }, 60_000);
+
+  it("files a printed document only for a patient on the register, always as Progress Notes", async () => {
+    process.env.PDF_BROWSER = EDGE;
+    expect((await exec(w, desk, "createDocumentPDF", { uhid: "ZZ9999", html: "<p>x</p>" })).error).toBe("Patient not found");
+    if (!existsSync(EDGE)) return;
+    await exec(w, desk, "createDocumentPDF", { uhid, html: "<p>y</p>", category: "Consent Form (Scanned PDF)", dedupeKey: "k2" });
+    const docs = (await exec(w, admin, "getPatientDocuments", { uhid })).documents;
+    expect(docs.filter((d: { category: string }) => d.category === "Consent Form (Scanned PDF)")).toHaveLength(0);
+  }, 60_000);
+});
+
+describe("removing meta elements", () => {
+  it("removes every form a meta tag can take", () => {
+    for (const bad of [
+      "<meta http-equiv=refresh content='0;url=http://x/'>", "<META HTTP-EQUIV=\"Refresh\" content=1>", "< meta http-equiv=refresh>",
+      "<meta\nhttp-equiv=refresh\ncontent=0>", "<svg><meta http-equiv=refresh content=0></svg>", "<meta http-equiv=refresh"
+    ]) {
+      expect(withoutMeta(`<p>a</p>${bad}<p>b</p>`), bad).not.toMatch(/<\s*meta/i);
+    }
+    expect(withoutMeta("<p>kept</p>")).toBe("<p>kept</p>");
   });
 });

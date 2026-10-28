@@ -23,6 +23,10 @@ const SAFE_TYPES = new Set([
   "application/vnd.ms-excel", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 ]);
 
+// What a printed document is filed as. It is not the caller's to choose: reception may make these PDFs,
+// but only those with clinical access decide what else lives in a patient's folder.
+const PDF_CATEGORY = "Progress Notes";
+
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
 
 const safeType = (v: unknown) => {
@@ -144,13 +148,16 @@ export const documents: ActionTable = {
     const html = str(p.html);
     if (!html) return { success: false, error: "No document content received" };
 
+    // Only a patient on the register has documents filed under them.
+    if (!(await sql`SELECT 1 FROM patients WHERE uhid = ${uhid}`.execute(tx)).rows.length) return { success: false, error: "Patient not found" };
+
     // A reprint is recognised before anything is made, so it costs neither a PDF nor a second file.
     const key = str(p.dedupeKey);
     if (key) {
-      const had = (await sql<{ id: string; file_name: string }>`
-        SELECT id, file_name FROM patient_documents
+      const had = (await sql<{ file_name: string }>`
+        SELECT file_name FROM patient_documents
          WHERE upper(uhid) = ${uhid} AND doc_key = ${key} AND deleted_at IS NULL`.execute(tx)).rows[0];
-      if (had) return { success: true, duplicate: true, id: had.id, fileName: had.file_name };
+      if (had) return { success: true, duplicate: true, fileName: had.file_name };
     }
 
     let pdf: Buffer;
@@ -160,7 +167,7 @@ export const documents: ActionTable = {
     }
     const name = `${safeName(p.docName, "Document")}_${uhid}_${await today(tx)}.pdf`;
     const id = await fileAway(tx, actor.clinicId, {
-      uhid, name, mime: "application/pdf", category: str(p.category) || "Progress Notes", bytes: pdf, docKey: nz(key)
+      uhid, name, mime: "application/pdf", category: PDF_CATEGORY, bytes: pdf, docKey: nz(key)
     });
     // Returned inline so the screen can save or attach it; no public link is made.
     return pdf.length <= INLINE_MAX_BYTES

@@ -22,7 +22,7 @@ PostgreSQL row level security.
 - `index.html` sign-in asks for clinic code + username + password when the
   page is served by the API, and only the password on the old backend.
 
-## Done (141 tests pass)
+## Done (159 tests pass)
 
 | Module | Legacy actions ported | Notes |
 | --- | --- | --- |
@@ -35,24 +35,21 @@ PostgreSQL row level security.
 | Clinical | getClinicalRecords, the 15 flat form saves (Pathology, Radiology, Radiograph, Local Anesthesia, Intra Oral, Prescription, Scaling, Minor Surgery, TMJoint, Restoration, Orthodontics + Progress, Denture, Pedo, Lab Log), get/saveClinicalSheets, get/saveCarePlan, saveConsent, getTreatmentProgress, generateSOAPNotes | the flat forms are generated from the live code (`api/src/legacy/clinical-forms.ts`, rerun `py api/scripts/gen-clinical-forms.py` from the repo root rather than edit); consents are append only; the narrative needs `ANTHROPIC_API_KEY` in `api/.env`, is capped at 20 per person per 10 min, and uses the clinic's own name (the live prompt said K.B. Dental). It sends the case details to Anthropic, so it stays off until Diya decides |
 | Treatment cases | getProcedureLibrary, saveProcedureLibrary, startTreatmentCase, getOpenCase, getCaseState, resolveStageOutcome, appendCaseStage | each clinic's library starts as a copy of the live standard list (274 rows, `procedure-defaults.json`) and is theirs to edit; stage rules are pure functions in `case-stages.ts`; booking and resolving use `appointments:*` permissions, saving the library needs `masters:write`; an empty library save is refused |
 | Documents | uploadPatientDocument, getPatientDocuments, getPatientDocumentContent, deletePatientDocument, createDocumentPDF | files in a folder on the server (`DOCUMENT_DIR`, default `~/.kb-pms/documents`), one sub-folder per clinic, stored under a random id (a typed name never becomes a path); only safe types keep their type, anything else is stored as an opaque download; delete hides the document and keeps the file; PDFs use the machine's Edge/Chrome (`PDF_BROWSER`), with the page locked down by CSP and a dead proxy, and PDF export is off until that is set. Permissions: list/view `clinical:read`, upload/delete `clinical:write`, PDF `patients:write` (confirm with Viveyk) |
+| CRM and chatbot | getCrmData, saveCrmCollection, queueCrmLead, getCrmLeadInbox, markCrmLeadsTaken, findAppointmentsByPhone, saveChatbotAppointment, chatbotReply | each CRM list saves whole (empty allowed, missing or damaged refused); the lead inbox queues a patient once; the chatbot needs a signed-in session for every call (Diya's rule), books through the desk's own diary rules, and relays to the model through `src/llm.ts` (needs `ANTHROPIC_API_KEY`, 60 turns per person per 10 min). CRM reads need `patients:read`, writes `patients:write` (my default) |
 | REST | /api/v1/auth, /patients, /appointments | |
 
 Checked in a browser: sign-in, Master, and quick registration (issued AL1001).
 
 ## Left, in this order
 
-1. **CRM and chatbot**: getCrmData, saveCrmCollection, queueCrmLead,
-   getCrmLeadInbox, markCrmLeadsTaken, findAppointmentsByPhone,
-   saveChatbotAppointment, chatbotReply. Diya decided the chatbot never looks
-   a patient up without a login.
-2. Point the `SCRIPT_URL` in `register.html`, `chatbot.html` and
+1. Point the `SCRIPT_URL` in `register.html`, `chatbot.html` and
    `expense.html` at `window.KB_SCRIPT_URL_OVERRIDE` (only `index.html` does today).
-3. Run every flow in the Flow test report in a browser (Playwright), against
+2. Run every flow in the Flow test report in a browser (Playwright), against
    the new backend, and record works / breaks / conditions in the report.
-4. Data migration from the Sheets. Diya will share view access or .xlsx
+3. Data migration from the Sheets. Diya will share view access or .xlsx
    files; no edit access is needed. Viveyk's `migration/` folder is a
    starting point only.
-5. Hosting, domain, backups (Google Drive is future scope), Windows-service
+4. Hosting, domain, backups (Google Drive is future scope), Windows-service
    or server setup.
 
 To find the actions a screen still lacks, call each one with `apiDirect`
@@ -119,6 +116,7 @@ npx tsc --noEmit
   `authRequired:false`. Someone with script access must set the script
   property `REQUIRE_AUTH=true`. Until then the live Documents screen also
   shows "no documents" because those calls fail with AUTH_REQUIRED.
+- **Security notes from the module work.** Two automatic reviews of the new modules found real bugs, now fixed: a malformed treatment-plan total could break every balance query, and PDF input could redirect the headless browser with an obfuscated `<meta refresh>` (all `<meta>` is now stripped). Watch for backslash escapes inside `sql` templates: JavaScript removes the backslash (`'\D'` becomes `'D'`), so write `[^0-9]`, `[.]` and so on.
 - **Security review owed.** The automatic reviews of the last commit and
   of the push failed with HTTP 429 (see `~/.claude/security/log.txt`).
   Review the branch manually before more work lands.
