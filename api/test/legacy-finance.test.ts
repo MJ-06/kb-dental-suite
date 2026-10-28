@@ -128,6 +128,21 @@ describe("expenses and profit and loss", () => {
   });
 });
 
+describe("labels and the signed-in user", () => {
+  it("spells every week and month the same way on every machine", async () => {
+    const weekly = await exec(w, admin, "getProfitLoss", { mode: "weekly", periods: 60 });
+    for (const x of weekly.series) expect(x.label).toMatch(/^\d{2} [A-Z][a-z]{2} – \d{2} [A-Z][a-z]{2}$/);
+    expect(weekly.series.some((x: { label: string }) => x.label.includes(" Sep"))).toBe(true);
+    const monthly = await exec(w, admin, "getProfitLoss", { mode: "monthly", periods: 24 });
+    expect(monthly.series.some((x: { label: string }) => x.label.startsWith("September "))).toBe(true);
+  });
+
+  it("tells the dashboard who is signed in", async () => {
+    expect(await exec(w, admin, "whoAmI")).toEqual({ success: true, name: "a admin", role: "admin", clinic: "Alpha Dental" });
+    expect(await exec(w, desk, "whoAmI")).toMatchObject({ role: "reception" });
+  });
+});
+
 describe("balances", () => {
   const PAID = 1000 + 750.5 + 1 + 70;
 

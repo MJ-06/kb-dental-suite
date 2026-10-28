@@ -48,11 +48,13 @@ const weekKey = (iso: string) => {
 
 const monthKey = (iso: string) => iso.slice(0, 7);
 
-const en = (iso: string, o: Intl.DateTimeFormatOptions) =>
-  new Date(iso + "T12:00:00Z").toLocaleDateString("en-IN", { timeZone: "UTC", ...o });
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+const MONTHS_LONG = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
+// Fixed names, not the runtime's locale data: en-IN spells September "Sept" on some Node versions and "Sep" on others.
+const dayMon = (iso: string) => `${iso.slice(8, 10)} ${MONTHS[Number(iso.slice(5, 7)) - 1]}`;
 
-const weekLabel = (key: string) => `${en(key, { day: "2-digit", month: "short" })} – ${en(addDays(key, 6), { day: "2-digit", month: "short" })}`;
-const monthLabel = (key: string) => en(key + "-01", { month: "long", year: "numeric" });
+const weekLabel = (key: string) => `${dayMon(key)} – ${dayMon(addDays(key, 6))}`;
+const monthLabel = (key: string) => `${MONTHS_LONG[Number(key.slice(5, 7)) - 1]} ${key.slice(0, 4)}`;
 
 /**
  * What a plan says it will cost: the estimate's own total ("₹5,000" and 5000

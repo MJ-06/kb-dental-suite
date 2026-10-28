@@ -1092,7 +1092,7 @@ function DOBInput({
     }
   }, [value]);
   const years = [];
-  for (let y = new Date().getFullYear() - 5; y >= 1930; y--) years.push(y);
+  for (let y = new Date().getFullYear(); y >= 1930; y--) years.push(y); // a child registers too: the list starts this year
   const days = [];
   for (let d = 1; d <= 31; d++) days.push(String(d).padStart(2, "0"));
   const upd = (d, m, y) => {
@@ -7822,6 +7822,17 @@ function PatientBalancePill({ uhid, size }) {
   if (loading) return React.createElement("span", { style:{ fontSize:small?9.5:11.5, color:"#5a5a5a" } }, "⏳ Balance...");
   if (!bal) return null;
   const owed = Math.max(0, bal.outstanding);
+  // With no treatment estimate there is nothing to be "paid up" against: say so, rather than claiming Paid Up.
+  if (!(bal.estimateTotal > 0)) {
+    return React.createElement("span", {
+      title: "No treatment estimate saved for this patient · Paid " + fmtRs(bal.paid),
+      style:{
+        display:"inline-flex", alignItems:"center", gap:4, fontWeight:800, borderRadius:999,
+        padding: small ? "2px 8px" : "4px 12px", fontSize: small ? 10 : 12.5,
+        background:"#f3f4f6", color:"#4b5563", border:"1px solid #9ca3af"
+      }
+    }, "No estimate yet");
+  }
   const paidUp = owed <= 0;
   return React.createElement("span", {
     title: "Treatment estimate " + fmtRs(bal.estimateTotal) + " · Paid " + fmtRs(bal.paid),
@@ -8080,6 +8091,11 @@ function Dashboard({
   const [birthdaysLoading, setBirthdaysLoading] = useState(true);
   const [followUpCount, setFollowUpCount] = useState(0);
   const [followUpsLoading, setFollowUpsLoading] = useState(true);
+  // The greeting names whoever is signed in, not a fixed doctor.
+  const [whoami, setWhoami] = useState(null);
+  useEffect(() => {
+    api("whoAmI").then(res => { if (res && res.success) setWhoami(res); });
+  }, []);
   useEffect(() => {
     api("getAllPatients").then(res => {
       if (res.success) setStats(prev => [...prev.map((s, i) => i === 1 ? {
@@ -8108,7 +8124,7 @@ function Dashboard({
       fontWeight: 700,
       marginBottom: 4
     }
-  }, "Good morning, Dr. Viveyk"), /*#__PURE__*/React.createElement("div", {
+  }, (() => { const h = new Date().getHours(); return (h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening") + (whoami && whoami.name ? ", " + whoami.name : ""); })()), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 14,
       color: "#444444",

@@ -22,7 +22,7 @@ PostgreSQL row level security.
 - `index.html` sign-in asks for clinic code + username + password when the
   page is served by the API, and only the password on the old backend.
 
-## Done (159 tests pass)
+## Done (161 tests pass)
 
 | Module | Legacy actions ported | Notes |
 | --- | --- | --- |
@@ -43,9 +43,19 @@ report tab): sign-in, Master gate, quick registration, dashboard, booking and
 check-in, a receipt and the Finance dashboard/collection tabs, a Restoration
 form save, CRM and chatbot screens opening. Document upload and PDF export were
 checked by calling the actions from the page, not through their screens.
-Not yet clicked through: register.html, chatbot.html and expense.html as
-standalone pages, Profit & Loss (behind the finance password), prescriptions,
-consent printing, phone width (375px).
+Also run in the browser: expense.html, register.html (lookup), chatbot.html (a
+question), Profit & Loss after the finance password. Not clicked through:
+submitting register.html, prescriptions and consent printing (backend-tested only).
+Phone width (375px): the app has no responsive layout; the fixed 196px sidebar
+takes half the screen. It is a desk-PC and tablet tool; a phone layout is a
+separate piece of work.
+Fixed after the flow tests: the birth-year list now runs to this year; the
+balance pill says "No estimate yet" instead of "Paid Up" when a patient has no
+treatment plan; the dashboard greets the signed-in user (`whoAmI`) instead of
+"Dr. Viveyk"; week labels read "Sep", not "Sept".
+Still hard-coded to K.B. Dental: the letterhead, printed signature lines
+("Dr. Viveyk Mittel"), the chatbot's answers and name, and the Care Plans and
+Treatment Plans cards on the dashboard still show "..." (no count is loaded).
 
 ## Left, in this order
 
