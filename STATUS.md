@@ -38,7 +38,14 @@ PostgreSQL row level security.
 | CRM and chatbot | getCrmData, saveCrmCollection, queueCrmLead, getCrmLeadInbox, markCrmLeadsTaken, findAppointmentsByPhone, saveChatbotAppointment, chatbotReply | each CRM list saves whole (empty allowed, missing or damaged refused); the lead inbox queues a patient once; the chatbot needs a signed-in session for every call (Diya's rule), books through the desk's own diary rules, and relays to the model through `src/llm.ts` (needs `ANTHROPIC_API_KEY`, 60 turns per person per 10 min). CRM reads need `patients:read`, writes `patients:write` (my default) |
 | REST | /api/v1/auth, /patients, /appointments | |
 
-Checked in a browser: sign-in, Master, and quick registration (issued AL1001).
+Checked in a browser (28 Oct, made-up patient AL1001, results in the Flow test
+report tab): sign-in, Master gate, quick registration, dashboard, booking and
+check-in, a receipt and the Finance dashboard/collection tabs, a Restoration
+form save, CRM and chatbot screens opening. Document upload and PDF export were
+checked by calling the actions from the page, not through their screens.
+Not yet clicked through: register.html, chatbot.html and expense.html as
+standalone pages, Profit & Loss (behind the finance password), prescriptions,
+consent printing, phone width (375px).
 
 ## Left, in this order
 
@@ -115,9 +122,22 @@ npx tsc --noEmit
   property `REQUIRE_AUTH=true`. Until then the live Documents screen also
   shows "no documents" because those calls fail with AUTH_REQUIRED.
 - **Security notes from the module work.** Two automatic reviews of the new modules found real bugs, now fixed: a malformed treatment-plan total could break every balance query, and PDF input could redirect the headless browser with an obfuscated `<meta refresh>` (all `<meta>` is now stripped). Watch for backslash escapes inside `sql` templates: JavaScript removes the backslash (`'\D'` becomes `'D'`), so write `[^0-9]`, `[.]` and so on.
-- **Security review owed.** The automatic reviews of the last commit and
-  of the push failed with HTTP 429 (see `~/.claude/security/log.txt`).
-  Review the branch manually before more work lands.
+- **Manual security review of the branch (28 Oct).** Looked at SQL building,
+  headers and CSRF, secrets, uploads and the PDF path. No SQL injection (the
+  few dynamic column names come from fixed lists); `X-Frame-Options`, `nosniff`,
+  `Referrer-Policy` and `no-store` are set; the `.env` files are git-ignored and
+  no patient data is tracked. To do before real use: (1) set `COOKIE_SECURE=true`
+  behind HTTPS; (2) `chatbot.html` loads `react@18` and `@babel/standalone` from
+  unpkg *unpinned and without integrity hashes* on a page that now carries a
+  staff session, and `index.html` loads cdnjs scripts without hashes: pin exact
+  versions and add `integrity`, or serve them from the API; (3) there is no
+  Content-Security-Policy on the pages (they use inline scripts), so a stored
+  script in any patient field would run: a nonce-based CSP is the next hardening
+  step; (4) state-changing `GET /exec` relies on the SameSite=Strict cookie
+  alone, which is fine for same-site use but means no cross-origin embedding;
+  (5) the per-address limit on `/exec` is 3000 a minute, loose for a public
+  address; tighten it once the clinic's own IPs are known.
+- **Automatic reviews** failed with HTTP 429 earlier in the build (see `~/.claude/security/log.txt`); they are working again and caught the issues listed above.
 - **Roles are a working default** (`api/src/auth/permissions.ts`). Viveyk
   has not confirmed them; the proposal and open questions are in the
   design doc.
