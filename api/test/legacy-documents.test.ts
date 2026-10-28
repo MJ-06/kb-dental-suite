@@ -158,6 +158,8 @@ describe("removing meta elements", () => {
     ]) {
       expect(withoutMeta(`<p>a</p>${bad}<p>b</p>`), bad).not.toMatch(/<\s*meta/i);
     }
+    expect(withoutMeta("<me<meta>ta http-equiv=refresh content=0>")).not.toMatch(/<\s*meta/i);
+    expect(() => withoutMeta("<meta".repeat(40))).not.toThrow();
     expect(withoutMeta("<p>kept</p>")).toBe("<p>kept</p>");
   });
 });

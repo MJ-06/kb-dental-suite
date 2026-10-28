@@ -42,7 +42,17 @@ async function fileSettled(path: string, deadline: number): Promise<void> {
  * click, and a tag cannot be written without the literal text "<meta". The
  * character set is declared in the response header instead.
  */
-export const withoutMeta = (html: string) => html.replace(/<\s*meta[^>]*>?/gi, "");
+export const withoutMeta = (html: string): string => {
+  // Removing one tag can join its neighbours into a new one ("<me<meta>ta"), so repeat until nothing changes.
+  let out = html;
+  for (let i = 0; i < 20; i++) {
+    const next = out.replace(/<\s*meta[^>]*>?/gi, "");
+    if (next === out) break;
+    out = next;
+  }
+  if (/<\s*meta/i.test(out)) throw new PdfUnavailable("That document cannot be turned into a PDF");
+  return out;
+};
 
 export async function htmlToPdf(source: string): Promise<Buffer> {
   const html = withoutMeta(source);
