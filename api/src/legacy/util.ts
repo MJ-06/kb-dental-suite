@@ -65,3 +65,10 @@ export function isoDay(v: unknown): string {
 export function uhidOf(v: unknown): string {
   return str(v).toUpperCase();
 }
+
+/** A JSON payload sent as an object or as text, normalised to JSON text; null when empty. A damaged one is refused. */
+export function jsonOf(v: unknown, label: string): string | null {
+  if (v === undefined || v === null || v === "") return null;
+  if (typeof v !== "string") return JSON.stringify(v);
+  try { return JSON.stringify(JSON.parse(v)); } catch { throw new DeskError(`the ${label} arrived damaged and was not saved`); }
+}
