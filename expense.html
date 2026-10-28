@@ -63,7 +63,11 @@ td{padding:7px 8px;border-bottom:1px solid #f0f0eb}
 // PUBLIC_ACTIONS list, so this page has its own lightweight staff login
 // (same staffLogin/authStatus endpoints and session token the main app
 // uses) rather than being left open.
-var SCRIPT_URL = "https://script.google.com/macros/s/AKfycby-OX-qvGE2U9Zt3b-_rpFqc5WQxRT5WMn1A030IcQIKXEaso36cMTbJ6c5xiP5O_6Zvg/exec";
+// When the clinic's own server serves this page, it sets KB_SCRIPT_URL_OVERRIDE to its own /exec,
+// and sign-in then also asks for the clinic code and username.
+var SCRIPT_URL = window.KB_SCRIPT_URL_OVERRIDE || "https://script.google.com/macros/s/AKfycby-OX-qvGE2U9Zt3b-_rpFqc5WQxRT5WMn1A030IcQIKXEaso36cMTbJ6c5xiP5O_6Zvg/exec";
+var NAMED = !!window.KB_SCRIPT_URL_OVERRIDE;
+function remembered(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
 var TOKEN_KEY = "kb_expense_token";
 
 function getToken() { try { return sessionStorage.getItem(TOKEN_KEY) || ""; } catch (e) { return ""; } }
@@ -123,9 +127,11 @@ function renderLogin() {
   app.innerHTML =
     '<div class="card">' +
       '<h2 style="margin-bottom:16px">Staff Sign In</h2>' +
-      '<div class="sub" style="margin-bottom:14px">Enter the clinic app password to record an expense.</div>' +
+      '<div class="sub" style="margin-bottom:14px">' + (NAMED ? "Enter your clinic code, username and password to record an expense." : "Enter the clinic app password to record an expense.") + '</div>' +
       (state.loginErr ? '<div class="err">⚠ ' + esc(state.loginErr) + '</div>' : "") +
-      '<div class="f"><label>Password</label><input type="password" id="l-pw" autofocus/></div>' +
+      (NAMED ? '<div class="f"><label>Clinic code</label><input type="text" id="l-clinic" autocomplete="organization" autocapitalize="none" value="' + esc(remembered("kb_clinic_code")) + '"/></div>' +
+               '<div class="f"><label>Username</label><input type="text" id="l-user" autocomplete="username" autocapitalize="none" value="' + esc(remembered("kb_username")) + '"/></div>' : "") +
+      '<div class="f"><label>Password</label><input type="password" id="l-pw" autocomplete="current-password"' + (NAMED ? "" : " autofocus") + '/></div>' +
       '<button class="btn" id="l-go"' + (state.loginBusy ? " disabled" : "") + '>' + (state.loginBusy ? "Signing in..." : "Sign In") + '</button>' +
     '</div>';
   var pwEl = document.getElementById("l-pw");
@@ -136,8 +142,15 @@ function renderLogin() {
 function doLogin() {
   var pw = document.getElementById("l-pw").value;
   if (!pw.trim()) return;
+  var creds = { password: pw };
+  if (NAMED) {
+    creds.clinic = (document.getElementById("l-clinic").value || "").trim();
+    creds.username = (document.getElementById("l-user").value || "").trim();
+    if (!creds.clinic || !creds.username) { state.loginErr = "Enter the clinic code and your username"; render(); return; }
+    try { localStorage.setItem("kb_clinic_code", creds.clinic); localStorage.setItem("kb_username", creds.username); } catch (e) {}
+  }
   state.loginBusy = true; state.loginErr = ""; render();
-  api("staffLogin", { password: pw }).then(function (res) {
+  api("staffLogin", creds).then(function (res) {
     state.loginBusy = false;
     if (res && res.success && res.token) {
       setToken(res.token);

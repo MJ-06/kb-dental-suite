@@ -72,7 +72,8 @@ textarea{resize:vertical;min-height:70px}
 // patientCompleteRegistration. Both require the patient's own mobile number to
 // match the record, return only what this form needs, and cannot create a
 // patient or change UHID, name or DOB. Nothing is shown until that match.
-var SCRIPT_URL = "https://script.google.com/macros/s/AKfycby-OX-qvGE2U9Zt3b-_rpFqc5WQxRT5WMn1A030IcQIKXEaso36cMTbJ6c5xiP5O_6Zvg/exec";
+// When the clinic's own server serves this page, it sets KB_SCRIPT_URL_OVERRIDE to its own /exec.
+var SCRIPT_URL = window.KB_SCRIPT_URL_OVERRIDE || "https://script.google.com/macros/s/AKfycby-OX-qvGE2U9Zt3b-_rpFqc5WQxRT5WMn1A030IcQIKXEaso36cMTbJ6c5xiP5O_6Zvg/exec";
 
 function api(action, data) {
   var p = new URLSearchParams({ action: action });
@@ -82,6 +83,11 @@ function api(action, data) {
   });
   return fetch(SCRIPT_URL + "?" + p.toString())
     .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
+    .then(function (res) {
+      // The clinic's server wants a staff sign-in (done once, in the main app, on this device).
+      if (res && res.authRequired) return { success: false, error: "Please ask the front desk to sign in on this device first, then try again." };
+      return res;
+    })
     .catch(function (e) { console.error("API:", e); return { success: false, error: e.message }; });
 }
 

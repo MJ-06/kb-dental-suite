@@ -42,14 +42,12 @@ Checked in a browser: sign-in, Master, and quick registration (issued AL1001).
 
 ## Left, in this order
 
-1. Point the `SCRIPT_URL` in `register.html`, `chatbot.html` and
-   `expense.html` at `window.KB_SCRIPT_URL_OVERRIDE` (only `index.html` does today).
-2. Run every flow in the Flow test report in a browser (Playwright), against
+1. Run every flow in the Flow test report in a browser (Playwright), against
    the new backend, and record works / breaks / conditions in the report.
-3. Data migration from the Sheets. Diya will share view access or .xlsx
+2. Data migration from the Sheets. Diya will share view access or .xlsx
    files; no edit access is needed. Viveyk's `migration/` folder is a
    starting point only.
-4. Hosting, domain, backups (Google Drive is future scope), Windows-service
+3. Hosting, domain, backups (Google Drive is future scope), Windows-service
    or server setup.
 
 To find the actions a screen still lacks, call each one with `apiDirect`
@@ -123,8 +121,7 @@ npx tsc --noEmit
 - **Roles are a working default** (`api/src/auth/permissions.ts`). Viveyk
   has not confirmed them; the proposal and open questions are in the
   design doc.
-- **register.html** (the iPad patient form) now needs a staff session on the
-  iPad. This needs confirming with Diya and Viveyk.
+- **register.html and chatbot.html** now point at the clinic's own server and, like everything on `/exec`, need a staff session on the device (sign in once in the main app; they say so when it is missing). `expense.html` has its own sign-in, which now asks for clinic code + username when served by the API. A *public* chatbot (patients booking without a login) would need its own clinic-scoped endpoint with rate limits: not built, needs a decision from Diya and Viveyk.
 - **UX findings so far:**
   - The year-of-birth list stops at 2021, so children under 5 can't be registered.
   - The greeting ("Dr. Viveyk") and the letterhead are hard-coded, which is

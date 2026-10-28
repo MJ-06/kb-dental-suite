@@ -24,10 +24,15 @@ body{font-family:'Poppins',sans-serif;background:#F0F2F8;height:100vh;overflow:h
 <script type="text/babel">
 const { useState, useEffect, useRef } = React;
 
-const SCRIPT_URL = "https://script.google.com/macros/s/AKfycby-OX-qvGE2U9Zt3b-_rpFqc5WQxRT5WMn1A030IcQIKXEaso36cMTbJ6c5xiP5O_6Zvg/exec";
+// When the clinic's own server serves this page, it sets KB_SCRIPT_URL_OVERRIDE to its own /exec.
+const SCRIPT_URL = window.KB_SCRIPT_URL_OVERRIDE || "https://script.google.com/macros/s/AKfycby-OX-qvGE2U9Zt3b-_rpFqc5WQxRT5WMn1A030IcQIKXEaso36cMTbJ6c5xiP5O_6Zvg/exec";
 function backendApi(action, data) {
   var p = new URLSearchParams(Object.assign({action:action}, data||{}));
-  return fetch(SCRIPT_URL + "?" + p.toString()).then(function(r){ return r.json(); });
+  return fetch(SCRIPT_URL + "?" + p.toString()).then(function(r){ return r.json(); }).then(function(res){
+    // The clinic's server answers only a signed-in device (done once, in the main app).
+    if (res && res.authRequired) return { success:false, error:"Please ask the front desk to sign in on this device first, then try again." };
+    return res;
+  });
 }
 
 function ChatBotPage() {
