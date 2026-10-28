@@ -54,8 +54,16 @@ const en = (iso: string, o: Intl.DateTimeFormatOptions) =>
 const weekLabel = (key: string) => `${en(key, { day: "2-digit", month: "short" })} – ${en(addDays(key, 6), { day: "2-digit", month: "short" })}`;
 const monthLabel = (key: string) => en(key + "-01", { month: "long", year: "numeric" });
 
-/** What a plan says it will cost: the estimate's own total. */
-const ESTIMATE_TOTAL = sql<number>`coalesce(nullif(regexp_replace(coalesce(estimate->>'total', ''), '[^0-9.\-]', '', 'g'), '')::float8, 0)`;
+/**
+ * What a plan says it will cost: the estimate's own total ("₹5,000" and 5000
+ * alike). Anything that is not a plain number once the symbols are stripped
+ * counts as 0 rather than failing the query, so one damaged plan can never
+ * take every patient's balance down with it.
+ */
+const ESTIMATE_TOTAL = sql<number>`(CASE
+  WHEN regexp_replace(coalesce(estimate->>'total', ''), '[^0-9.\-]', '', 'g') ~ '^[0-9]{1,12}(\.[0-9]{1,4})?$'
+  THEN regexp_replace(coalesce(estimate->>'total', ''), '[^0-9.\-]', '', 'g')::float8
+  ELSE 0 END)`;
 
 export const finance: ActionTable = {
   saveReceipt: write("payments:collect", async (p, { tx }) => {
@@ -280,6 +288,11 @@ export const finance: ActionTable = {
       if (typeof v !== "string") return JSON.stringify(v);
       try { return JSON.stringify(JSON.parse(v)); } catch { throw new DeskError("The treatment plan arrived damaged and was not saved"); }
     };
+    const total = (JSON.parse(json(p.estimate) ?? "null") as { total?: unknown } | null)?.total;
+    if (total !== undefined && total !== null && total !== "") {
+      // Same reading as ESTIMATE_TOTAL: symbols and commas go, what is left must be plain money.
+      if (!/^\d{1,12}(\.\d{1,4})?$/.test(String(total).replace(/[^0-9.\-]/g, ""))) throw new DeskError("The estimate total must be an amount of money");
+    }
     const patient = (await sql<{ id: string }>`SELECT id FROM patients WHERE uhid = ${uhid}`.execute(tx)).rows[0];
     await sql`
       INSERT INTO treatment_plans (patient_id, uhid, patient_name, plan_date, plan_rows, estimate)

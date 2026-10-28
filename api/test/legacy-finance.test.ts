@@ -159,6 +159,14 @@ describe("balances", () => {
     expect(res.json()).toMatchObject({ success: false, error: expect.stringMatching(/damaged/) });
   });
 
+  it("refuses an estimate total that is not money, so no balance query can be broken by it", async () => {
+    for (const total of ["1.2.3", "lots", "-5", "9".repeat(400)]) {
+      const res = await exec(w, admin, "saveTreatmentPlan", { uhid, rows: [], estimate: { total } });
+      expect(res).toMatchObject({ success: false, error: "The estimate total must be an amount of money" });
+    }
+    expect((await exec(w, admin, "getOutstandingList", {})).success).toBe(true);
+  });
+
   it("keeps the balances of one clinic from another", async () => {
     expect((await exec(w, betaAdmin, "getPatientOutstanding", { uhid })).estimateTotal).toBe(0);
   });
