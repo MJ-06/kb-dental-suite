@@ -1,0 +1,150 @@
+# Multi-clinic PMS: status and handover
+
+Branch `saas/multi-clinic`, pushed to the fork `MJ-06/kb-dental-suite`
+(the account has no write access to `kbdental/kb-dental-suite`).
+Last updated 28 Oct 2026. Review, design and decisions:
+https://claude.ai/artifact/Eb4jkEuheuLYFabAXjUYXV (main tab), with every UI
+flow and its test result in its "Flow test report" tab.
+
+## What this is
+
+A new backend in `api/` for today's screens (`index.html`, `register.html`,
+`chatbot.html`, `expense.html`), replacing Apps Script plus Google Sheets.
+It is hosted centrally for many clinics; each clinic's rows are isolated by
+PostgreSQL row level security.
+
+- TypeScript on Node 24 LTS, Fastify, Kysely (typed SQL), PostgreSQL 18.
+- `api/src/routes/`: the new REST API (`/api/v1/...`).
+- `api/src/legacy/`: the `/exec` adapter. Today's screens send `?action=...`
+  exactly as they did to Apps Script, and get the same response shapes back.
+- The API also serves the HTML pages. `api/src/http/pages.ts` injects
+  `window.KB_SCRIPT_URL_OVERRIDE`, so the pages call `/exec` on the same origin.
+- `index.html` sign-in asks for clinic code + username + password when the
+  page is served by the API, and only the password on the old backend.
+
+## Done (80 tests pass)
+
+| Module | Legacy actions ported | Notes |
+| --- | --- | --- |
+| Foundation | - | clinics, forced RLS on every tenant table, `kb_app` role cannot bypass it, audit trigger, version column |
+| Sign-in | staffLogin, staffLogout, authStatus, ping, batch | HttpOnly SameSite=Strict cookie, hashed tokens, 5 failures pause the account for 15 min, per-IP limit |
+| Masters | ~45 get/save list and settings actions, screen passwords, signatures | named lists deactivate entries left out of a save, never delete them |
+| Patients | getNextUHID, checkDuplicate, saveRegistration, getPending, getPatient, getAllPatients, searchPatients, getTodaysBirthdays, patientLookup, patientCompleteRegistration | a save never blanks a field it left empty; each history taken is its own row |
+| Diary | getAppointments, saveAppointment, updateAppointmentStatus, updateAppointment, deleteAppointment, get/save/deleteBlockedSlot, getDailyRegister, saveToDailyRegister, getFollowUps | no overlapping bookings per chair; a cancellation needs a reason |
+| REST | /api/v1/auth, /patients, /appointments | |
+
+Checked in a browser: sign-in, Master, and quick registration (issued AL1001).
+
+## Left, in this order
+
+1. **Finance**: getReceipts, saveReceipt, getRevenueByPatient, getDailyCollection,
+   getFinanceSummary (FY runs April to March), getProfitLoss, getExpenses,
+   saveExpense, deleteExpense, getPatientOutstanding, getOutstandingList.
+   Live code is at `apps-script/out/Code.gs` lines 3916-4420 and 5196-5260.
+   - A receipt has up to two payment modes and two amounts.
+   - Receipt numbers come from the Finance sheet's "Receipt No." tab, so a
+     per-clinic receipt series is needed (same design as the UHID counter).
+   - Use the `payments:collect` permission for taking payments.
+2. **Clinical**: getClinicalSheets, saveClinicalSheets, getClinicalRecords, the
+   per-form saves (Pathology, Radiology, RCT, Restoration and the rest),
+   care plan, treatment plan, getTreatmentProgress, savePrescription,
+   saveConsent, getClinicalNoteTemplates (already ported in masters),
+   generateSOAPNotes.
+3. **Treatment cases**: getProcedureLibrary, saveProcedureLibrary,
+   startTreatmentCase, getOpenCase, getCaseState, resolveStageOutcome,
+   appendCaseStage.
+4. **Documents**: upload, list, content, delete, createDocumentPDF. Needs
+   S3-compatible storage with one prefix per clinic, or a local folder for now.
+5. **CRM and chatbot**: getCrmData, saveCrmCollection, queueCrmLead,
+   getCrmLeadInbox, markCrmLeadsTaken, findAppointmentsByPhone,
+   saveChatbotAppointment, chatbotReply. Diya decided the chatbot never looks
+   a patient up without a login.
+6. Point the `SCRIPT_URL` in `register.html`, `chatbot.html` and
+   `expense.html` at `window.KB_SCRIPT_URL_OVERRIDE` (only `index.html` does today).
+7. Run every flow in the Flow test report in a browser (Playwright), against
+   the new backend, and record works / breaks / conditions in the report.
+8. Data migration from the Sheets. Diya will share view access or .xlsx
+   files; no edit access is needed. Viveyk's `migration/` folder is a
+   starting point only.
+9. Hosting, domain, backups (Google Drive is future scope), Windows-service
+   or server setup.
+
+To find the actions a screen still lacks, call each one with `apiDirect`
+from the browser console. Missing ones answer `Unknown action: X`.
+
+## How to run (Windows, this laptop)
+
+The PostgreSQL 18 service `postgresql-x64-18` starts at boot.
+
+```bash
+cd api
+npm install
+npm run db:bootstrap   # once per machine: roles kb_owner/kb_app, DBs kb_pms + kb_pms_test, writes .env
+npm run db:migrate
+npm run db:seed        # dev clinic "kbdev" with one account per role
+npm run dev            # http://127.0.0.1:8080 (tsx watch)
+npm test               # vitest against kb_pms_test; each file rebuilds the DB
+npx tsc --noEmit
+```
+
+- `npm run db:reset-dev` wipes and rebuilds the dev DB. It refuses anything
+  not on localhost. Reseeding reuses the existing dev passwords.
+- Secrets, none of them in git:
+  - `api/.env` holds the app's `kb_app` credentials.
+  - `~/.kb-pms/owner.env` holds the schema-owner credentials, used only by
+    migrations, tests and admin scripts.
+  - `~/.kb-pms/postgres-superuser.txt` holds the PostgreSQL superuser password.
+- **Test logins** (clinic code `kbdev`; dev-admin, dev-doctor, dev-reception,
+  dev-accounts) are in `~/.kb-pms/dev-logins.txt`.
+- Gotcha: stopping the background task can leave a stale node process on
+  port 8080. Find it with `Get-NetTCPConnection -LocalPort 8080` and stop it.
+
+## Key decisions and gotchas
+
+- **Port from the live Apps Script (`apps-script/out/Code.gs`), not from
+  Viveyk's `server/`.** His copy returns the wrong shapes in places, for
+  example reasonSteps, panel rates and saveSignature's parameters.
+- **UHID scheme** (KB): two letters for the year (AA = 2015, so AL = 2026),
+  then the month, then that month's running number: `AE0117`. The number is
+  2 digits and grows to 3 after 99. `clinics.uhid_scheme` also supports
+  `sequential` with a prefix. `next_uhid()` locks a per-period counter and
+  never goes below the highest UHID already issued, which keeps imports safe.
+- The registration screen shows a UHID before saving, and saves under it.
+  `getNextUHID` therefore reserves the number (`uhid_reservations`). A new
+  patient can only be saved under an unused reservation, so unused numbers
+  leave gaps but never duplicates.
+- Dates of birth travel as `dd/mm/yyyy`. Appointment dates and times are the
+  clinic's local time and are converted with `clinics.timezone`. Never use
+  the server's timezone; use `clinic_today()`.
+- **Every new clinic table:** add `clinic_id ... DEFAULT app_clinic_id()`,
+  the housekeeping columns (`version`, `created_at`, `updated_at`,
+  `created_by`, `updated_by`), then `SELECT enable_tenant_table('t')`.
+  Foreign keys to tenant tables include `clinic_id`.
+- Legacy actions declare a permission (`read(fn, perm)` / `write(perm, fn)`).
+  A `{success:false}` result rolls back the whole transaction.
+- Migrations are not yet deployed anywhere, so 0001-0006 have been edited in
+  place. Freeze them at the first real deployment and add new files after that.
+- Panels are created only in Master. Registration refuses an unknown panel.
+- `index.html` loads React from a CDN, so the screens need internet.
+
+## Open items
+
+- **The live site exposes patient data.** The live Apps Script reports
+  `authRequired:false`. Someone with script access must set the script
+  property `REQUIRE_AUTH=true`. Until then the live Documents screen also
+  shows "no documents" because those calls fail with AUTH_REQUIRED.
+- **Security review owed.** The automatic reviews of the last commit and
+  of the push failed with HTTP 429 (see `~/.claude/security/log.txt`).
+  Review the branch manually before more work lands.
+- **Roles are a working default** (`api/src/auth/permissions.ts`). Viveyk
+  has not confirmed them; the proposal and open questions are in the
+  design doc.
+- **register.html** (the iPad patient form) now needs a staff session on the
+  iPad. This needs confirming with Diya and Viveyk.
+- **UX findings so far:**
+  - The year-of-birth list stops at 2021, so children under 5 can't be registered.
+  - The greeting ("Dr. Viveyk") and the letterhead are hard-coded, which is
+    wrong for other clinics.
+  - The balance pill shows "Paid Up" whenever a patient has no treatment
+    plan, whatever was done.
+  - Live calls take 2-4 seconds each.
