@@ -55,11 +55,11 @@ export const withoutMeta = (html: string): string => {
 };
 
 export async function htmlToPdf(source: string): Promise<Buffer> {
-  const html = withoutMeta(source);
   const browser = process.env.PDF_BROWSER;
   if (!browser) throw new PdfUnavailable("PDF export is not set up on this server");
   if (Buffer.byteLength(source) > MAX_HTML_BYTES) throw new PdfUnavailable("That document is too large to turn into a PDF");
   if (running >= 2) throw new PdfUnavailable("The PDF maker is busy. Try again in a moment.");
+  const html = withoutMeta(source); // only after the cheap checks, so a huge input never reaches the repeated passes
 
   running++;
   const dir = await mkdtemp(join(tmpdir(), "kb-pdf-"));
