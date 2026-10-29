@@ -49,7 +49,8 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
 
   // A clinic's desks share one address behind its router and the screens
   // are chatty, so the general ceiling is generous; sign-in has its own.
-  const limits = { config: { rateLimit: { max: 3000, timeWindow: "1 minute" } }, bodyLimit: 40 * 1024 * 1024 };
+  // Tighten with EXEC_RATE_LIMIT once the real traffic is known.
+  const limits = { config: { rateLimit: { max: Number(process.env.EXEC_RATE_LIMIT ?? 900), timeWindow: "1 minute" } }, bodyLimit: 40 * 1024 * 1024 };
   app.get("/exec", limits, async (req) => handler(req));
   app.post("/exec", limits, async (req) => handler(req));
 

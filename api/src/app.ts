@@ -51,6 +51,7 @@ export async function buildApp(opts: AppOptions & { logger?: boolean }) {
     reply.header("Referrer-Policy", "same-origin");
     reply.header("X-Frame-Options", "DENY");
     reply.header("Cache-Control", "no-store");
+    if (opts.cookieSecure) reply.header("Strict-Transport-Security", "max-age=15552000");
   });
 
   app.get("/health", async () => {

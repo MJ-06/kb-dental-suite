@@ -2,7 +2,7 @@
 
 Branch `saas/multi-clinic`, pushed to the fork `MJ-06/kb-dental-suite`
 (the account has no write access to `kbdental/kb-dental-suite`).
-Last updated 28 Oct 2026. Review, design and decisions:
+Last updated 29 Oct 2026. Review, design and decisions:
 https://claude.ai/artifact/Eb4jkEuheuLYFabAXjUYXV (main tab), with every UI
 flow and its test result in its "Flow test report" tab.
 
@@ -56,6 +56,67 @@ treatment plan; the dashboard greets the signed-in user (`whoAmI`) instead of
 Still hard-coded to K.B. Dental: the letterhead, printed signature lines
 ("Dr. Viveyk Mittel"), the chatbot's answers and name, and the Care Plans and
 Treatment Plans cards on the dashboard still show "..." (no count is loaded).
+
+## Where attachments should live (recommendation, 29 Oct)
+
+**Private cloud object storage, with only the metadata in the database.** Use an
+S3-compatible bucket (Cloudflare R2, Backblaze B2 or AWS S3 Mumbai; the code only
+needs the S3 API, so the choice stays open).
+- **Cost.** Roughly US$0.006 to 0.025 per GB a month (about 0.5 to 2 rupees; check
+  current prices), and R2 charges nothing for downloads. A clinic adding 10 GB of
+  X-rays and photos a year pays pennies. Attachments inside PostgreSQL sit on
+  database storage, which managed hosts price several times higher, and they bloat
+  every backup and restore.
+- **Backup.** Turn on bucket versioning plus a lifecycle rule, and copy to a second
+  account or provider monthly. The database backup stays small and fast. The row
+  holds the object key, size, type and checksum, so a restore can verify that
+  nothing is missing.
+- **Access control.** The bucket is never public. Keys look like
+  `clinics/<clinic_id>/<random id>`; the browser asks the API, the API checks
+  session, `clinical:read` and clinic, then streams the file or hands out a link
+  that expires in a few minutes. Encrypt at rest, and keep the audit trigger on the
+  metadata table so every upload and delete is logged.
+- **Many clinics.** One bucket with a per-clinic prefix is simplest; the clinic id
+  is checked in the API and in the key. A bucket per clinic only if a clinic
+  demands its own data location or exit.
+- **Why not the database.** One backup and simpler to start, but every backup,
+  restore and replica then carries gigabytes of images.
+- **Today.** Files sit in a folder on the laptop (`DOCUMENT_DIR`). Keep that until
+  hosting is chosen; the move is a swap in `api/src/storage.ts` plus a one-off copy
+  of existing files. Decision for Diya: provider and region.
+
+## Google Sheets the migration needs (29 Oct, from `apps-script/out/Code.gs`)
+
+View access or an .xlsx download is enough for all of these. The IDs are in the
+code; only the last four characters are given here.
+
+1. **Main clinic book (ends `AJC4`)**, the Apps Script's own spreadsheet. Tabs:
+   Registrations, Pending, Appointments, Daily Register, Blocked Slots, Treatment
+   Plans, Treatment Cases, Procedure Library, Care Plans, Consents, Patient
+   Documents (metadata only), Signatures. Masters: Treatments Master, Medicines
+   Master, Medicine Notes / Instructions / Frequencies / Durations / Dosages,
+   Implant Brands, Payment Modes, Panels, Panel Rates, Expense Categories,
+   Employees, Doctor Details, Clinical Note Templates, Clinic Profile, Chairs,
+   Appointment Reasons, Clinic Timings, Working Days. CRM Pipelines, Leads,
+   Contacts, Companies, Followups, Products, Activities, Payments, Sources, CRM
+   Lead Inbox. Clinical forms: Pathology, Radiology, Radiograph, Local Anesthesia,
+   Intra Oral Scan, Scaling, Minor Surgery, TMJoint, Restoration, Orthodontics,
+   Orthodontics Progress, Denture, Pedo, Lab Log, Prescriptions, RCT, Implant
+   Surgery, Implant Prosthetic, Crown & Bridge, Clinical Sheets, and Clinical
+   Sheets - RCT / Implant Surgery / Implant Prosthetic / Crown Bridge.
+2. **Panel patients book (ends `6sjo`)**: tab Registrations (panel patients are
+   registered and billed there).
+3. **"K. B. Dental - Finance Sheet" (ends `htUI`)**: tabs Patient Fee Receipt and
+   Expenses, plus any summary tabs they use (not named in the code, so ask for the
+   whole file).
+4. **Old registration book (ends `yhUA`)**: only its first tab, used for old
+   patient look-ups.
+5. **Drive folder "KB Dental - Patient Documents"**: the X-ray and scan files
+   themselves (not a Sheet; needs Drive view access or a zip download).
+
+Ask Viveyk whether the Script Properties `FINANCE_SHEET_ID` and `CLINICAL_SHEET_ID`
+point somewhere else today. If they do, the finance and clinical tabs are in those
+files instead of the ones above.
 
 ## Left, in this order
 
@@ -136,17 +197,25 @@ npx tsc --noEmit
   headers and CSRF, secrets, uploads and the PDF path. No SQL injection (the
   few dynamic column names come from fixed lists); `X-Frame-Options`, `nosniff`,
   `Referrer-Policy` and `no-store` are set; the `.env` files are git-ignored and
-  no patient data is tracked. To do before real use: (1) set `COOKIE_SECURE=true`
-  behind HTTPS; (2) `chatbot.html` loads `react@18` and `@babel/standalone` from
-  unpkg *unpinned and without integrity hashes* on a page that now carries a
-  staff session, and `index.html` loads cdnjs scripts without hashes: pin exact
-  versions and add `integrity`, or serve them from the API; (3) there is no
-  Content-Security-Policy on the pages (they use inline scripts), so a stored
-  script in any patient field would run: a nonce-based CSP is the next hardening
-  step; (4) state-changing `GET /exec` relies on the SameSite=Strict cookie
-  alone, which is fine for same-site use but means no cross-origin embedding;
-  (5) the per-address limit on `/exec` is 3000 a minute, loose for a public
-  address; tighten it once the clinic's own IPs are known.
+  no patient data is tracked. **Hardening done 29 Oct:** `COOKIE_SECURE` now
+  defaults to on (only the exact value `false` turns it off; HSTS is sent with it);
+  the pages load React, ReactDOM, html2canvas, jsPDF and Babel from `/vendor/`,
+  served from `node_modules` at exact pinned versions (`api/src/http/pages.ts`), so
+  no page loads a script from a CDN; `chatbot.html` itself now pins its unpkg URLs
+  to exact versions for the old Apps Script hosting; every page carries a
+  per-request nonce Content-Security-Policy (`script-src 'self' 'nonce-...'`,
+  `'unsafe-eval'` on the chatbot page only because Babel compiles JSX in the
+  browser, `frame-ancestors 'none'`); the `/exec` limit is 900 a minute per
+  address (`EXEC_RATE_LIMIT`). Tested in `test/pages.test.ts`; 165 tests pass.
+  **Still to do:** (a) a signed-in browser pass over every screen to catch anything
+  the CSP blocks (print windows that rely on inline scripts would break); only the
+  sign-in screen was confirmed to load cleanly with no console errors;
+  (b) precompile the chatbot's JSX at build time to drop `'unsafe-eval'`;
+  (c) `npm audit` reports advisories, mostly in jsPDF 2.5.1, a browser-only
+  library: upgrade it once the PDF screens are re-tested; (d) state-changing
+  `GET /exec` relies on the SameSite=Strict cookie alone; (e) tighten the rate
+  limit again once the clinic's addresses are known. A plain-words summary of
+  what protects the app is in `docs/how-we-protect-the-app.md`.
 - **Automatic reviews** failed with HTTP 429 earlier in the build (see `~/.claude/security/log.txt`); they are working again and caught the issues listed above.
 - **Roles are a working default** (`api/src/auth/permissions.ts`). Viveyk
   has not confirmed them; the proposal and open questions are in the
