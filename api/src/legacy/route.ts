@@ -38,7 +38,9 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
     }
     if (action === "staffLogin") {
       if (tooManyAttempts(req.ip)) return { success: false, error: "Too many attempts. Wait a minute and try again." };
-      return staffLogin(params, req);
+      // Credentials never ride in a URL (logs, history, referrers): POST body only.
+      if (req.method !== "POST") return { success: false, error: "Sign in must be sent as a POST" };
+      return staffLogin((req.body as Params | undefined) ?? {}, req);
     }
     if (action === "staffLogout") return staffLogout(req);
 
@@ -101,6 +103,7 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
     const clinic = String(p.clinic ?? "").trim();
     const username = String(p.username ?? "").trim().toLowerCase();
     const password = String(p.password ?? "");
+    if (password.length > 200 || username.length > 100 || clinic.length > 100) return { success: false, error: "Sign-in details are too long" };
     if (!clinic || !username || !password) return { success: false, error: "Enter the clinic code, your username and your password" };
 
     const outcome = await db.transaction().execute((tx) => attemptLogin(tx, clinic, username, password));

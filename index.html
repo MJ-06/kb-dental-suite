@@ -344,7 +344,8 @@ async function apiDirect(action, data = {}) {
     // for the sake of tidiness.
     const query = p.toString();
     const url = SCRIPT_URL + "?" + query;
-    const long = query.length > 1800;
+    // Sign-in always goes in the body so a password never lands in a URL.
+    const long = query.length > 1800 || action === "staffLogin";
     const body = long ? JSON.stringify(Object.assign({ action }, data,
                                        getSessionToken() ? { token: getSessionToken() } : {})) : null;
     const attempts = 3;

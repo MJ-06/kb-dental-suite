@@ -1,7 +1,8 @@
 // The Master screen through /exec, the way today's screens call it.
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { exec, execLogin } from "./legacy.js";
-import { makeWorld, type World } from "./setup.js";
+import { createUser } from "../src/admin.js";
+import { makeWorld, OWNER_URL, PASSWORD, type World } from "./setup.js";
 
 let w: World;
 let admin: string;
@@ -23,6 +24,18 @@ describe("signing in through /exec", () => {
   it("ignores a token in the URL", async () => {
     const res = await w.app.inject({ url: "/exec", query: { action: "getChairsList", token: "anything" } });
     expect(res.json().authRequired).toBe(true);
+  });
+
+  it("takes a sign-in only as a POST body, never from the URL, and bounds its length", async () => {
+    const fromUrl = await w.app.inject({ url: "/exec", query: { action: "staffLogin", clinic: "alpha", username: "a-admin", password: PASSWORD } });
+    expect(fromUrl.json().success).toBe(false);
+    expect(fromUrl.cookies).toHaveLength(0);
+    const long = await w.app.inject({
+      method: "POST", url: "/exec", headers: { "content-type": "text/plain" },
+      payload: JSON.stringify({ action: "staffLogin", clinic: "alpha", username: "a-admin", password: "x".repeat(5000) })
+    });
+    expect(long.json().success).toBe(false);
+    expect(long.cookies).toHaveLength(0);
   });
 
   it("reports authRequired and whether this browser is signed in", async () => {
@@ -145,5 +158,39 @@ describe("batch", () => {
     expect(res.results.a.success).toBe(true);
     expect(res.results.getPaymentModesList.modes).toEqual(["Cash", "UPI", "Card"]);
     expect(res.results.savePanelsList.error).toBe("batch: reads only");
+  });
+});
+
+describe("signature ownership", () => {
+  const png = "data:image/png;base64,iVBORw0KGgo=";
+  it("lets a doctor save only their own signature, and an admin anyone's", async () => {
+    await createUser(OWNER_URL, w.clinicA, { username: "a-doc", displayName: "Dr. Asha Rao", password: PASSWORD, role: "doctor" });
+    const doc = await execLogin(w, "alpha", "a-doc");
+    expect(await exec(w, doc, "saveSignature", { doctor: "Asha Rao", signatureDataUrl: png })).toEqual({ success: true });
+    const other = await exec(w, doc, "saveSignature", { doctor: "Dr. Vikram", signatureDataUrl: png });
+    expect(other).toMatchObject({ success: false });
+    expect(await exec(w, admin, "saveSignature", { doctor: "Dr. Vikram", signatureDataUrl: png })).toEqual({ success: true });
+  });
+});
+
+describe("audit log", () => {
+  it("never copies password hashes or password settings into before/after rows", async () => {
+    await exec(w, admin, "saveFinancePassword", { password: "s3cret-master" });
+    const { default: pg } = await import("pg");
+    const c = new pg.Client({ connectionString: OWNER_URL });
+    await c.connect();
+    try {
+      await c.query("ALTER TABLE audit_log NO FORCE ROW LEVEL SECURITY");
+      const r = await c.query(`SELECT count(*)::int AS n FROM audit_log
+        WHERE (table_name = 'app_users' AND (before_row ? 'password_hash' OR after_row ? 'password_hash'))
+           OR (table_name = 'clinic_settings' AND (after_row->>'key') ILIKE '%password%' AND after_row ? 'value')`);
+      expect(r.rows[0].n).toBe(0);
+      const seen = await c.query(`SELECT count(*)::int AS n FROM audit_log WHERE table_name = 'app_users'
+        OR (table_name = 'clinic_settings' AND (after_row->>'key') ILIKE '%password%')`);
+      expect(seen.rows[0].n).toBeGreaterThan(1); // the rows are still audited, just without the secret
+    } finally {
+      await c.query("ALTER TABLE audit_log FORCE ROW LEVEL SECURITY");
+      await c.end();
+    }
   });
 });

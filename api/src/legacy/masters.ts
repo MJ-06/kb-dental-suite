@@ -5,6 +5,7 @@
 //     (history still points at an old doctor or fee, so nothing is deleted)
 //   - plain value lists: replace the rows
 import { sql } from "kysely";
+import { can } from "../auth/permissions.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import type { Tx } from "../db/index.js";
 import { read, write, DeskError, type ActionTable, type Params } from "./types.js";
@@ -311,8 +312,14 @@ Object.assign(masters, {
     const r = await sql<{ owner_name: string; image_data: string }>`SELECT owner_name, image_data FROM signatures`.execute(tx);
     return { success: true, signatures: Object.fromEntries(r.rows.map((x) => [x.owner_name, x.image_data])) };
   }),
-  saveSignature: write("clinical:write", async (p, { tx }) => {
+  saveSignature: write("clinical:write", async (p, { tx, actor }) => {
     const doctor = str(p.doctor);
+    // A signature prints on prescriptions and consents, so a clinician may
+    // set only their own; setting anyone else's takes masters:write.
+    const bare = (n: string) => n.toLowerCase().replace(/^dr[.\s]+/, "").replace(/\s+/g, " ").trim();
+    if (!can(actor.role, "masters:write") && bare(doctor) !== bare(actor.displayName)) {
+      throw new DeskError("You can only save your own signature");
+    }
     const data = str(p.signatureDataUrl);
     // PNG, JPEG or WebP as base64, nothing else: an SVG or a value with a
     // quote in it could carry script into the pages that print signatures.

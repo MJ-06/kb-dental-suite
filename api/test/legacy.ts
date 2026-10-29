@@ -3,7 +3,10 @@ import { expect } from "vitest";
 import { PASSWORD, type World } from "./setup.js";
 
 export async function execLogin(world: World, clinic: string, username: string): Promise<string> {
-  const res = await world.app.inject({ url: "/exec", query: { action: "staffLogin", clinic, username, password: PASSWORD } });
+  const res = await world.app.inject({
+    method: "POST", url: "/exec", headers: { "content-type": "text/plain;charset=utf-8" },
+    payload: JSON.stringify({ action: "staffLogin", clinic, username, password: PASSWORD })
+  });
   expect(res.json()).toMatchObject({ success: true });
   const c = res.cookies.find((x) => x.name === "kb_session")!;
   return `kb_session=${c.value}`;

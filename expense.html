@@ -81,7 +81,12 @@ function api(action, data) {
   });
   var tok = getToken();
   if (tok) p.append("token", tok);
-  return fetch(SCRIPT_URL + "?" + p.toString())
+  // Sign-in goes in the body so a password never lands in a URL.
+  var req = action === "staffLogin"
+    ? fetch(SCRIPT_URL, { method: "POST", headers: { "Content-Type": "text/plain;charset=utf-8" },
+        body: JSON.stringify(Object.assign({ action: action }, data || {})) })
+    : fetch(SCRIPT_URL + "?" + p.toString());
+  return req
     .then(function (r) { if (!r.ok) throw new Error("HTTP " + r.status); return r.json(); })
     .then(function (res) {
       if (res && res.authRequired) { setToken(""); state.screen = "login"; render(); }
