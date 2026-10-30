@@ -235,6 +235,7 @@ with psycopg.connect(url, autocommit=False) as conn:
         if ptype == "Panel" and not pn: ptype = "Normal"; notes.append(f"{u}: Panel patient with no panel name, imported as Normal")
         cat = s(r[35]) if s(r[35]) in ("Serving", "Pensioner") else None
         ts = first_seen.get(u)
+        reg_kind = "timestamp" if ts else "uhid_month"
         date_source["recorded timestamp" if ts else "UHID month"] += 1
         if not ts:
             ts = uhid_month(u)
@@ -256,7 +257,7 @@ with psycopg.connect(url, autocommit=False) as conn:
                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s::jsonb)""",
             (res[0], ts.replace(tzinfo=TZ) if ts else dt.datetime.now(TZ), status, split(r[14]), split(r[22]), s(r[15]) or None, habits or None,
              yes(r[16]) if s(r[16]) else None, yes(r[17]) if s(r[17]) else None, s(r[24]) or None, s(r[26]) or None, s(r[23]) or None,
-             yes(r[32]), '{"imported_from":"%s","in_pain":"%s","dob_text":"%s"}' % (src, s(r[25]).replace('"', ""), s(dob_raw).replace('"', "") if dob is None else "")),
+             yes(r[32]), '{"imported_from":"%s","reg_date_source":"%s","in_pain":"%s","dob_text":"%s"}' % (src, reg_kind, s(r[25]).replace('"', ""), s(dob_raw).replace('"', "") if dob is None else "")),
             "patient_registrations", u)
     counts["patients"] = (len(groups), len(pid))
     notes.append("registration date source: " + ", ".join(f"{k} {v}" for k, v in date_source.items()))
@@ -265,6 +266,11 @@ with psycopg.connect(url, autocommit=False) as conn:
         if not u: return None
         if u in pid: return pid[u]
         orphans.append({"table": table, "uhid": u}); return None
+
+    def typed_note(u, p, note):
+        """An appointment for a UHID that has no registration keeps the UHID as typed, in its notes."""
+        n = s(note)
+        return (f"[UHID as typed in the sheet: {u}] " + n).strip() if u and not p else (n or None)
 
     # ── appointments ──
     ok = 0; rows = load(PMS, "Appointments")
@@ -287,7 +293,7 @@ with psycopg.connect(url, autocommit=False) as conn:
                        status, checkin_at, engaged_at, checkout_at, cancel_reason)
                      VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                   (p, s(r[2]) or "(no name)", s(r[6]) or None, starts, ends, s(r[4]) or "Consultation", s(r[29]) or None,
-                   doctor(r[5]), chair(r[11]), s(r[7]) or None, status, ci, en, co,
+                   doctor(r[5]), chair(r[11]), typed_note(u, p, r[7]), status, ci, en, co,
                    (s(r[15]) or "Not recorded in the sheet") if status == "Cancelled" else None), "appointments", f"row {i}")
         if not res and rejects and rejects[-1]["row"] == f"row {i}" and "one_patient_per_chair" in rejects[-1]["reason"]:
             rejects.pop()
@@ -295,7 +301,7 @@ with psycopg.connect(url, autocommit=False) as conn:
                            status, checkin_at, engaged_at, checkout_at, cancel_reason)
                          VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                       (p, s(r[2]) or "(no name)", s(r[6]) or None, starts, ends, s(r[4]) or "Consultation", s(r[29]) or None,
-                       doctor(r[5]), s(r[7]) or None, status, ci, en, co,
+                       doctor(r[5]), typed_note(u, p, r[7]), status, ci, en, co,
                        (s(r[15]) or "Not recorded in the sheet") if status == "Cancelled" else None), "appointments", f"row {i}")
             overlaps.append({"row": i, "date": str(d), "time": s(r[3]), "chair": s(r[11]), "note": "chair clashed with another booking at the assumed 30 minutes; imported without a chair"})
         ok += bool(res)

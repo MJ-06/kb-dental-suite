@@ -224,6 +224,31 @@ with psycopg.connect(url, autocommit=False) as conn:
                       (u, pid.get(u), s(r[1]) or None, s(r[2]), json.dumps(data)), "clinical_sheets", f"{tab} {u}")
         if rows: tally(f"Clinical sheets: {tab}", len(rows), ok)
 
+    # ── registration day: first appearance of the patient's data ──
+    # A patient whose sheets carry no timestamp was dated to the first of their UHID's month. If
+    # their earliest daily-register visit, appointment, receipt or clinical record falls in that
+    # month (or earlier), that day is the better registration day. Data that first appears in a
+    # later month says nothing about when they registered, so the UHID month stays.
+    cur.execute("""
+        WITH first AS (
+          SELECT p.id,
+                 least((SELECT min(visit_date) FROM daily_register d WHERE d.patient_id = p.id),
+                       (SELECT min((starts_at AT TIME ZONE 'Asia/Kolkata')::date) FROM appointments a WHERE a.patient_id = p.id),
+                       (SELECT min(receipt_date) FROM receipts r WHERE r.patient_id = p.id),
+                       (SELECT min((recorded_at AT TIME ZONE 'Asia/Kolkata')::date) FROM clinical_records c WHERE c.patient_id = p.id)) AS d
+            FROM patients p JOIN patient_registrations pr ON pr.patient_id = p.id
+           WHERE pr.form->>'reg_date_source' = 'uhid_month'
+        ), moved AS (
+          UPDATE patients SET registered_on = (f.d + time '10:00') AT TIME ZONE 'Asia/Kolkata'
+            FROM first f
+           WHERE patients.id = f.id AND f.d IS NOT NULL
+             AND date_trunc('month', f.d) <= date_trunc('month', patients.registered_on AT TIME ZONE 'Asia/Kolkata')
+          RETURNING patients.id)
+        UPDATE patient_registrations SET form = form || '{"reg_date_source":"first_data"}'::jsonb
+         WHERE patient_id IN (SELECT id FROM moved)""")
+    cur.execute("SELECT count(*) FILTER (WHERE form->>'reg_date_source' = 'first_data'), count(*) FILTER (WHERE form->>'reg_date_source' = 'uhid_month'), count(*) FILTER (WHERE form->>'reg_date_source' = 'timestamp') FROM patient_registrations")
+    a, b, c = cur.fetchone(); counts["Registration day (first data / UHID month / recorded)"] = (a, f"{b} / {c}")
+
     # ── CRM ──
     pos = 0
     for coll in ("pipelines", "leads", "contacts", "companies", "followups", "products", "activities", "payments", "sources"):
