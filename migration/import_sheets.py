@@ -54,6 +54,15 @@ def s(v):
     if isinstance(v, float) and v == int(v): return str(int(v))
     return str(v).strip()
 def uhid(v): return s(v).upper().replace(" ", "")
+def mobile(v):
+    """Strip spaces, +, -; drop a leading 91 or 0 when 10 digits remain; else keep what the sheet had."""
+    raw = s(v)
+    d = re.sub(r"[\s+\-().]", "", raw)
+    if re.fullmatch(r"\d+", d):
+        if len(d) == 12 and d.startswith("91"): d = d[2:]
+        elif len(d) == 11 and d.startswith("0"): d = d[1:]
+        if len(d) == 10: return d
+    return raw
 def num(v):
     try: return round(float(v), 2) if v not in (None, "") else 0.0
     except (TypeError, ValueError): return 0.0
@@ -63,7 +72,8 @@ def day(v):
     return parse_date(s(v))
 def parse_date(t):
     t = t.strip()
-    for f in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d/%m/%y", "%d-%m-%y", "%d.%m.%Y", "%d %b %Y", "%d %B %Y", "%d-%b-%Y"):
+    if re.match(r"^\d{1,2}[-/.]\d{1,2}[-/.]\d{2}$", t): return None   # two-digit year: never guess the century
+    for f in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d", "%d.%m.%Y", "%d %b %Y", "%d %B %Y", "%d-%b-%Y"):
         try: return dt.datetime.strptime(t[:len(t)], f).date()
         except ValueError: pass
     m = re.match(r"^(\d{4})-(\d{2})-(\d{2})", t)
@@ -166,7 +176,7 @@ with psycopg.connect(url, autocommit=False) as conn:
                 dup_rows.append({"uhid": u, "copies": len(items), "differs_in": ",".join(diff), "kept": "latest",
                                  "names": " || ".join(s(x[1][2]) for x in items), "genders": " || ".join(s(x[1][3]) for x in items),
                                  "dobs": " || ".join(s(x[1][4]) for x in items)})
-        if not re.match(r"^[A-Z]{2}(0[1-9]|1[0-2])\d{2,3}$", u): bad_uhids.append({"uhid": u, "why": "not year letters + month 01-12 + 2-3 digit count"})
+        if not re.match(r"^A[A-L](0[1-9]|1[0-2])\d{2,3}$", u): bad_uhids.append({"uhid": u, "why": "not year letters AA-AL + month 01-12 + 2-3 digit count"})
         dob_raw = r[4]; dob = day(dob_raw) if dob_raw not in (None, "") else None
         if s(dob_raw).lower() in ("not known", "unknown", "na", "n/a", "-"): dob = None
         elif dob_raw not in (None, "") and (dob is None or dob < dt.date(1900, 1, 2) or dob > dt.date.today()):
@@ -182,7 +192,7 @@ with psycopg.connect(url, autocommit=False) as conn:
                        panel_category, card_id, referred_by_type, registration_status, registered_on)
                      VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                   (u, s(r[2]) or "(no name)", s(r[3]) or None, dob, s(r[5]) or None, s(r[6]) or None, s(r[7]) or None, s(r[8]) or None,
-                   s(r[9]) or None, s(r[10]) or None, s(r[11]) or None, s(r[12]) or None, s(r[13]) or None, s(r[27]) or None, ptype, pn,
+                   mobile(r[9]) or None, mobile(r[10]) or None, s(r[11]) or None, s(r[12]) or None, mobile(r[13]) or None, s(r[27]) or None, ptype, pn,
                    cat if ptype == "Panel" else None, (s(r[36]) or None) if ptype == "Panel" else None, s(r[37]) or None, status,
                    (ts.replace(tzinfo=TZ) if ts else dt.datetime.now(TZ))), "patients", u)
         if not res: continue
