@@ -92,7 +92,36 @@ def at(d, t): return dt.datetime.combine(d, t, tzinfo=TZ)
 def yes(v): return s(v).lower() in ("yes", "y", "true", "1")
 def split(v): return [x.strip() for x in re.split(r"[,;\n]", s(v)) if x.strip() and x.strip().lower() not in ("none", "no", "nil", "na", "n/a")]
 
-rejects, dup_rows, orphans, date_issues, notes, overlaps, bad_uhids = [], [], [], [], [], [], []
+# Coarse service groups. The first group whose keywords appear wins, in this order, so
+# "Consultation + Extraction" counts as Extraction and "RCT + Crown" as Crown & Bridge.
+service_other = collections.Counter()
+SERVICE_GROUPS = [
+    ("Implant", r"implant|alpha ?bio|nobel|straumann|sinus|bone graft"),
+    ("Orthodontics", r"invisal|aligner|brace|ortho|damon|retainer"),
+    ("Crown & Bridge", r"crown|bridge|fpd|fmr|zirconi|e-?max|veneer|laminate|inlay|onlay|pfm|cementation|recement|prep|impression|prosthes[ie]s|prosthis|prosthises"),
+    ("Root Canal (RCT)", r"\brc\b|rct|root canal|obturation|bmp|irrigation|rc open|pulp|apico|post ?& ?core|post and core"),
+    ("Denture", r"denture|rpd|\bcd\b|reline"),
+    ("Extraction & Surgery", r"extract|extration|extrac|impaction|surgery|suture|frenectomy|gingivectomy|flap|curettage|wisdom"),
+    ("Restoration", r"restoration|filling|composite|gic|build ?up"),
+    ("Gum care & Scaling", r"scal|prophyl|prophal|prophy|\bo\.?p\b|perio|polish|gum|depigment|laser|lllt|brush"),
+    ("Imaging", r"iopa|rvg|opg|cbct|x-?ray|radiograph|digital scan|scan|ceph"),
+    ("Whitening & Cosmetic", r"whiten|bleach|smile|zoom"),
+    ("Appliances", r"night ?g|guard|splint|tmd|tens|appliance|space maintain|jaw relation"),
+    ("Membership", r"member"),
+    ("Consultation & Follow-up", r"consu|check ?up|follow|review|emergency|dressing"),
+]
+def service_group(text):
+    g = _service_group(text)
+    if g == "Other": service_other[text] += 1
+    return g
+def _service_group(text):
+    t = re.sub(r"\s+", " ", (text or "").lower())
+    if not t.strip(): return None
+    for name, pat in SERVICE_GROUPS:
+        if re.search(pat, t): return name
+    return "Other"
+
+rejects, dup_rows, orphans, date_issues, notes, overlaps, bad_uhids, service_review = [], [], [], [], [], [], [], []
 def reject(table, key, reason): rejects.append({"table": table, "row": key, "reason": reason})
 counts = {}
 
@@ -159,6 +188,26 @@ with psycopg.connect(url, autocommit=False) as conn:
 
     # ── patients ──
     reg_rows = [("main", r) for r in load(PMS, "Registrations")] + [("panel-book", r) for r in load(EMP, "Registrations")]
+    # The date a patient was first registered: the earliest timestamp for that UHID in any of
+    # the registration sources (PMS, panel book, and the Google Form's own response book, which
+    # kept a timestamp for every row). If none has one, the month the UHID itself encodes.
+    first_seen = {}
+    def see(u, v):
+        if isinstance(v, str) and re.match(r"^\d{4}-\d{2}-\d{2}T", v):       # app-era rows carry an ISO time in UTC
+            try: v = dt.datetime.fromisoformat(v.replace("Z", "+00:00")).astimezone(TZ).replace(tzinfo=None)
+            except ValueError: return
+        if u and isinstance(v, dt.datetime) and dt.datetime(2014, 1, 1) < v < dt.datetime.now() + dt.timedelta(days=1):
+            if u not in first_seen or v < first_seen[u]: first_seen[u] = v
+    for src, r in reg_rows: see(uhid(r[1]), r[0])
+    try:
+        for r in load("K. B. Dental - Patient Registration (Responses).xlsx", "Registration Form"): see(uhid(r[1]), r[0])
+    except (FileNotFoundError, KeyError): notes.append("Registration Form response book not found: registration dates fall back to the UHID month")
+    def uhid_month(u):
+        m = re.match(r"^([A-Z])([A-Z])(\d{2})", u)
+        if not m: return None
+        year = 2015 + (ord(m[1]) - 65) * 26 + (ord(m[2]) - 65); month = int(m[3])
+        return dt.datetime(year, month, 1, 10, 0) if 1 <= month <= 12 and year <= dt.date.today().year else None
+    date_source = collections.Counter()
     groups = collections.OrderedDict()
     for src, r in reg_rows:
         u = uhid(r[1])
@@ -185,7 +234,11 @@ with psycopg.connect(url, autocommit=False) as conn:
         pn = panel(r[34]) if ptype == "Panel" else None
         if ptype == "Panel" and not pn: ptype = "Normal"; notes.append(f"{u}: Panel patient with no panel name, imported as Normal")
         cat = s(r[35]) if s(r[35]) in ("Serving", "Pensioner") else None
-        ts = r[0] if isinstance(r[0], dt.datetime) else None
+        ts = first_seen.get(u)
+        date_source["recorded timestamp" if ts else "UHID month"] += 1
+        if not ts:
+            ts = uhid_month(u)
+            if not ts: date_source["none (import day)"] += 1
         status = "Quick" if s(r[31]).lower() == "quick" else "Complete"
         res = one("""INSERT INTO patients (uhid, full_name, gender, date_of_birth, blood_group, occupation, marital_status, address,
                        mobile, whatsapp, email, emergency_name, emergency_contact, emergency_relation, patient_type, panel_id,
@@ -206,6 +259,7 @@ with psycopg.connect(url, autocommit=False) as conn:
              yes(r[32]), '{"imported_from":"%s","in_pain":"%s","dob_text":"%s"}' % (src, s(r[25]).replace('"', ""), s(dob_raw).replace('"', "") if dob is None else "")),
             "patient_registrations", u)
     counts["patients"] = (len(groups), len(pid))
+    notes.append("registration date source: " + ", ".join(f"{k} {v}" for k, v in date_source.items()))
 
     def known(u, table):
         if not u: return None
@@ -310,11 +364,12 @@ with psycopg.connect(url, autocommit=False) as conn:
         if kind == "m": mn += 1; legacy = f"MANUAL-{mn}"
         else: legacy = x["legacy"]
         no += 1
-        res = one("""INSERT INTO receipts (receipt_no, receipt_date, patient_id, uhid, patient_name, service, mode1, amount1, mode2, amount2, remarks, legacy_receipt_no)
-                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+        res = one("""INSERT INTO receipts (receipt_no, receipt_date, patient_id, uhid, patient_name, service, mode1, amount1, mode2, amount2, remarks, legacy_receipt_no, service_group)
+                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                   (no, x["date"], known(x["uhid"], "receipts"), x["uhid"] or None, x["name"] or None, x["service"] or None, x["mode1"] or None,
-                   x["amt1"], x["mode2"] or None, x["amt2"], x["remarks"] or None, legacy), "receipts", legacy or f"{x['date']} {x['uhid']}")
+                   x["amt1"], x["mode2"] or None, x["amt2"], x["remarks"] or None, legacy, service_group(x["service"])), "receipts", legacy or f"{x['date']} {x['uhid']}")
         ok += bool(res)
+    service_review.extend({"service_as_typed": k, "receipts": n, "group": "Other"} for k, n in service_other.most_common())
     cur.execute("INSERT INTO receipt_counters (last_value) VALUES (%s) ON CONFLICT (clinic_id) DO UPDATE SET last_value = EXCLUDED.last_value", (no,))
     counts["receipts"] = (len(allr), ok)
     notes.append(f"receipts: {len(receipts) - only_rn} entries from Patient Fee Receipt ({sum(1 for x in receipts if x['matched'])} took an e-receipt number), {only_rn} Receipt No. rows with no entry, {len(manual)} manual lines from FY tabs")
@@ -348,7 +403,7 @@ def write(name, rows):
 write("rejects.csv", rejects); write("review-duplicate-uhids.csv", dup_rows); write("date-issues.csv", date_issues)
 oc = collections.Counter((o["table"], o["uhid"]) for o in orphans)
 write("review-unregistered-uhids.csv", [{"table": t, "uhid": u, "rows": n} for (t, u), n in sorted(oc.items())])
-write("review-appointment-chair-clashes.csv", overlaps); write("review-invalid-uhids.csv", bad_uhids); write("notes.csv", [{"note": n} for n in notes])
+write("review-appointment-chair-clashes.csv", overlaps); write("review-invalid-uhids.csv", bad_uhids); write("review-service-names.csv", service_review); write("notes.csv", [{"note": n} for n in notes])
 print("loaded (sheet rows, loaded):", counts)
 print("rejects:", len(rejects), dict(collections.Counter(r["table"] for r in rejects)), "| duplicate-UHID groups:", len(dup_rows),
       "| unregistered UHID refs:", len(orphans), "| date issues:", len(date_issues))
