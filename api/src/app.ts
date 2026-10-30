@@ -49,7 +49,7 @@ export async function buildApp(opts: AppOptions & { logger?: boolean }) {
   app.addHook("onSend", async (_req, reply) => {
     reply.header("X-Content-Type-Options", "nosniff");
     reply.header("Referrer-Policy", "same-origin");
-    reply.header("X-Frame-Options", "DENY");
+    if (!reply.hasHeader("X-Frame-Options")) reply.header("X-Frame-Options", "DENY");
     reply.header("Cache-Control", "no-store");
     if (opts.cookieSecure) reply.header("Strict-Transport-Security", "max-age=15552000");
   });

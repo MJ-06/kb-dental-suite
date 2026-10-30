@@ -40,11 +40,27 @@ const CDN_SRC = [
 ] as const;
 const OVERRIDE = `<script>window.KB_SCRIPT_URL_OVERRIDE = location.origin + "/exec";</script>`;
 
+// index.html carries its mini-apps (CRM, the clinical forms) as base64 HTML and opens
+// them in blob: iframes. A blob document inherits the page's CSP, so its inline
+// scripts need the page's nonce and its CDN libraries must come from /vendor/.
+// The page's own b64decode is patched to do that to anything that decodes to HTML.
+const EMBED_FIX = (nonce: string) => String.raw`<script>window.__kbEmbed = function (h) {
+  if (!/<script/i.test(h)) return h;
+  var o = location.origin;
+  return h.replace(/<script(?=[\s>])/gi, '<script nonce="${nonce}"')
+    .replace(/https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/react\/[^"']+/g, o + "/vendor/react.js")
+    .replace(/https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/react-dom\/[^"']+/g, o + "/vendor/react-dom.js")
+    .replace(/https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/html2canvas\/[^"']+/g, o + "/vendor/html2canvas.js")
+    .replace(/https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/jspdf\/[^"']+/g, o + "/vendor/jspdf.js")
+    .replace(/https:\/\/unpkg\.com\/react@[^"']+/g, o + "/vendor/react.js")
+    .replace(/https:\/\/unpkg\.com\/react-dom@[^"']+/g, o + "/vendor/react-dom.js");
+};</script>`;
+
 // Only scripts carrying this request's random nonce run, so a script a
 // stranger manages to store in a patient field is inert. Babel (chatbot
 // page only) compiles JSX with eval, which needs 'unsafe-eval'. Styles stay
 // inline because the screens build print layouts that way.
-function csp(nonce: string, needsEval: boolean): string {
+function csp(nonce: string, needsEval: boolean, framedBySelf = false): string {
   return [
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}'${needsEval ? " 'unsafe-eval'" : ""}`,
@@ -56,7 +72,7 @@ function csp(nonce: string, needsEval: boolean): string {
     "object-src 'none'",
     "base-uri 'self'",
     "form-action 'self'",
-    "frame-ancestors 'none'"
+    framedBySelf ? "frame-ancestors 'self'" : "frame-ancestors 'none'"
   ].join("; ");
 }
 
@@ -68,10 +84,20 @@ export const pageRoutes: FastifyPluginAsync = async (app) => {
       // the files are small and this is not a hot path.
       let html = readFileSync(ROOT + file, "utf8");
       for (const [from, to] of CDN_SRC) html = html.replace(from, to);
+      let head = OVERRIDE;
+      if (file === "index.html") {
+        head += EMBED_FIX(nonce);
+        // Decoded mini-apps get the nonce and local libraries (see EMBED_FIX).
+        html = html.replace("return new TextDecoder('utf-8').decode(bytes);", "return window.__kbEmbed(new TextDecoder('utf-8').decode(bytes));");
+        // The in-app chatbot opens the real chatbot page instead of a blob copy,
+        // because that page, not a blob, is allowed to compile its JSX.
+        html = html.replace("_chatbotBlobUrl = URL.createObjectURL(blob);", '_chatbotBlobUrl = location.origin + "/chatbot.html";');
+      }
       html = html
         .replace(/<script(?=[\s>])/gi, `<script nonce="${nonce}"`)
-        .replace(/<head>/i, `<head>\n${OVERRIDE.replace("<script>", `<script nonce="${nonce}">`)}`);
-      reply.header("Content-Security-Policy", csp(nonce, file === "chatbot.html"));
+        .replace(/<head>/i, `<head>\n${head.replaceAll("<script>", `<script nonce="${nonce}">`)}`);
+      reply.header("Content-Security-Policy", csp(nonce, file === "chatbot.html", file === "chatbot.html"));
+      if (file === "chatbot.html") reply.header("X-Frame-Options", "SAMEORIGIN"); // the main app shows it in a frame
       return reply.type("text/html; charset=utf-8").send(html);
     });
   }

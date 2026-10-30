@@ -12,7 +12,7 @@ describe("page security", () => {
   it("sends a CSP whose nonce matches every script tag, with a new nonce each time", async () => {
     const a = await page("/");
     const nonce = /'nonce-([^']+)'/.exec(String(a.headers["content-security-policy"]))![1];
-    const tags = a.body.match(/<script[^>]*>/gi)!;
+    const tags = a.body.match(/<script(?=[\s>])[^>]*>/gi)!;
     expect(tags.length).toBeGreaterThan(3);
     expect(tags.every((t) => t.includes(`nonce="${nonce}"`))).toBe(true);
     const b = await page("/");
@@ -29,6 +29,16 @@ describe("page security", () => {
       expect(await csp(u)).not.toMatch(/script-src[^;]*https?:/);
     }
     expect(await csp("/")).toContain("frame-ancestors 'none'");
+  });
+
+  it("lets the page's mini-apps (blob frames) run under the same CSP, and frames the chatbot page only from itself", async () => {
+    const idx = (await page("/")).body;
+    expect(idx).toContain("window.__kbEmbed(new TextDecoder");
+    expect(idx).not.toContain("_chatbotBlobUrl = URL.createObjectURL(blob);");
+    const chat = await page("/chatbot.html");
+    expect(chat.headers["x-frame-options"]).toBe("SAMEORIGIN");
+    expect(String(chat.headers["content-security-policy"])).toContain("frame-ancestors 'self'");
+    expect((await page("/")).headers["x-frame-options"]).toBe("DENY");
   });
 
   it("serves the pinned libraries from its own address", async () => {
