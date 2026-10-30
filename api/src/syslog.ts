@@ -19,9 +19,17 @@ const newRef = () => "E-" + Array.from(randomBytes(6), (b) => ALPHABET[b % ALPHA
 export function scrub(message: string): string {
   return message
     .replace(/\(([^()]*)\)=\(([^()]*)\)/g, "($1)=(…)")
-    .replace(/\b\d{10,}\b/g, "…")
+    .replace(/[\w.+-]+@[\w-]+\.[\w.-]+/g, "…")      // email addresses
+    .replace(/\b\d{6,}\b/g, "…")                    // phone, card and similar numbers
     .replace(/'[^']{0,200}'/g, "'…'")
+    .replace(/"[^"]{0,200}"/g, '"…"')
     .slice(0, 300);
+}
+
+/** A database error says only what rule broke, never the offending values: those are patient data. */
+function describeFailure(err: { message?: string; code?: string; constraint?: string } | undefined, fallback: unknown): string {
+  if (err?.code && /^[0-9A-Z]{5}$/.test(err.code)) return `Database error ${err.code}${err.constraint ? ` (rule ${err.constraint})` : ""}`;
+  return scrub(String(err?.message ?? fallback));
 }
 
 export interface Failure { kind: string; action?: string; status?: number; error: unknown }
@@ -43,7 +51,7 @@ export async function recordFailure(token: string | undefined, f: Failure, log?:
       const stack = (err?.stack ?? "").split("\n").slice(1, 7).map((l) => l.trim().replace(/\(.*[\/]api[\/]/, "(")).join("\n");
       await sql`
         INSERT INTO system_log (level, kind, ref, action, status, message, detail)
-        VALUES ('error', ${f.kind}, ${ref}, ${f.action ?? null}, ${f.status ?? 500}, ${scrub(String(err?.message ?? f.error))},
+        VALUES ('error', ${f.kind}, ${ref}, ${f.action ?? null}, ${f.status ?? 500}, ${describeFailure(err, f.error)},
                 ${JSON.stringify({ code: err?.code ?? null, constraint: err?.constraint ?? null, table: err?.table ?? null, stack })}::jsonb)`.execute(tx);
     });
   } catch (e) {

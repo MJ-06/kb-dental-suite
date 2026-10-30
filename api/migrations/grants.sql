@@ -29,5 +29,6 @@ REVOKE ALL ON schema_migrations FROM kb_app;
 
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO kb_app;
 
--- The system log is append only; an admin may only mark a failure resolved.
-REVOKE DELETE ON system_log FROM kb_app;
+-- The system log is append only; an admin may only mark an open failure resolved.
+REVOKE UPDATE, DELETE ON system_log FROM kb_app;
+GRANT UPDATE (resolved_at, resolved_by, resolution) ON system_log TO kb_app;

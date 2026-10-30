@@ -32,6 +32,14 @@ describe("system log", () => {
     expect(mine.message).not.toContain("9899102136");
   });
 
+  it("keeps only the rule for a database error, not the offending values", async () => {
+    actions.__dbboom = read(async () => { const e = new Error('duplicate key value violates unique constraint "patients_uhid" Key (uhid)=(AL0705)') as Error & { code: string; constraint: string }; e.code = "XX000"; e.constraint = "patients_uhid"; throw e; });
+    const res = await exec(w, desk, "__dbboom");
+    delete actions.__dbboom;
+    const row = (await list(admin, `?ref=${res.ref}`)).json().rows[0];
+    expect(row.message).toBe("Database error XX000 (rule patients_uhid)");
+  });
+
   it("does not log a mistake the desk can fix", async () => {
     const before = (await list(admin, "?status=all")).json().counts;
     await exec(w, desk, "saveReceipt", { amount1: 0 }); // "Enter the amount received"
