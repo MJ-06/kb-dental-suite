@@ -13,14 +13,14 @@ import { isoDay, nz, num, str, uhidOf } from "./util.js";
 const MODES_JOINED = (m1: string | null, m2: string | null) => (m2 ? `${m1 ?? ""} + ${m2}` : m1 ?? "");
 
 interface ReceiptRow {
-  date: string; receipt_no: number; uhid: string | null; patient_name: string | null; service: string | null;
+  date: string; receipt_no: number; label: string | null; uhid: string | null; patient_name: string | null; service: string | null;
   mode1: string | null; mode2: string | null; fee: number; remarks: string | null;
 }
 
 /** Receipts between two clinic days (either may be empty), newest first. */
 async function receiptsBetween(tx: Tx, from: string, to: string, uhid = ""): Promise<ReceiptRow[]> {
   const r = await sql<ReceiptRow>`
-    SELECT receipt_date::text AS date, receipt_no, uhid, patient_name, service, mode1, mode2,
+    SELECT receipt_date::text AS date, receipt_no, legacy_receipt_no AS label, uhid, patient_name, service, mode1, mode2,
            (amount1 + amount2)::float8 AS fee, remarks
       FROM receipts
      WHERE (${from || null}::date IS NULL OR receipt_date >= ${from || null}::date)
@@ -78,14 +78,14 @@ export const finance: ActionTable = {
       ? (await sql<{ id: string; full_name: string }>`SELECT id, full_name FROM patients WHERE uhid = ${uhid}`.execute(tx)).rows[0]
       : undefined;
     const date = isoDay(p.date) || (await today(tx));
-    const r = await sql<{ id: string; receipt_no: number }>`
+    const r = await sql<{ id: string; receipt_no: number; label: string | null }>`
       INSERT INTO receipts (receipt_no, receipt_date, patient_id, uhid, patient_name, service,
-                            mode1, amount1, mode2, amount2, remarks)
+                            mode1, amount1, mode2, amount2, remarks, legacy_receipt_no)
       VALUES (next_receipt_no(), ${date}::date, ${patient?.id ?? null}, ${nz(uhid)},
               ${nz(p.patientName) ?? patient?.full_name ?? null}, ${nz(p.service)},
-              ${nz(p.mode1)}, ${amount1}, ${amount2 > 0 ? nz(p.mode2) : null}, ${amount2}, ${nz(p.remarks)})
-      RETURNING id, receipt_no`.execute(tx);
-    return { success: true, id: r.rows[0]!.id, receiptNo: r.rows[0]!.receipt_no };
+              ${nz(p.mode1)}, ${amount1}, ${amount2 > 0 ? nz(p.mode2) : null}, ${amount2}, ${nz(p.remarks)}, next_receipt_label(${date}::date))
+      RETURNING id, receipt_no, legacy_receipt_no AS label`.execute(tx);
+    return { success: true, id: r.rows[0]!.id, receiptNo: r.rows[0]!.label ?? r.rows[0]!.receipt_no };
   }),
 
   // One patient's receipts need the right to take payments; the whole
@@ -100,7 +100,7 @@ export const finance: ActionTable = {
       success: true,
       receipts: rows.map((r) => ({
         date: r.date, uhid: r.uhid ?? "", patientName: r.patient_name ?? "", service: r.service ?? "",
-        mode: MODES_JOINED(r.mode1, r.mode2), fee: r.fee, receiptNo: r.receipt_no, remarks: r.remarks ?? ""
+        mode: MODES_JOINED(r.mode1, r.mode2), fee: r.fee, receiptNo: r.label ?? r.receipt_no, remarks: r.remarks ?? ""
       }))
     };
   }, "payments:collect"),

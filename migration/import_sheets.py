@@ -28,6 +28,7 @@ ap = argparse.ArgumentParser()
 ap.add_argument("--data", required=True)
 ap.add_argument("--clinic", default="kb")
 ap.add_argument("--name", default="K.B. Dental")
+ap.add_argument("--receipt-scheme", default="fy", choices=["fy", "sequential"], help="how new receipts are numbered; fy continues the yy-yy/n numbers")
 ap.add_argument("--wipe", action="store_true", help="delete this clinic's rows in the rehearsal DB first")
 args = ap.parse_args()
 DATA = Path(args.data)
@@ -81,7 +82,7 @@ def at(d, t): return dt.datetime.combine(d, t, tzinfo=TZ)
 def yes(v): return s(v).lower() in ("yes", "y", "true", "1")
 def split(v): return [x.strip() for x in re.split(r"[,;\n]", s(v)) if x.strip() and x.strip().lower() not in ("none", "no", "nil", "na", "n/a")]
 
-rejects, dup_rows, orphans, date_issues, notes, overlaps = [], [], [], [], [], []
+rejects, dup_rows, orphans, date_issues, notes, overlaps, bad_uhids = [], [], [], [], [], [], []
 def reject(table, key, reason): rejects.append({"table": table, "row": key, "reason": reason})
 counts = {}
 
@@ -95,9 +96,10 @@ with psycopg.connect(url, autocommit=False) as conn:
     else:
         cur.execute("INSERT INTO clinics (code, name, uhid_scheme, timezone) VALUES (%s, %s, 'year-month', 'Asia/Kolkata') RETURNING id", (args.clinic, args.name))
         cid = cur.fetchone()[0]
+    cur.execute("UPDATE clinics SET receipt_scheme = %s WHERE id = %s", (args.receipt_scheme, cid))
     cur.execute("SELECT set_config('app.clinic_id', %s, false)", (str(cid),))
     if args.wipe:
-        for t in ("receipts", "expenses", "daily_register", "appointments", "patient_registrations", "uhid_reservations", "patients", "panel_rates", "panels", "doctors", "chairs"):
+        for t in ("clinical_records", "clinical_sheets", "treatment_plans", "treatment_cases", "patient_documents", "consents", "care_plans", "receipts", "expenses", "daily_register", "appointments", "patient_registrations", "uhid_reservations", "patients", "panel_rates", "panels", "doctors", "chairs"):
             cur.execute(f"DELETE FROM {t}")
         cur.execute("DELETE FROM receipt_counters"); cur.execute("DELETE FROM uhid_counters")
 
@@ -157,13 +159,14 @@ with psycopg.connect(url, autocommit=False) as conn:
     pid = {}
     for u, items in groups.items():
         items.sort(key=lambda x: (x[1][0] is None, x[1][0] if isinstance(x[1][0], dt.datetime) else dt.datetime.max))
-        src, r = items[0]
+        src, r = items[-1]          # a repeat UHID is a deliberate re-registration: the latest row is current
         if len(items) > 1:
-            diff = [k for k, i in FIELDS.items() if len({norm(x[1][i]) for x in items}) > 1]
-            dup_rows.append({"uhid": u, "copies": len(items), "differs_in": ",".join(diff) or "identical",
-                             "kept": "earliest", "names": " || ".join(s(x[1][2]) for x in items),
-                             "mobiles": " || ".join(s(x[1][9]) for x in items), "dobs": " || ".join(s(x[1][4]) for x in items)})
-        if not re.match(r"^[A-Z]{2}\d{4,6}$", u): notes.append(f"UHID shape unusual, kept: {u}")
+            diff = [k for k in ("name", "gender", "dob") if len({norm(x[1][FIELDS[k]]) for x in items}) > 1]
+            if diff:                # only a different name, gender or date of birth needs a person
+                dup_rows.append({"uhid": u, "copies": len(items), "differs_in": ",".join(diff), "kept": "latest",
+                                 "names": " || ".join(s(x[1][2]) for x in items), "genders": " || ".join(s(x[1][3]) for x in items),
+                                 "dobs": " || ".join(s(x[1][4]) for x in items)})
+        if not re.match(r"^[A-Z]{2}(0[1-9]|1[0-2])\d{2,3}$", u): bad_uhids.append({"uhid": u, "why": "not year letters + month 01-12 + 2-3 digit count"})
         dob_raw = r[4]; dob = day(dob_raw) if dob_raw not in (None, "") else None
         if s(dob_raw).lower() in ("not known", "unknown", "na", "n/a", "-"): dob = None
         elif dob_raw not in (None, "") and (dob is None or dob < dt.date(1900, 1, 2) or dob > dt.date.today()):
@@ -207,6 +210,9 @@ with psycopg.connect(url, autocommit=False) as conn:
         u = uhid(r[1]); p = known(u, "appointments")
         starts = at(d, t); ends = starts + dt.timedelta(minutes=30)
         status = s(r[8]) if s(r[8]) in ("Scheduled", "Checked In", "In Chair", "Completed", "Cancelled", "No Show") else "Scheduled"
+        if d < dt.date.today():
+            if status == "Scheduled": status = "No Show"
+            elif status in ("In Chair", "Checked In"): status = "Completed"
         stamps = []
         for c in (12, 13, 14):
             tt = parse_time(r[c]); stamps.append(at(d, tt) if tt else None)
@@ -247,20 +253,30 @@ with psycopg.connect(url, autocommit=False) as conn:
     counts["daily_register"] = (len(rows), ok)
 
     # ── receipts ──
-    pfr = collections.defaultdict(list)       # (uhid, day, total) -> rows of Patient Fee Receipt
-    for r in load(FIN, "Patient Fee Receipt"):
-        ts = day(r[0]) if r[0] else None
-        pfr[(uhid(r[1]), ts, round(num(r[5]) + num(r[7]), 2))].append(r)
-    e_keys = collections.Counter(); receipts = []
+    # Patient Fee Receipt is the book the desk types into (by Timestamp, with the second
+    # payment in "Amount (Payment mode is more than one)"). Receipt No. carries the printed
+    # e-receipt number; each entry takes its number from the matching row (same patient,
+    # day and total). Receipt No. rows with no entry are kept too. FY-tab lines that match
+    # neither are the manual receipts.
+    rn_pool = collections.defaultdict(list)
     for r in load(FIN, "Receipt No."):
         d = day(r[0]); u = uhid(r[1]); fee = num(r[5])
         if not d and not u and not fee: continue          # a formula row with nothing in it
-        e_keys[(u, d, fee)] += 1
-        m = pfr.get((u, d, fee)); src = m.pop(0) if m else None
-        receipts.append({"date": d, "uhid": u, "name": s(r[2]), "service": s(r[3]),
-                         "mode1": s(src[4]) if src else s(r[4]), "amt1": num(src[5]) if src else fee,
-                         "mode2": s(src[6]) if src else "", "amt2": num(src[7]) if src else 0.0,
-                         "remarks": s(src[8]) if src else "", "legacy": s(r[6]), "matched": bool(src)})
+        rn_pool[(u, d, fee)].append(r)
+    receipts = []
+    for r in load(FIN, "Patient Fee Receipt"):
+        d = day(r[0]); u = uhid(r[1]); tot = round(num(r[5]) + num(r[7]), 2)
+        if not d and not u and not tot: continue
+        pool = rn_pool.get((u, d, tot)); rn = pool.pop(0) if pool else None
+        receipts.append({"date": d, "uhid": u, "name": s(r[2]), "service": s(r[3]), "mode1": s(r[4]), "amt1": num(r[5]),
+                         "mode2": s(r[6]), "amt2": num(r[7]), "remarks": s(r[8]), "legacy": s(rn[6]) if rn else None, "matched": bool(rn)})
+    only_rn = 0
+    for lst in rn_pool.values():
+        for r in lst:
+            only_rn += 1
+            receipts.append({"date": day(r[0]), "uhid": uhid(r[1]), "name": s(r[2]), "service": s(r[3]), "mode1": s(r[4]), "amt1": num(r[5]),
+                             "mode2": "", "amt2": 0.0, "remarks": "", "legacy": s(r[6]) or None, "matched": False})
+    e_keys = collections.Counter((x["uhid"], x["date"], round(x["amt1"] + x["amt2"], 2)) for x in receipts)
     manual_max = collections.Counter(); manual_row = {}
     for fy in ("FY 2024-25", "FY 2025-26", "FY 2026-27"):
         tabn = collections.Counter(); first = {}
@@ -276,23 +292,22 @@ with psycopg.connect(url, autocommit=False) as conn:
         for r in manual_row[k][:n]:
             manual.append({"date": k[1], "uhid": k[0], "name": s(r[4]), "service": s(r[5]), "mode1": s(r[6]), "amt1": k[2],
                            "mode2": "", "amt2": 0.0, "remarks": s(r[21]), "legacy": None, "matched": None})
-    receipts.sort(key=lambda x: (x["date"] or dt.date.min)); manual.sort(key=lambda x: x["date"])
     allr = [(x, "e") for x in receipts] + [(x, "m") for x in manual]
     allr.sort(key=lambda t: (t[0]["date"] or dt.date.min, 0 if t[1] == "e" else 1))
     ok = 0; mn = 0; no = 0
     for x, kind in allr:
         if not x["date"]: reject("receipts", x["legacy"] or "manual", "no readable date"); continue
         if kind == "m": mn += 1; legacy = f"MANUAL-{mn}"
-        else: legacy = x["legacy"] or None
+        else: legacy = x["legacy"]
         no += 1
         res = one("""INSERT INTO receipts (receipt_no, receipt_date, patient_id, uhid, patient_name, service, mode1, amount1, mode2, amount2, remarks, legacy_receipt_no)
                      VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                   (no, x["date"], known(x["uhid"], "receipts"), x["uhid"] or None, x["name"] or None, x["service"] or None, x["mode1"] or None,
-                   x["amt1"], x["mode2"] or None, x["amt2"], x["remarks"] or None, legacy), "receipts", legacy or f"manual {x['date']}")
+                   x["amt1"], x["mode2"] or None, x["amt2"], x["remarks"] or None, legacy), "receipts", legacy or f"{x['date']} {x['uhid']}")
         ok += bool(res)
     cur.execute("INSERT INTO receipt_counters (last_value) VALUES (%s) ON CONFLICT (clinic_id) DO UPDATE SET last_value = EXCLUDED.last_value", (no,))
     counts["receipts"] = (len(allr), ok)
-    notes.append(f"receipts: {len(receipts)} e-receipts ({sum(1 for x in receipts if x['matched'])} matched to Patient Fee Receipt for payment split), {len(manual)} manual lines from FY tabs")
+    notes.append(f"receipts: {len(receipts) - only_rn} entries from Patient Fee Receipt ({sum(1 for x in receipts if x['matched'])} took an e-receipt number), {only_rn} Receipt No. rows with no entry, {len(manual)} manual lines from FY tabs")
 
     # ── expenses ──
     ok = 0; rows = load(FIN, "Expense")
@@ -311,8 +326,8 @@ with psycopg.connect(url, autocommit=False) as conn:
     cur.execute("SELECT count(*), coalesce(sum(amount), 0) FROM expenses")
     ec, esum = cur.fetchone()
     exp_sheet_sum = round(sum(num(r[5]) for r in rows), 2)
-    sheet_e = round(sum(x["amt1"] + x["amt2"] for x in receipts) , 2)
-    notes.append(f"check: e-receipt total in sheet {sheet_e:,.2f}; all receipts loaded total {float(rsum):,.2f} (includes manual lines)")
+    sheet_e = round(sum(x["amt1"] + x["amt2"] for x in receipts), 2)
+    notes.append(f"check: entries + e-receipt-only rows {sheet_e:,.2f}; all receipts loaded {float(rsum):,.2f} (includes {sum(x['amt1'] for x in manual):,.2f} manual)")
     notes.append(f"check: expenses in sheet {exp_sheet_sum:,.2f}; loaded {float(esum):,.2f}")
     conn.commit()
 
@@ -323,7 +338,7 @@ def write(name, rows):
 write("rejects.csv", rejects); write("review-duplicate-uhids.csv", dup_rows); write("date-issues.csv", date_issues)
 oc = collections.Counter((o["table"], o["uhid"]) for o in orphans)
 write("review-unregistered-uhids.csv", [{"table": t, "uhid": u, "rows": n} for (t, u), n in sorted(oc.items())])
-write("review-appointment-chair-clashes.csv", overlaps); write("notes.csv", [{"note": n} for n in notes])
+write("review-appointment-chair-clashes.csv", overlaps); write("review-invalid-uhids.csv", bad_uhids); write("notes.csv", [{"note": n} for n in notes])
 print("loaded (sheet rows, loaded):", counts)
 print("rejects:", len(rejects), dict(collections.Counter(r["table"] for r in rejects)), "| duplicate-UHID groups:", len(dup_rows),
       "| unregistered UHID refs:", len(orphans), "| date issues:", len(date_issues))

@@ -203,3 +203,27 @@ describe("balances", () => {
     expect((await exec(w, betaAdmin, "getPatientOutstanding", { uhid })).estimateTotal).toBe(0);
   });
 });
+
+describe("receipt numbers per financial year", () => {
+  it("prints yy-yy/n for a clinic on the fy scheme, continues imported numbers, and restarts each April", async () => {
+    const { default: pg } = await import("pg");
+    const { OWNER_URL } = await import("./setup.js");
+    const c = new pg.Client({ connectionString: OWNER_URL });
+    await c.connect();
+    await c.query("UPDATE clinics SET receipt_scheme = 'fy' WHERE code = 'beta'");
+    await c.end();
+    const save = (date: string) => exec(w, betaAdmin, "saveReceipt", { patientName: "FY Person", mode1: "Cash", amount1: 100, date });
+    expect((await save("2026-10-05")).receiptNo).toBe("26-27/1");
+    expect((await save("2026-10-06")).receiptNo).toBe("26-27/2");
+    expect((await save("2027-03-31")).receiptNo).toBe("26-27/3"); // still the 26-27 year
+    expect((await save("2027-04-01")).receiptNo).toBe("27-28/1"); // new year restarts
+    const listed = await exec(w, betaAdmin, "getReceipts", { fromDate: "2026-10-01", toDate: "2026-10-31" });
+    const labels = listed.receipts.map((r: { receiptNo: string | number }) => r.receiptNo).filter((n: string | number) => typeof n === "string");
+    expect(labels.sort()).toEqual(["26-27/1", "26-27/2"]); // an earlier receipt on the old scheme keeps its plain number
+  });
+
+  it("keeps the plain running number for a clinic on the sequential scheme", async () => {
+    const res = await exec(w, desk, "saveReceipt", { patientName: "Seq", mode1: "Cash", amount1: 10, date: "2026-10-09" });
+    expect(typeof res.receiptNo).toBe("number");
+  });
+});
