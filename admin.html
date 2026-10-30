@@ -78,6 +78,8 @@ tfoot td{font-weight:700;background:var(--soft);position:sticky;bottom:0}
 .msg.err{background:#fff0f0;border:1px solid var(--red);color:#8a2218}
 .msg.warn{background:#fff8e6;border:1px solid #d9a21b;color:#6b4b00}
 @media (prefers-color-scheme:dark){.msg.err{background:#3a1d1a;color:#ffb4aa}.msg.warn{background:#352c14;color:#f1d28a}}
+.flag{color:#8a5a00;font-weight:600}
+@media (prefers-color-scheme:dark){.flag{color:#f1d28a}}
 .empty{color:var(--muted);padding:28px 8px;text-align:center}
 .signin{max-width:380px;margin:8vh auto}
 .signin .f{margin-bottom:12px}.signin label{display:block;font-size:12px;font-weight:700;color:var(--muted);margin-bottom:3px}
@@ -297,7 +299,7 @@ tfoot td{font-weight:700;background:var(--soft);position:sticky;bottom:0}
       var tb = h("tbody");
       r.rows.slice(0, 1000).forEach(function (row) {
         var tr = h("tr");
-        r.columns.forEach(function (c) { var txt = cellText(c, row[c.key]); tr.appendChild(h("td", { class: c.type === "money" || c.type === "int" ? "r num" : "", title: txt, text: txt })); });
+        r.columns.forEach(function (c) { var txt = cellText(c, row[c.key]); var cls = c.type === "money" || c.type === "int" ? "r num" : ""; if (/^(Not on the|No doctor)/.test(txt)) cls = "flag"; tr.appendChild(h("td", { class: cls, title: txt, text: txt })); });
         tb.appendChild(tr);
       });
       t.appendChild(tb);

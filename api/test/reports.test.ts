@@ -156,13 +156,13 @@ describe("service groups", () => {
 });
 
 describe("doctor-wise", () => {
-  it("counts visits and appointments per doctor, matching typed names to the doctor list", async () => {
+  it("counts visits and appointments per doctor, ignoring spacing and capitals, and marking other spellings", async () => {
     await w.db.transaction().execute(async (tx) => {
       await setTenant(tx, w.clinicA);
       await sql`INSERT INTO doctors (name) VALUES ('Dr. Asha Rao'), ('Dr. Ben Cole')`.execute(tx);
       await sql`INSERT INTO daily_register (visit_date, uhid, patient_name, operating_doctor) VALUES
         ('2025-06-01', 'P1', 'One', 'Dr. Asha Rao'),
-        ('2025-06-02', 'P1', 'One', 'dr.  asha'),
+        ('2025-06-02', 'P1', 'One', 'dr.  asha  RAO'),
         ('2025-06-02', 'P2', 'Two', 'Dr. Asha Rao | Dr. Ben Cole'),
         ('2025-06-03', 'P3', 'Three', ''),
         ('2025-07-01', 'P5', 'Five', 'Dr. Ahsa Rao'),
@@ -175,13 +175,13 @@ describe("doctor-wise", () => {
           FROM unnest(ARRAY['Completed', 'No Show']) AS s`.execute(tx);
     });
     const { rows, totals } = (await get(admin, "/reports/doctor-wise?fy=2025-26")).json();
-    expect(rows).toMatchObject([
-      { doctor: "Dr. Asha Rao", visits: 4, patients: 3, booked: 2, completed: 1, noShow: 1 },
-      { doctor: "Dr. Ben Cole", visits: 2, patients: 2 },
-      { doctor: "Dr. Cy Nolan", visits: 2, patients: 2 },
-      { doctor: "Not recorded", visits: 1 }
-    ]);
-    expect(rows[0].share).toBe(44.4);
+    const by = (name: string) => rows.find((r: { doctor: string }) => r.doctor === name);
+    expect(rows[0]).toMatchObject({ doctor: "Dr. Asha Rao", check: "", visits: 3, patients: 2, booked: 2, completed: 1, noShow: 1 });
+    expect(by("Dr. Ben Cole")).toMatchObject({ check: "", visits: 1 });
+    // A different spelling is not guessed at: it is shown as typed and marked.
+    expect(by("Dr. Ahsa Rao")).toMatchObject({ check: "Not on the doctor list", visits: 1 });
+    expect(by("Dr. Cy")).toMatchObject({ check: "Not on the doctor list" });
+    expect(by("Not recorded")).toMatchObject({ check: "No doctor recorded", visits: 1 });
     expect(totals).toMatchObject({ visits: 9, booked: 2 });
     expect((await get(admin, "/reports/doctor-wise?fy=2026-27")).json().rows).toMatchObject([{ doctor: "Dr. Ben Cole", visits: 1 }]);
   });

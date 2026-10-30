@@ -94,19 +94,6 @@ const SERVICE_GROUP = sql`(CASE
   WHEN nullif(trim(service), '') IS NULL THEN 'No service stated'
   ELSE 'Other' END)`;
 
-/** Edit distance where swapping two neighbouring letters counts as one slip. */
-function slip(a: string, b: string): number {
-  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array<number>(b.length).fill(0)]);
-  for (let j = 0; j <= b.length; j++) d[0]![j] = j;
-  for (let i = 1; i <= a.length; i++) {
-    for (let j = 1; j <= b.length; j++) {
-      d[i]![j] = Math.min(d[i - 1]![j]! + 1, d[i]![j - 1]! + 1, d[i - 1]![j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
-      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i]![j] = Math.min(d[i]![j]!, d[i - 2]![j - 2]! + 1);
-    }
-  }
-  return d[a.length]![b.length]!;
-}
-
 const sum = (rows: Record<string, unknown>[], key: string) => rows.reduce((s, r) => s + (Number(r[key]) || 0), 0);
 const cap = <T>(rows: T[]) => ({ rows: rows.slice(0, ROW_CAP), truncated: rows.length > ROW_CAP });
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -320,24 +307,10 @@ export const REPORTS: ReportDef[] = [
     async run({ tx, tz, period }) {
       const known = (await sql<{ name: string }>`SELECT name FROM doctors ORDER BY name`.execute(tx)).rows.map((d) => d.name);
       const squash = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 80);
-      // A typed name is read as a doctor when each word of the shorter name
-      // matches a word of the longer one, allowing one slip per word (a missing,
-      // extra, wrong or swapped letter: "Vivyek" for "Viveyk", "Mittal" for
-      // "Mittel"). If two doctors fit equally well it is left as typed.
-      const words = (n: string) => n.slice(0, 120).toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((w) => w && w !== "dr").slice(0, 6);
-      // Free text: only short words that differ in length by at most one are compared, so the cost stays bounded.
-      const close = (x: string, y: string) =>
-        x === y || (x.length >= 4 && y.length >= 4 && x.length <= 30 && y.length <= 30 && Math.abs(x.length - y.length) <= 1 && slip(x, y) <= 1);
-      const covers = (small: string[], big: string[]) => small.length > 0 && small.every((w) => big.some((v) => close(w, v)));
-      const known2 = known.map((name) => ({ name, w: words(name) }));
-      const canon = (typed: string): string => {
-        const t = words(typed);
-        if (!t.length) return squash(typed) ? squash(typed) : "Not recorded";
-        const exact = known2.filter((k) => k.w.join(" ") === t.join(" "));
-        if (exact.length === 1) return exact[0]!.name;
-        const fits = known2.filter((k) => covers(t, k.w) || covers(k.w, t));
-        return fits.length === 1 ? fits[0]!.name : squash(typed);
-      };
+      // Only spacing and capitals are forgiven. Anything else stays as typed, and the
+      // report marks it so it can be corrected at the source.
+      const listed = new Map(known.map((name) => [squash(name).toLowerCase(), name]));
+      const canon = (typed: string): string => listed.get(squash(typed).toLowerCase()) ?? (squash(typed) || "Not recorded");
       type Row = { doctor: string; visits: number; patients: Set<string>; booked: number; completed: number; noShow: number; cancelled: number };
       const byDoctor = new Map<string, Row>();
       const rowFor = (name: string) => {
@@ -370,28 +343,15 @@ export const REPORTS: ReportDef[] = [
         else if (x.status === "Cancelled") r.cancelled += x.n;
       }
 
-      // Names that are not on the doctor list ("Dr. Deeksha" and "Dr. Deeksha
-      // Bhanotia") are joined when one clearly is the other.
-      const listed = new Set(known);
-      const loose = [...byDoctor.keys()].filter((n) => !listed.has(n) && n !== "Not recorded").slice(0, 200);
-      for (const n of loose) {
-        const longer = loose.filter((m) => m !== n && words(m).length > words(n).length && covers(words(n), words(m)));
-        if (longer.length !== 1) continue;
-        const from = byDoctor.get(n)!, to = rowFor(longer[0]!);
-        to.visits += from.visits; to.booked += from.booked; to.completed += from.completed; to.noShow += from.noShow; to.cancelled += from.cancelled;
-        from.patients.forEach((p) => to.patients.add(p));
-        byDoctor.delete(n);
-      }
-
       const all = [...byDoctor.values()].sort((a, b) => b.visits - a.visits || b.booked - a.booked || a.doctor.localeCompare(b.doctor));
       const totalVisits = all.reduce((s, r) => s + r.visits, 0);
       const rows = all.map((r) => ({
-        doctor: r.doctor, visits: r.visits, patients: r.patients.size, share: totalVisits ? Math.round((r.visits / totalVisits) * 1000) / 10 : 0,
+        doctor: r.doctor, check: r.doctor === "Not recorded" ? "No doctor recorded" : [...listed.values()].includes(r.doctor) ? "" : "Not on the doctor list", visits: r.visits, patients: r.patients.size, share: totalVisits ? Math.round((r.visits / totalVisits) * 1000) / 10 : 0,
         booked: r.booked, completed: r.completed, noShow: r.noShow, cancelled: r.cancelled
       }));
       return {
         columns: [
-          { key: "doctor", label: "Doctor", type: "text" }, { key: "visits", label: "Visits (register)", type: "int" },
+          { key: "doctor", label: "Doctor", type: "text" }, { key: "check", label: "Check", type: "text" }, { key: "visits", label: "Visits (register)", type: "int" },
           { key: "patients", label: "Patients seen", type: "int" }, { key: "share", label: "Share of visits %", type: "money" },
           { key: "booked", label: "Appointments booked", type: "int" }, { key: "completed", label: "Completed", type: "int" },
           { key: "noShow", label: "No-shows", type: "int" }, { key: "cancelled", label: "Cancelled", type: "int" }
