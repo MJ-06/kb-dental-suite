@@ -319,13 +319,15 @@ export const REPORTS: ReportDef[] = [
     about: "For each doctor: visits recorded in the daily register, patients seen, and appointments booked, completed, missed or cancelled. Money is not shown because receipts do not record which doctor treated the patient. The register's doctor is typed text, so spellings are matched to the doctor list where they clearly agree, allowing a small typo, and left as typed when more than one doctor fits (\"Dr. Viveyk\" or \"Dr. Vivyek Mittel\" is read as Dr. Viveyk Mittel), and a visit with two doctors counts for each.",
     async run({ tx, tz, period }) {
       const known = (await sql<{ name: string }>`SELECT name FROM doctors ORDER BY name`.execute(tx)).rows.map((d) => d.name);
-      const squash = (s: string) => s.replace(/\s+/g, " ").trim();
+      const squash = (s: string) => s.replace(/\s+/g, " ").trim().slice(0, 80);
       // A typed name is read as a doctor when each word of the shorter name
       // matches a word of the longer one, allowing one slip per word (a missing,
       // extra, wrong or swapped letter: "Vivyek" for "Viveyk", "Mittal" for
       // "Mittel"). If two doctors fit equally well it is left as typed.
-      const words = (n: string) => n.toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((w) => w && w !== "dr");
-      const close = (x: string, y: string) => x === y || (Math.min(x.length, y.length) >= 4 && slip(x, y) <= 1);
+      const words = (n: string) => n.slice(0, 120).toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((w) => w && w !== "dr").slice(0, 6);
+      // Free text: only short words that differ in length by at most one are compared, so the cost stays bounded.
+      const close = (x: string, y: string) =>
+        x === y || (x.length >= 4 && y.length >= 4 && x.length <= 30 && y.length <= 30 && Math.abs(x.length - y.length) <= 1 && slip(x, y) <= 1);
       const covers = (small: string[], big: string[]) => small.length > 0 && small.every((w) => big.some((v) => close(w, v)));
       const known2 = known.map((name) => ({ name, w: words(name) }));
       const canon = (typed: string): string => {
@@ -371,7 +373,7 @@ export const REPORTS: ReportDef[] = [
       // Names that are not on the doctor list ("Dr. Deeksha" and "Dr. Deeksha
       // Bhanotia") are joined when one clearly is the other.
       const listed = new Set(known);
-      const loose = [...byDoctor.keys()].filter((n) => !listed.has(n) && n !== "Not recorded");
+      const loose = [...byDoctor.keys()].filter((n) => !listed.has(n) && n !== "Not recorded").slice(0, 200);
       for (const n of loose) {
         const longer = loose.filter((m) => m !== n && words(m).length > words(n).length && covers(words(n), words(m)));
         if (longer.length !== 1) continue;
