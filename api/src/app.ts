@@ -11,6 +11,7 @@ import { pageRoutes } from "./http/pages.js";
 import { legacyRoutes } from "./legacy/route.js";
 import { authRoutes } from "./routes/auth.js";
 import { patientRoutes } from "./routes/patients.js";
+import { adminReportRoutes } from "./routes/admin-reports.js";
 import { systemLogRoutes } from "./routes/system-log.js";
 import { configureSystemLog } from "./syslog.js";
 
@@ -65,6 +66,7 @@ export async function buildApp(opts: AppOptions & { logger?: boolean }) {
   await app.register(authRoutes, { ...opts, prefix: "/api/v1/auth" });
   await app.register(patientRoutes, { ...opts, prefix: "/api/v1/patients" });
   await app.register(appointmentRoutes, { ...opts, prefix: "/api/v1/appointments" });
+  await app.register(adminReportRoutes, { ...opts, prefix: "/api/v1/admin" });
   await app.register(systemLogRoutes, { ...opts, prefix: "/api/v1/system-log" });
   await app.register(legacyRoutes, opts);
   await app.register(pageRoutes);

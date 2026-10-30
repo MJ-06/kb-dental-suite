@@ -118,6 +118,16 @@ Ask Viveyk whether the Script Properties `FINANCE_SHEET_ID` and `CLINICAL_SHEET_
 point somewhere else today. If they do, the finance and clinical tabs are in those
 files instead of the ones above.
 
+## Admin overview and Excel export (30 Oct)
+
+`/admin.html` (admin only): a dashboard (collected, spent, net, patients, visits, outstanding, month-by-month chart, payment modes, top services and expenses) and 10 reports, each viewable on screen and downloadable as .xlsx, plus one workbook with every report. Pick a financial year (April to March), "All years" or a custom date range.
+- **Access.** New permission `reports:read` (`api/src/auth/permissions.ts`); only `admin` has it, so accounts, reception and doctors get 403 on every route. API under `/api/v1/admin`: `/dashboard`, `/reports`, `/reports/:id`, `/reports/:id/xlsx`, `/export/all`. Every export is written to the system log (kind "export") with who took it. The files can hold names and phone numbers: treat them as confidential.
+- **Reports** (`api/src/reports/reports.ts`): collections by financial year (by mode), collections/expenses/net by month (personal expenses shown separately), collections by service, receipts, expenses by head, expenses, outstanding balances, patients registered, appointments by month, appointments. Adding one is one entry in `REPORTS`; the screen, the JSON and the Excel file all follow.
+- **Excel** is written by `api/src/reports/xlsx.ts` (no new dependency). Text is stored as text, never a formula, so a patient named `=SUM(...)` stays a name. Opens cleanly in openpyxl; not yet opened in Excel itself.
+- **Registration date.** Imported patients all carry the import day in `registered_on`, so under the year-month UHID scheme the reports date a patient by the month in the UHID (shown as the 1st). Worth fixing at the source in the importer.
+- **Checked** against kb_rehearsal (never committed): dashboard, a report and the full workbook, at desktop and 375px, light and dark; the full workbook (10 sheets, ~80 KB) downloads in under 0.2 s. Service names are free text, so "Collections by service" has about 190 rows on the real data; a cleaned service list would make it useful.
+- Tests: `api/test/reports.test.ts` (16). Run with the full suite: 194 pass.
+
 ## Left, in this order
 
 1. Run every flow in the Flow test report in a browser (Playwright), against

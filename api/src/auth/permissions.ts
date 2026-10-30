@@ -18,7 +18,8 @@ export const PERMISSIONS = [
   "finance:write",       // edit or cancel receipts, expenses, panel claims
   "masters:write",       // doctors, chairs, panels, fee lists, medicines
   "users:manage",        // staff accounts and roles
-  "audit:read"
+  "audit:read",
+  "reports:read"         // admin dashboards, reports and Excel exports (admin only)
 ] as const;
 
 export type Permission = (typeof PERMISSIONS)[number];

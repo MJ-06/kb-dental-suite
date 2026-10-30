@@ -62,7 +62,7 @@ const monthLabel = (key: string) => `${MONTHS_LONG[Number(key.slice(5, 7)) - 1]}
  * counts as 0 rather than failing the query, so one damaged plan can never
  * take every patient's balance down with it.
  */
-const ESTIMATE_TOTAL = sql<number>`(CASE
+export const ESTIMATE_TOTAL = sql<number>`(CASE
   WHEN regexp_replace(coalesce(estimate->>'total', ''), '[^0-9.-]', '', 'g') ~ '^[0-9]{1,12}([.][0-9]{1,4})?$'
   THEN regexp_replace(coalesce(estimate->>'total', ''), '[^0-9.-]', '', 'g')::float8
   ELSE 0 END)`;
