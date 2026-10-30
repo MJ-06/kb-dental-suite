@@ -165,6 +165,10 @@ describe("doctor-wise", () => {
         ('2025-06-02', 'P1', 'One', 'dr.  asha'),
         ('2025-06-02', 'P2', 'Two', 'Dr. Asha Rao | Dr. Ben Cole'),
         ('2025-06-03', 'P3', 'Three', ''),
+        ('2025-07-01', 'P5', 'Five', 'Dr. Ahsa Rao'),
+        ('2025-07-02', 'P7', 'Seven', 'Dr. Cy'),
+        ('2025-07-02', 'P8', 'Eight', 'Dr. Cy Nolan'),
+        ('2025-07-01', 'P6', 'Six', 'DR BEN COLE JR'),
         ('2026-06-03', 'P4', 'Four', 'Dr. Ben Cole')`.execute(tx);
       await sql`INSERT INTO appointments (patient_name, starts_at, ends_at, reason, status, doctor_id)
         SELECT 'One', '2025-06-01T10:00:00+05:30', '2025-06-01T10:30:00+05:30', 'Check', s, (SELECT id FROM doctors WHERE name = 'Dr. Asha Rao')
@@ -172,12 +176,13 @@ describe("doctor-wise", () => {
     });
     const { rows, totals } = (await get(admin, "/reports/doctor-wise?fy=2025-26")).json();
     expect(rows).toMatchObject([
-      { doctor: "Dr. Asha Rao", visits: 3, patients: 2, booked: 2, completed: 1, noShow: 1 },
-      { doctor: "Dr. Ben Cole", visits: 1, patients: 1 },
+      { doctor: "Dr. Asha Rao", visits: 4, patients: 3, booked: 2, completed: 1, noShow: 1 },
+      { doctor: "Dr. Ben Cole", visits: 2, patients: 2 },
+      { doctor: "Dr. Cy Nolan", visits: 2, patients: 2 },
       { doctor: "Not recorded", visits: 1 }
     ]);
-    expect(rows[0].share).toBe(60);
-    expect(totals).toMatchObject({ visits: 5, booked: 2 });
+    expect(rows[0].share).toBe(44.4);
+    expect(totals).toMatchObject({ visits: 9, booked: 2 });
     expect((await get(admin, "/reports/doctor-wise?fy=2026-27")).json().rows).toMatchObject([{ doctor: "Dr. Ben Cole", visits: 1 }]);
   });
 });

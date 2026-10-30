@@ -94,7 +94,20 @@ const SERVICE_GROUP = sql`(CASE
   WHEN nullif(trim(service), '') IS NULL THEN 'No service stated'
   ELSE 'Other' END)`;
 
-const sum =(rows: Record<string, unknown>[], key: string) => rows.reduce((s, r) => s + (Number(r[key]) || 0), 0);
+/** Edit distance where swapping two neighbouring letters counts as one slip. */
+function slip(a: string, b: string): number {
+  const d: number[][] = Array.from({ length: a.length + 1 }, (_, i) => [i, ...Array<number>(b.length).fill(0)]);
+  for (let j = 0; j <= b.length; j++) d[0]![j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      d[i]![j] = Math.min(d[i - 1]![j]! + 1, d[i]![j - 1]! + 1, d[i - 1]![j - 1]! + (a[i - 1] === b[j - 1] ? 0 : 1));
+      if (i > 1 && j > 1 && a[i - 1] === b[j - 2] && a[i - 2] === b[j - 1]) d[i]![j] = Math.min(d[i]![j]!, d[i - 2]![j - 2]! + 1);
+    }
+  }
+  return d[a.length]![b.length]!;
+}
+
+const sum = (rows: Record<string, unknown>[], key: string) => rows.reduce((s, r) => s + (Number(r[key]) || 0), 0);
 const cap = <T>(rows: T[]) => ({ rows: rows.slice(0, ROW_CAP), truncated: rows.length > ROW_CAP });
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 export const monthName = (ym: string) => `${MONTHS[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
@@ -303,17 +316,25 @@ export const REPORTS: ReportDef[] = [
   },
   {
     id: "doctor-wise", title: "Doctor-wise activity", group: "Diary",
-    about: "For each doctor: visits recorded in the daily register, patients seen, and appointments booked, completed, missed or cancelled. Money is not shown because receipts do not record which doctor treated the patient. The register's doctor is typed text, so spellings are matched to the doctor list where they clearly agree (\"Dr. Viveyk\" is read as Dr. Viveyk Mittel), and a visit with two doctors counts for each.",
+    about: "For each doctor: visits recorded in the daily register, patients seen, and appointments booked, completed, missed or cancelled. Money is not shown because receipts do not record which doctor treated the patient. The register's doctor is typed text, so spellings are matched to the doctor list where they clearly agree, allowing a small typo, and left as typed when more than one doctor fits (\"Dr. Viveyk\" or \"Dr. Vivyek Mittel\" is read as Dr. Viveyk Mittel), and a visit with two doctors counts for each.",
     async run({ tx, tz, period }) {
       const known = (await sql<{ name: string }>`SELECT name FROM doctors ORDER BY name`.execute(tx)).rows.map((d) => d.name);
       const squash = (s: string) => s.replace(/\s+/g, " ").trim();
+      // A typed name is read as a doctor when each word of the shorter name
+      // matches a word of the longer one, allowing one slip per word (a missing,
+      // extra, wrong or swapped letter: "Vivyek" for "Viveyk", "Mittal" for
+      // "Mittel"). If two doctors fit equally well it is left as typed.
+      const words = (n: string) => n.toLowerCase().replace(/[^a-z\s]/g, " ").split(/\s+/).filter((w) => w && w !== "dr");
+      const close = (x: string, y: string) => x === y || (Math.min(x.length, y.length) >= 4 && slip(x, y) <= 1);
+      const covers = (small: string[], big: string[]) => small.length > 0 && small.every((w) => big.some((v) => close(w, v)));
+      const known2 = known.map((name) => ({ name, w: words(name) }));
       const canon = (typed: string): string => {
-        const t = squash(typed).toLowerCase();
-        if (!t) return "Not recorded";
-        const exact = known.find((k) => k.toLowerCase() === t);
-        if (exact) return exact;
-        const starts = known.filter((k) => k.toLowerCase().startsWith(t));
-        return starts.length === 1 ? starts[0]! : squash(typed);
+        const t = words(typed);
+        if (!t.length) return squash(typed) ? squash(typed) : "Not recorded";
+        const exact = known2.filter((k) => k.w.join(" ") === t.join(" "));
+        if (exact.length === 1) return exact[0]!.name;
+        const fits = known2.filter((k) => covers(t, k.w) || covers(k.w, t));
+        return fits.length === 1 ? fits[0]!.name : squash(typed);
       };
       type Row = { doctor: string; visits: number; patients: Set<string>; booked: number; completed: number; noShow: number; cancelled: number };
       const byDoctor = new Map<string, Row>();
@@ -345,6 +366,19 @@ export const REPORTS: ReportDef[] = [
         if (x.status === "Completed") r.completed += x.n;
         else if (x.status === "No Show") r.noShow += x.n;
         else if (x.status === "Cancelled") r.cancelled += x.n;
+      }
+
+      // Names that are not on the doctor list ("Dr. Deeksha" and "Dr. Deeksha
+      // Bhanotia") are joined when one clearly is the other.
+      const listed = new Set(known);
+      const loose = [...byDoctor.keys()].filter((n) => !listed.has(n) && n !== "Not recorded");
+      for (const n of loose) {
+        const longer = loose.filter((m) => m !== n && words(m).length > words(n).length && covers(words(n), words(m)));
+        if (longer.length !== 1) continue;
+        const from = byDoctor.get(n)!, to = rowFor(longer[0]!);
+        to.visits += from.visits; to.booked += from.booked; to.completed += from.completed; to.noShow += from.noShow; to.cancelled += from.cancelled;
+        from.patients.forEach((p) => to.patients.add(p));
+        byDoctor.delete(n);
       }
 
       const all = [...byDoctor.values()].sort((a, b) => b.visits - a.visits || b.booked - a.booked || a.doctor.localeCompare(b.doctor));
