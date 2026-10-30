@@ -155,6 +155,33 @@ describe("service groups", () => {
   });
 });
 
+describe("doctor-wise", () => {
+  it("counts visits and appointments per doctor, matching typed names to the doctor list", async () => {
+    await w.db.transaction().execute(async (tx) => {
+      await setTenant(tx, w.clinicA);
+      await sql`INSERT INTO doctors (name) VALUES ('Dr. Asha Rao'), ('Dr. Ben Cole')`.execute(tx);
+      await sql`INSERT INTO daily_register (visit_date, uhid, patient_name, operating_doctor) VALUES
+        ('2025-06-01', 'P1', 'One', 'Dr. Asha Rao'),
+        ('2025-06-02', 'P1', 'One', 'dr.  asha'),
+        ('2025-06-02', 'P2', 'Two', 'Dr. Asha Rao | Dr. Ben Cole'),
+        ('2025-06-03', 'P3', 'Three', ''),
+        ('2026-06-03', 'P4', 'Four', 'Dr. Ben Cole')`.execute(tx);
+      await sql`INSERT INTO appointments (patient_name, starts_at, ends_at, reason, status, doctor_id)
+        SELECT 'One', '2025-06-01T10:00:00+05:30', '2025-06-01T10:30:00+05:30', 'Check', s, (SELECT id FROM doctors WHERE name = 'Dr. Asha Rao')
+          FROM unnest(ARRAY['Completed', 'No Show']) AS s`.execute(tx);
+    });
+    const { rows, totals } = (await get(admin, "/reports/doctor-wise?fy=2025-26")).json();
+    expect(rows).toMatchObject([
+      { doctor: "Dr. Asha Rao", visits: 3, patients: 2, booked: 2, completed: 1, noShow: 1 },
+      { doctor: "Dr. Ben Cole", visits: 1, patients: 1 },
+      { doctor: "Not recorded", visits: 1 }
+    ]);
+    expect(rows[0].share).toBe(60);
+    expect(totals).toMatchObject({ visits: 5, booked: 2 });
+    expect((await get(admin, "/reports/doctor-wise?fy=2026-27")).json().rows).toMatchObject([{ doctor: "Dr. Ben Cole", visits: 1 }]);
+  });
+});
+
 describe("Excel export", () => {
   it("downloads a real workbook with a header, the rows and a total", async () => {
     const res = await get(admin, "/reports/receipts/xlsx?fy=2025-26");

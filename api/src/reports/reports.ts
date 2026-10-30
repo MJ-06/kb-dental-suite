@@ -302,6 +302,70 @@ export const REPORTS: ReportDef[] = [
     }
   },
   {
+    id: "doctor-wise", title: "Doctor-wise activity", group: "Diary",
+    about: "For each doctor: visits recorded in the daily register, patients seen, and appointments booked, completed, missed or cancelled. Money is not shown because receipts do not record which doctor treated the patient. The register's doctor is typed text, so spellings are matched to the doctor list where they clearly agree (\"Dr. Viveyk\" is read as Dr. Viveyk Mittel), and a visit with two doctors counts for each.",
+    async run({ tx, tz, period }) {
+      const known = (await sql<{ name: string }>`SELECT name FROM doctors ORDER BY name`.execute(tx)).rows.map((d) => d.name);
+      const squash = (s: string) => s.replace(/\s+/g, " ").trim();
+      const canon = (typed: string): string => {
+        const t = squash(typed).toLowerCase();
+        if (!t) return "Not recorded";
+        const exact = known.find((k) => k.toLowerCase() === t);
+        if (exact) return exact;
+        const starts = known.filter((k) => k.toLowerCase().startsWith(t));
+        return starts.length === 1 ? starts[0]! : squash(typed);
+      };
+      type Row = { doctor: string; visits: number; patients: Set<string>; booked: number; completed: number; noShow: number; cancelled: number };
+      const byDoctor = new Map<string, Row>();
+      const rowFor = (name: string) => {
+        let r = byDoctor.get(name);
+        if (!r) byDoctor.set(name, (r = { doctor: name, visits: 0, patients: new Set(), booked: 0, completed: 0, noShow: 0, cancelled: 0 }));
+        return r;
+      };
+
+      // Visits: one register row per patient per day; "A | B" credits both.
+      const reg = await sql<{ doc: string; pid: string; n: number }>`
+        SELECT trim(d) AS doc, coalesce(nullif(upper(uhid), ''), patient_name, '') AS pid, count(*)::int AS n
+          FROM daily_register, unnest(string_to_array(coalesce(nullif(trim(operating_doctor), ''), ' '), '|')) AS d
+         WHERE ${within("visit_date", period)} GROUP BY 1, 2`.execute(tx);
+      for (const x of reg.rows) {
+        const r = rowFor(canon(x.doc));
+        r.visits += x.n;
+        if (x.pid) r.patients.add(x.pid);
+      }
+
+      const day = localDay("a.starts_at", tz);
+      const appts = await sql<{ doctor: string | null; status: string; n: number }>`
+        SELECT d.name AS doctor, a.status, count(*)::int AS n
+          FROM appointments a LEFT JOIN doctors d ON d.id = a.doctor_id
+         WHERE ${within(day, period)} GROUP BY 1, 2`.execute(tx);
+      for (const x of appts.rows) {
+        const r = rowFor(x.doctor ? canon(x.doctor) : "Not recorded");
+        r.booked += x.n;
+        if (x.status === "Completed") r.completed += x.n;
+        else if (x.status === "No Show") r.noShow += x.n;
+        else if (x.status === "Cancelled") r.cancelled += x.n;
+      }
+
+      const all = [...byDoctor.values()].sort((a, b) => b.visits - a.visits || b.booked - a.booked || a.doctor.localeCompare(b.doctor));
+      const totalVisits = all.reduce((s, r) => s + r.visits, 0);
+      const rows = all.map((r) => ({
+        doctor: r.doctor, visits: r.visits, patients: r.patients.size, share: totalVisits ? Math.round((r.visits / totalVisits) * 1000) / 10 : 0,
+        booked: r.booked, completed: r.completed, noShow: r.noShow, cancelled: r.cancelled
+      }));
+      return {
+        columns: [
+          { key: "doctor", label: "Doctor", type: "text" }, { key: "visits", label: "Visits (register)", type: "int" },
+          { key: "patients", label: "Patients seen", type: "int" }, { key: "share", label: "Share of visits %", type: "money" },
+          { key: "booked", label: "Appointments booked", type: "int" }, { key: "completed", label: "Completed", type: "int" },
+          { key: "noShow", label: "No-shows", type: "int" }, { key: "cancelled", label: "Cancelled", type: "int" }
+        ],
+        // Patients seen is not summed: one patient can see two doctors.
+        rows, totals: { visits: sum(rows, "visits"), booked: sum(rows, "booked"), completed: sum(rows, "completed"), noShow: sum(rows, "noShow"), cancelled: sum(rows, "cancelled") }
+      };
+    }
+  },
+  {
     id: "appointments-by-month", title: "Appointments by month", group: "Diary",
     about: "How many visits were booked each month and how they ended.",
     async run({ tx, tz, period }) {
