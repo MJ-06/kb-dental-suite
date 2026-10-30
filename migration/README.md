@@ -91,6 +91,20 @@ import report says this out loud.
 
 ---
 
+## The sheet importers and the steps after them (new backend)
+
+The runbook above is for the earlier schema. For the multi-clinic backend the order is:
+
+1. `uv run --with openpyxl --with "psycopg[binary]" python -X utf8 migration/import_sheets.py --data <folder> --clinic kb --wipe`
+   (patients, appointments, daily register, receipts, expenses)
+2. `... migration/import_sheets_2.py --data <folder> --clinic kb --wipe`
+   (master lists, clinical forms, treatment cases and plans, CRM, documents, and the registration-day refinement)
+3. `npx tsx api/scripts/fix-doctor-names.ts` to preview, then with `--apply`, to correct the doctor-name typos (one-off, run after the final import).
+4. Read `data/out/*.csv`: rejects, duplicate UHIDs, unregistered UHIDs and their proposed fixes (`python migration/orphan_uhid_report.py`), service names left as "Other".
+5. `npx tsx api/scripts/rehearsal-check.ts` calls the screens' actions and prints what each returns.
+
+Both importers refuse any database that is not `kb_rehearsal` on localhost; a real go-live load needs a deliberate, reviewed change to that guard. `data/` is git-ignored: it holds real patient data and must never be committed.
+
 ## The cutover
 
 The rehearsal has already been done, and the counts matched.
