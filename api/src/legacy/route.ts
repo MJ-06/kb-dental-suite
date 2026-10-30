@@ -11,6 +11,7 @@ import { attemptCounter, attemptLogin } from "../auth/login.js";
 import { hashToken, SESSION_COOKIE, SESSION_TTL_MS } from "../auth/tokens.js";
 import { resumeSession } from "../db/index.js";
 import type { AppOptions } from "../app.js";
+import { recordFailure } from "../syslog.js";
 import { actions } from "./registry.js";
 import { DeskError, type Params, type Result } from "./types.js";
 
@@ -76,7 +77,10 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
         return out;
       });
     } catch (e) {
-      return describe(e, action, app.log);
+      const known = describe(e);
+      if (known) return known;
+      const ref = await recordFailure(token, { kind: "legacy_action", action, error: e }, app.log);
+      return { success: false, error: `Something went wrong saving that. Reference ${ref}: quote it to whoever looks after the system.`, ref };
     }
   }
 
@@ -154,11 +158,11 @@ const PG_MESSAGES: Record<string, string> = {
   "22008": "One of the dates is not valid"
 };
 
-function describe(e: unknown, action: string, log: { error: (o: unknown, m: string) => void }): Result {
+/** What the desk is told for a failure we expect; null for one we do not (it is logged). */
+function describe(e: unknown): Result | null {
   if (e instanceof Refused) return e.result;
   if (e instanceof DeskError) return { success: false, error: e.message };
   const code = (e as { code?: string }).code;
   if (code && PG_MESSAGES[code]) return { success: false, error: PG_MESSAGES[code]!, rule: (e as { constraint?: string }).constraint };
-  log.error({ err: e, action }, "legacy action failed");
-  return { success: false, error: "Something went wrong saving that. It has been logged." };
+  return null;
 }

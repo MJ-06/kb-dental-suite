@@ -2,6 +2,8 @@
 // and a status code; anything unexpected is logged in full and reported as
 // a generic failure, so internals never reach the browser.
 import type { FastifyError, FastifyReply, FastifyRequest } from "fastify";
+import { SESSION_COOKIE } from "../auth/tokens.js";
+import { recordFailure } from "../syslog.js";
 
 export class HttpError extends Error {
   constructor(public status: number, public code: string, message: string, public details?: unknown) {
@@ -21,7 +23,7 @@ const PG_ERRORS: Record<string, [number, string, string]> = {
   "42501": [403, "forbidden", "Not allowed"]
 };
 
-export function errorHandler(err: FastifyError & { code?: string; constraint?: string }, req: FastifyRequest, reply: FastifyReply) {
+export async function errorHandler(err: FastifyError & { code?: string; constraint?: string }, req: FastifyRequest, reply: FastifyReply) {
   if (err instanceof HttpError) {
     return reply.status(err.status).send({ error: { code: err.code, message: err.message, details: err.details } });
   }
@@ -37,6 +39,6 @@ export function errorHandler(err: FastifyError & { code?: string; constraint?: s
     req.log.warn({ pg: err.code, constraint: err.constraint }, message);
     return reply.status(status).send({ error: { code, message, details: err.constraint ? { rule: err.constraint } : undefined } });
   }
-  req.log.error(err);
-  return reply.status(500).send({ error: { code: "internal", message: "Something went wrong. It has been logged." } });
+  const ref = await recordFailure(req.cookies?.[SESSION_COOKIE], { kind: "rest", action: `${req.method} ${req.routeOptions?.url ?? req.url.split("?")[0]}`, error: err }, req.log);
+  return reply.status(500).send({ error: { code: "internal", message: `Something went wrong. Reference ${ref}.`, ref } });
 }

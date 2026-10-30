@@ -19,7 +19,8 @@ const PAGES: Record<string, string> = {
   "/index.html": "index.html",
   "/register.html": "register.html",
   "/chatbot.html": "chatbot.html",
-  "/expense.html": "expense.html"
+  "/expense.html": "expense.html",
+  "/system-log.html": "system-log.html"
 };
 // CDN address (as written in the pages) -> file inside node_modules.
 const VENDOR: Record<string, string> = {

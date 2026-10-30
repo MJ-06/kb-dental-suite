@@ -1,0 +1,138 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>System log</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --panel: #ffffff; --ink: #1d2a2c; --muted: #5b6b6e; --line: #dcd7cb;
+    --accent: #0f6b66; --accent-ink: #ffffff; --bad: #a3331f; --bad-bg: #fbe9e5; --ok: #1f6b3a; --ok-bg: #e4f3ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121a1b; --panel: #1b2527; --ink: #e8efee; --muted: #9db0b1; --line: #2e3d3f;
+            --accent: #5cc4bc; --accent-ink: #0b1a1a; --bad: #ff9c88; --bad-bg: #3a1f1a; --ok: #8fd6a8; --ok-bg: #173324; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  p.lead { color: var(--muted); margin: 0 0 20px; max-width: 70ch; }
+  .bar { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; margin-bottom: 16px; }
+  label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+  select, input, button { font: inherit; min-height: 40px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 6px 10px; }
+  button { cursor: pointer; background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.quiet { background: var(--panel); color: var(--ink); border-color: var(--line); }
+  button:disabled { opacity: .55; cursor: default; }
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .counts { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 16px; }
+  .count { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 10px 14px; min-width: 130px; }
+  .count b { display: block; font-size: 24px; }
+  .count span { color: var(--muted); font-size: 13px; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); background: var(--bg); }
+  tr:last-child td { border-bottom: 0; }
+  code.ref { font-weight: 700; letter-spacing: .03em; }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; }
+  .pill.open { background: var(--bad-bg); color: var(--bad); }
+  .pill.done { background: var(--ok-bg); color: var(--ok); }
+  .pill.info { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
+  details pre { white-space: pre-wrap; word-break: break-word; font: 12px/1.5 Consolas, monospace; background: var(--bg); padding: 8px; border-radius: 6px; margin: 8px 0 0; }
+  .empty, .err { padding: 28px; text-align: center; color: var(--muted); background: var(--panel); border: 1px dashed var(--line); border-radius: 8px; }
+  .err { color: var(--bad); border-color: var(--bad); }
+  @media (max-width: 720px) {
+    table, thead, tbody, tr, td { display: block; }
+    thead { display: none; }
+    tr { border-bottom: 1px solid var(--line); padding: 8px 0; }
+    td { border: 0; padding: 3px 12px; }
+    td::before { content: attr(data-label) ": "; color: var(--muted); font-size: 12px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; transition: none !important; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>System log</h1>
+  <p class="lead">Every unexpected failure gets a reference such as <code class="ref">E-7K2Q9X</code>, shown on the screen where it happened. Ask the person to read it out, type it below, and see what failed and when. Patient details are never stored here.</p>
+
+  <div class="counts" id="counts" aria-live="polite"></div>
+
+  <form class="bar" id="filters">
+    <label>Show
+      <select id="status"><option value="open">Open failures</option><option value="resolved">Resolved</option><option value="all">All failures</option></select>
+    </label>
+    <label>Type
+      <select id="level"><option value="error">Failures</option><option value="info">Events (exports and so on)</option><option value="all">Both</option></select>
+    </label>
+    <label>Reference
+      <input id="ref" maxlength="20" placeholder="E-7K2Q9X" autocomplete="off">
+    </label>
+    <button type="submit">Search</button>
+    <button type="button" class="quiet" id="refresh">Refresh</button>
+  </form>
+
+  <div id="out"><div class="empty">Loading…</div></div>
+</main>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var esc = function (s) { return String(s == null ? "" : s).replace(/[&<>"']/g, function (c) { return { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]; }); };
+  var when = function (iso) { var d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "medium" }); };
+
+  function api(method, path, body) {
+    return fetch("/api/v1/system-log" + path, {
+      method: method, credentials: "same-origin",
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok) throw new Error(r.status === 401 ? "Please sign in to the main app first, then reload this page." : r.status === 403 ? "Only an administrator can open the system log." : (j.error && j.error.message) || "HTTP " + r.status);
+        return j;
+      });
+    });
+  }
+
+  function render(data) {
+    var c = data.counts;
+    $("counts").innerHTML =
+      '<div class="count"><b>' + c.open + '</b><span>open failures</span></div>' +
+      '<div class="count"><b>' + c.resolved + '</b><span>resolved</span></div>' +
+      '<div class="count"><b>' + c.events + '</b><span>logged events</span></div>';
+    if (!data.rows.length) { $("out").innerHTML = '<div class="empty">Nothing here. That is good news for open failures.</div>'; return; }
+    var rows = data.rows.map(function (r) {
+      var isErr = r.level === "error";
+      var pill = !isErr ? '<span class="pill info">event</span>' : r.resolved_at ? '<span class="pill done">resolved</span>' : '<span class="pill open">open</span>';
+      var det = '<details><summary>Details</summary><pre>' + esc(JSON.stringify(r.detail, null, 2)) + (r.resolution ? "\n\nResolution: " + esc(r.resolution) + " (" + esc(r.resolved_by || "") + ", " + esc(when(r.resolved_at)) + ")" : "") + "</pre></details>";
+      var act = isErr && !r.resolved_at ? '<button type="button" class="quiet" data-resolve="' + esc(r.id) + '">Mark resolved</button>' : "";
+      return "<tr>" +
+        '<td data-label="Reference">' + (r.ref ? '<code class="ref">' + esc(r.ref) + "</code>" : "") + " " + pill + "</td>" +
+        '<td data-label="When">' + esc(when(r.happened_at)) + "</td>" +
+        '<td data-label="What">' + esc(r.action || r.kind) + '<br><span style="color:var(--muted)">' + esc(r.message || "") + "</span>" + det + "</td>" +
+        '<td data-label="Who">' + esc(r.user || "") + "</td>" +
+        '<td data-label="">' + act + "</td></tr>";
+    }).join("");
+    $("out").innerHTML = '<table><thead><tr><th>Reference</th><th>When</th><th>What</th><th>Who</th><th></th></tr></thead><tbody>' + rows + "</tbody></table>";
+  }
+
+  function load() {
+    var q = "?status=" + $("status").value + "&level=" + $("level").value + ($("ref").value.trim() ? "&ref=" + encodeURIComponent($("ref").value.trim()) : "");
+    api("GET", q).then(render).catch(function (e) { $("counts").innerHTML = ""; $("out").innerHTML = '<div class="err" role="alert">' + esc(e.message) + "</div>"; });
+  }
+
+  $("filters").addEventListener("submit", function (e) { e.preventDefault(); load(); });
+  $("refresh").addEventListener("click", load);
+  $("out").addEventListener("click", function (e) {
+    var id = e.target && e.target.getAttribute && e.target.getAttribute("data-resolve");
+    if (!id) return;
+    var note = window.prompt("What was done about it? (optional, up to 300 characters)", "");
+    if (note === null) return;
+    e.target.disabled = true;
+    api("POST", "/" + id + "/resolve", { resolution: note.slice(0, 300) }).then(load).catch(function (er) { e.target.disabled = false; window.alert(er.message); });
+  });
+  load();
+})();
+</script>
+</body>
+</html>
