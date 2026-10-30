@@ -81,21 +81,20 @@ const within = (col: string | RawBuilder<unknown>, p: Period) => {
 /** The clinic's own day for a timestamptz column (a fixed column name, never user input). */
 const localDay = (col: string, tz: string) => sql`((${sql.raw(col)}) AT TIME ZONE ${tz})::date`;
 
-/**
- * The day a patient registered. Imported patients all carry the day of the
- * import in registered_on, so under the year-month UHID scheme the UHID itself
- * (two letters for the year, then the month) is the reliable record: it gives
- * the month, shown as the 1st. Other schemes use registered_on.
- */
-const registeredDay = (tz: string, alias = "") => {
-  const u = sql.raw(alias + "uhid"), r = sql.raw(alias + "registered_on");
-  return sql`(CASE
-    WHEN (SELECT uhid_scheme FROM clinic_profile()) = 'year-month' AND ${u} ~ '^[A-Z]{2}(0[1-9]|1[0-2])[0-9]+$'
-    THEN make_date(2015 + (ascii(substr(${u}, 1, 1)) - 65) * 26 + ascii(substr(${u}, 2, 1)) - 65, substr(${u}, 3, 2)::int, 1)
-    ELSE ((${r}) AT TIME ZONE ${tz})::date END)`;
-};
+/** The day a patient registered, in the clinic's own day. */
+const registeredDay = (tz: string, alias = "") => sql`((${sql.raw(alias + "registered_on")}) AT TIME ZONE ${tz})::date`;
 
-const sum = (rows: Record<string, unknown>[], key: string) => rows.reduce((s, r) => s + (Number(r[key]) || 0), 0);
+/**
+ * What a receipt was for, as the coarse group set at import or at the desk.
+ * A receipt with a service but no group is "Other"; one with neither is shown
+ * on its own row so the gap stays visible.
+ */
+const SERVICE_GROUP = sql`(CASE
+  WHEN nullif(trim(service_group), '') IS NOT NULL THEN trim(service_group)
+  WHEN nullif(trim(service), '') IS NULL THEN 'No service stated'
+  ELSE 'Other' END)`;
+
+const sum =(rows: Record<string, unknown>[], key: string) => rows.reduce((s, r) => s + (Number(r[key]) || 0), 0);
 const cap = <T>(rows: T[]) => ({ rows: rows.slice(0, ROW_CAP), truncated: rows.length > ROW_CAP });
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 export const monthName = (ym: string) => `${MONTHS[Number(ym.slice(5, 7)) - 1]} ${ym.slice(0, 4)}`;
@@ -169,10 +168,10 @@ export const REPORTS: ReportDef[] = [
   },
   {
     id: "collections-by-service", title: "Collections by service", group: "Money",
-    about: "Which treatments brought in the money in the period.",
+    about: "Which kind of treatment brought in the money in the period, grouped (RCT, Implant, Orthodontics and so on). Receipts with no service typed are shown on their own row.",
     async run({ tx, period }) {
       const r = await sql<{ service: string; n: number; v: number }>`
-        SELECT coalesce(nullif(trim(service), ''), 'Not stated') AS service, count(*)::int AS n, sum(amount1 + amount2)::float8 AS v
+        SELECT ${SERVICE_GROUP} AS service, count(*)::int AS n, sum(amount1 + amount2)::float8 AS v
           FROM receipts WHERE ${within("receipt_date", period)} GROUP BY 1 ORDER BY v DESC, service`.execute(tx);
       const all = r.rows.reduce((s, x) => s + x.v, 0);
       const rows = r.rows.map((x) => ({ service: x.service, receipts: x.n, collected: x.v, share: all ? Math.round((x.v / all) * 1000) / 10 : 0 }));
@@ -191,7 +190,7 @@ export const REPORTS: ReportDef[] = [
     async run({ tx, period }) {
       const r = await sql<Record<string, unknown>>`
         SELECT receipt_date::text AS date, coalesce(legacy_receipt_no, receipt_no::text) AS no, upper(uhid) AS uhid,
-               patient_name AS patient, service, mode1, amount1::float8 AS amount1, mode2, amount2::float8 AS amount2,
+               patient_name AS patient, service, service_group AS "group", mode1, amount1::float8 AS amount1, mode2, amount2::float8 AS amount2,
                (amount1 + amount2)::float8 AS total, remarks
           FROM receipts WHERE ${within("receipt_date", period)}
          ORDER BY receipt_date DESC, receipt_no DESC LIMIT ${ROW_CAP + 1}`.execute(tx);
@@ -200,7 +199,7 @@ export const REPORTS: ReportDef[] = [
         columns: [
           { key: "date", label: "Date", type: "date" }, { key: "no", label: "Receipt no.", type: "text" },
           { key: "uhid", label: "UHID", type: "text" }, { key: "patient", label: "Patient", type: "text" },
-          { key: "service", label: "Service", type: "text" }, { key: "mode1", label: "Mode", type: "text" },
+          { key: "service", label: "Service (as typed)", type: "text" }, { key: "group", label: "Service group", type: "text" }, { key: "mode1", label: "Mode", type: "text" },
           { key: "amount1", label: "Amount", type: "money" }, { key: "mode2", label: "Second mode", type: "text" },
           { key: "amount2", label: "Second amount", type: "money" }, { key: "total", label: "Total", type: "money" },
           { key: "remarks", label: "Remarks", type: "text" }
@@ -277,7 +276,7 @@ export const REPORTS: ReportDef[] = [
   },
   {
     id: "patients", title: "Patients registered", group: "Patients",
-    about: "Patients registered in the period (for KB-style UHIDs the month comes from the UHID, shown as the 1st), with their visits and what they have paid in total. Contact details are included, so treat the Excel file as confidential.",
+    about: "Patients registered in the period with their visits and what they have paid in total. Contact details are included, so treat the Excel file as confidential.",
     async run({ tx, tz, period }) {
       const r = await sql<Record<string, unknown>>`
         SELECT p.uhid, p.full_name AS name, p.gender, p.date_of_birth::text AS dob, p.mobile,
@@ -438,7 +437,7 @@ export async function buildDashboard(tx: Tx, tz: string, q: { fy?: string }): Pr
   const modes = await sql<{ mode: string; v: number }>`
     SELECT mode, sum(amt)::float8 AS v FROM ${MODE_PARTS} WHERE ${within("receipt_date", period)} GROUP BY 1 ORDER BY v DESC`.execute(tx);
   const services = await sql<{ service: string; v: number }>`
-    SELECT coalesce(nullif(trim(service), ''), 'Not stated') AS service, sum(amount1 + amount2)::float8 AS v
+    SELECT ${SERVICE_GROUP} AS service, sum(amount1 + amount2)::float8 AS v
       FROM receipts WHERE ${within("receipt_date", period)} GROUP BY 1 ORDER BY v DESC LIMIT 6`.execute(tx);
   const heads = await sql<{ head: string; v: number }>`
     SELECT coalesce(nullif(trim(expense_name), ''), 'Not stated') AS head, sum(amount)::float8 AS v

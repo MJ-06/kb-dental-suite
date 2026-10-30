@@ -118,7 +118,7 @@ describe("the numbers", () => {
     expect(d.kpis).toMatchObject({ collectedPeriod: 750, expensesPeriod: 300, netPeriod: 450 });
     expect(d.months).toHaveLength(12);
     expect(d.byMode).toEqual([{ mode: "Cash", amount: 500 }, { mode: "UPI", amount: 250 }]);
-    expect(d.topServices[0]).toEqual({ service: "Scaling", amount: 750 });
+    expect(d.topServices[0]).toEqual({ service: "Other", amount: 750 }); // no group set yet
     expect(d.fys).toContain("2024-25");
   });
 
@@ -139,15 +139,19 @@ describe("the numbers", () => {
   });
 });
 
-describe("patients", () => {
-  it("dates an imported patient by the month in the UHID, not by the day of the import", async () => {
+describe("service groups", () => {
+  it("groups receipts by service_group, with Other and a visible row for no service", async () => {
     await w.db.transaction().execute(async (tx) => {
       await setTenant(tx, w.clinicA);
-      await sql`INSERT INTO patients (uhid, full_name) VALUES ('AE0117', 'Imported Patient')`.execute(tx);
+      await sql`UPDATE receipts SET service_group = 'Scaling' WHERE service = 'Scaling'`.execute(tx);
+      await sql`UPDATE receipts SET service = NULL WHERE service = 'Implant'`.execute(tx);
     });
-    const old = (await get(admin, "/reports/patients?fy=2018-19")).json();
-    expect(old.rows).toMatchObject([{ uhid: "AE0117", name: "Imported Patient", registered: "2019-01-01" }]);
-    expect((await get(admin, "/reports/patients?fy=2025-26")).json().rows).toHaveLength(0);
+    const { rows } = (await get(admin, "/reports/collections-by-service?fy=all")).json();
+    expect(rows.map((r: { service: string; collected: number }) => [r.service, r.collected])).toEqual([
+      ["No service stated", 2000], ["Other", 1000], ["Scaling", 750]
+    ]);
+    const d = (await get(admin, "/dashboard?fy=2025-26")).json();
+    expect(d.topServices[0]).toEqual({ service: "Scaling", amount: 750 });
   });
 });
 
