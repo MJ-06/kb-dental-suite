@@ -340,7 +340,7 @@ tfoot td{font-weight:700;background:var(--soft);position:sticky;bottom:0}
       if (!me) return;
       show($("signin"), false); show($("app"), true); show($("who"), true);
       $("whoName").textContent = me.user.name + " (" + me.user.role + ")";
-      if (me.user.role !== "admin") { show($("content"), false); show($("forbidden"), true); return; }
+      if ((me.user.permissions || []).indexOf("reports:read") < 0) { show($("content"), false); show($("forbidden"), true); return; }
       show($("forbidden"), false); show($("content"), true);
       return Promise.all([api("/reports"), api("/dashboard")]).then(function (res) {
         state.catalog = res[0];

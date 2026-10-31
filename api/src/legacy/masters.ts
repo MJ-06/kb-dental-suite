@@ -317,7 +317,7 @@ Object.assign(masters, {
     // A signature prints on prescriptions and consents, so a clinician may
     // set only their own; setting anyone else's takes masters:write.
     const bare = (n: string) => n.toLowerCase().replace(/^dr[.\s]+/, "").replace(/\s+/g, " ").trim();
-    if (!can(actor.role, "masters:write") && bare(doctor) !== bare(actor.displayName)) {
+    if (!can(actor, "masters:write") && bare(doctor) !== bare(actor.displayName)) {
       throw new DeskError("You can only save your own signature");
     }
     const data = str(p.signatureDataUrl);

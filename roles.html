@@ -1,0 +1,270 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Roles &amp; access</title>
+<style>
+  :root {
+    --bg: #f6f4ef; --panel: #ffffff; --ink: #1d2a2c; --muted: #5b6b6e; --line: #dcd7cb;
+    --accent: #0f6b66; --accent-ink: #ffffff; --bad: #a3331f; --bad-bg: #fbe9e5; --ok: #1f6b3a; --ok-bg: #e4f3ea;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #121a1b; --panel: #1b2527; --ink: #e8efee; --muted: #9db0b1; --line: #2e3d3f;
+            --accent: #5cc4bc; --accent-ink: #0b1a1a; --bad: #ff9c88; --bad-bg: #3a1f1a; --ok: #8fd6a8; --ok-bg: #173324; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 15px/1.5 "Segoe UI", system-ui, sans-serif; }
+  main { max-width: 1100px; margin: 0 auto; padding: 24px 16px 64px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 17px; margin: 32px 0 8px; }
+  p.lead { color: var(--muted); margin: 0 0 16px; max-width: 70ch; }
+  label { display: grid; gap: 4px; font-size: 13px; color: var(--muted); }
+  select, input[type=text], input[type=password], button { font: inherit; min-height: 40px; border-radius: 6px; border: 1px solid var(--line); background: var(--panel); color: var(--ink); padding: 6px 10px; }
+  button { cursor: pointer; background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button.quiet { background: var(--panel); color: var(--ink); border-color: var(--line); }
+  button.danger { background: var(--panel); color: var(--bad); border-color: var(--bad); }
+  button:disabled { opacity: .55; cursor: default; }
+  :focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: end; }
+  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  table { width: 100%; border-collapse: collapse; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }
+  th, td { text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
+  th { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); background: var(--bg); }
+  tr:last-child td { border-bottom: 0; }
+  tr.off td { color: var(--muted); }
+  .pill { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; }
+  .pill.on { background: var(--ok-bg); color: var(--ok); }
+  .pill.off { background: var(--bg); color: var(--muted); border: 1px solid var(--line); }
+  .pill.lock { background: var(--bad-bg); color: var(--bad); }
+  details.role { background: var(--panel); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 8px; }
+  details.role > summary { cursor: pointer; padding: 10px 14px; display: flex; gap: 12px; align-items: center; }
+  details.role > summary b { font-size: 15px; }
+  details.role > summary span { color: var(--muted); font-size: 13px; }
+  .role-body { padding: 4px 14px 14px; display: grid; gap: 12px; }
+  fieldset { border: 1px solid var(--line); border-radius: 6px; margin: 0; padding: 8px 12px 10px; }
+  legend { font-size: 12px; text-transform: uppercase; letter-spacing: .04em; color: var(--muted); padding: 0 6px; }
+  .perm { display: flex; gap: 8px; align-items: baseline; padding: 3px 0; font-size: 14px; color: var(--ink); }
+  .perm input { margin-top: 3px; }
+  .perm small { color: var(--muted); }
+  .notice { padding: 10px 14px; border-radius: 8px; margin-bottom: 16px; }
+  .notice.err { background: var(--bad-bg); color: var(--bad); }
+  .notice.ok { background: var(--ok-bg); color: var(--ok); }
+  .notice code { font: 700 15px Consolas, monospace; user-select: all; background: var(--panel); color: var(--ink); padding: 2px 8px; border-radius: 4px; }
+  ul.log { list-style: none; margin: 0; padding: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 8px; }
+  ul.log li { padding: 8px 14px; border-bottom: 1px solid var(--line); }
+  ul.log li:last-child { border-bottom: 0; }
+  ul.log time { color: var(--muted); font-size: 12px; display: block; }
+  .empty { padding: 20px; text-align: center; color: var(--muted); border: 1px dashed var(--line); border-radius: 8px; }
+  @media (max-width: 720px) {
+    table, thead, tbody, tr, td { display: block; }
+    thead { display: none; }
+    tr { border-bottom: 1px solid var(--line); padding: 8px 0; }
+    td { border: 0; padding: 3px 12px; }
+    td::before { content: attr(data-label) ": "; color: var(--muted); font-size: 12px; }
+  }
+  @media (prefers-reduced-motion: reduce) { * { scroll-behavior: auto; transition: none !important; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Roles &amp; access</h1>
+  <p class="lead">Decide who can sign in and what each role may do. A change to a role applies to everyone on it from their next click. Every change is recorded below, with who made it.</p>
+
+  <div id="notice" role="status" aria-live="polite"></div>
+
+  <h2>Staff</h2>
+  <div id="staff"><div class="empty">Loading…</div></div>
+  <form id="addStaff" class="panel row" style="margin-top:12px" autocomplete="off">
+    <label>Username<input type="text" id="nu" required minlength="2" maxlength="40" pattern="[A-Za-z0-9._\-]{2,40}" placeholder="saloni"></label>
+    <label>Name shown<input type="text" id="nn" required maxlength="80" placeholder="Saloni Shrivastava"></label>
+    <label>Role<select id="nr" required></select></label>
+    <label>Password (leave empty to make one)<input type="password" id="np" minlength="10" maxlength="200" autocomplete="new-password"></label>
+    <button type="submit">Add staff login</button>
+  </form>
+
+  <h2>Roles</h2>
+  <div id="roles"></div>
+  <form id="addRole" class="panel row" style="margin-top:12px" autocomplete="off">
+    <label>New role name<input type="text" id="rn" required minlength="2" maxlength="40" placeholder="Dental nurse"></label>
+    <label>Start from<select id="rc"></select></label>
+    <button type="submit">Create role</button>
+  </form>
+
+  <h2>Recent changes</h2>
+  <div id="log"></div>
+</main>
+
+<script>
+(function () {
+  var $ = function (id) { return document.getElementById(id); };
+  var state = { perms: [], roles: [], staff: [], me: null };
+
+  function el(tag, attrs, kids) {
+    var n = document.createElement(tag);
+    Object.keys(attrs || {}).forEach(function (k) {
+      if (k === "text") n.textContent = attrs[k];
+      else if (k === "on") Object.keys(attrs.on).forEach(function (ev) { n.addEventListener(ev, attrs.on[ev]); });
+      else if (attrs[k] !== false && attrs[k] != null) n.setAttribute(k, attrs[k] === true ? "" : attrs[k]);
+    });
+    (kids || []).forEach(function (c) { if (c) n.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+    return n;
+  }
+  var when = function (iso) { var d = new Date(iso); return isNaN(d) ? "" : d.toLocaleString("en-IN", { dateStyle: "medium", timeStyle: "short" }); };
+
+  function api(method, path, body) {
+    return fetch("/api/v1/access" + path, {
+      method: method, credentials: "same-origin",
+      headers: body ? { "Content-Type": "application/json" } : undefined,
+      body: body ? JSON.stringify(body) : undefined
+    }).then(function (r) {
+      return r.json().catch(function () { return {}; }).then(function (j) {
+        if (!r.ok) {
+          var e = new Error(r.status === 401 ? "Please sign in to the main app first, then reload this page."
+            : r.status === 403 ? "Only an administrator can open Roles & access."
+            : (j.error && j.error.message) || "HTTP " + r.status);
+          e.status = r.status; throw e;
+        }
+        return j;
+      });
+    });
+  }
+
+  function say(kind, text, secret) {
+    var box = $("notice"); box.textContent = "";
+    if (!text) return;
+    var kids = [text];
+    if (secret) kids = [text + " ", el("code", { text: secret }), " Shown once: write it down and hand it over in person. Ask them to keep it private."];
+    box.appendChild(el("div", { class: "notice " + kind, role: kind === "err" ? "alert" : null }, kids));
+    window.scrollTo({ top: 0 });
+  }
+  var fail = function (e) { say("err", e.message); };
+
+  function reload(keepOpen) {
+    var open = {};
+    document.querySelectorAll("details.role[open]").forEach(function (d) { open[d.getAttribute("data-id")] = 1; });
+    return Promise.all([api("GET", "/permissions"), api("GET", "/roles"), api("GET", "/staff"), api("GET", "/activity")]).then(function (r) {
+      state.perms = r[0].permissions; state.roles = r[1].roles; state.staff = r[2].staff;
+      renderStaff(); renderRoles(keepOpen ? open : {}); renderLog(r[3].activity); fillRoleSelects();
+    });
+  }
+
+  function roleSelect(selected, onchange) {
+    var s = el("select", { "aria-label": "Role" });
+    state.roles.forEach(function (r) { s.appendChild(el("option", { value: r.id, text: r.name, selected: r.id === selected })); });
+    if (onchange) s.addEventListener("change", function () { onchange(s.value); });
+    return s;
+  }
+  function fillRoleSelects() {
+    var nr = $("nr"), prev = nr.value; nr.textContent = "";
+    state.roles.forEach(function (r) { nr.appendChild(el("option", { value: r.id, text: r.name })); });
+    if (prev) nr.value = prev;
+    var rc = $("rc"); rc.textContent = "";
+    rc.appendChild(el("option", { value: "", text: "No permissions (tick them after)" }));
+    state.roles.forEach(function (r) { rc.appendChild(el("option", { value: r.id, text: "A copy of " + r.name })); });
+  }
+
+  function renderStaff() {
+    if (!state.staff.length) { $("staff").innerHTML = '<div class="empty">No staff yet.</div>'; return; }
+    var head = el("thead", {}, [el("tr", {}, ["Name", "Username", "Role", "Status", ""].map(function (h) { return el("th", { text: h }); }))]);
+    var body = el("tbody");
+    state.staff.forEach(function (u) {
+      var status = !u.active ? el("span", { class: "pill off", text: "inactive" }) : u.locked ? el("span", { class: "pill lock", text: "paused after wrong passwords" }) : el("span", { class: "pill on", text: "active" });
+      var tr = el("tr", { class: u.active ? "" : "off" }, [
+        el("td", { "data-label": "Name", text: u.display_name }),
+        el("td", { "data-label": "Username", text: u.username }),
+        el("td", { "data-label": "Role" }, [roleSelect(u.role_id, function (id) {
+          api("PATCH", "/staff/" + u.id, { role_id: id }).then(function () { say("ok", u.username + " is now on the role " + state.roles.filter(function (r) { return r.id === id; })[0].name + "."); return reload(true); }).catch(function (e) { fail(e); reload(true); });
+        })]),
+        el("td", { "data-label": "Status" }, [status]),
+        el("td", { "data-label": "" }, [
+          el("button", { type: "button", class: "quiet", text: "Reset password", on: { click: function () { resetPassword(u); } } }), " ",
+          el("button", { type: "button", class: u.active ? "danger" : "quiet", text: u.active ? "Deactivate" : "Reactivate", on: { click: function () { toggle(u); } } })
+        ])
+      ]);
+      body.appendChild(tr);
+    });
+    $("staff").textContent = ""; $("staff").appendChild(el("table", {}, [head, body]));
+  }
+
+  function toggle(u) {
+    if (u.active && !window.confirm("Deactivate " + u.display_name + "? They are signed out now and cannot sign in until you reactivate them.")) return;
+    api("PATCH", "/staff/" + u.id, { active: !u.active }).then(function () { say("ok", u.display_name + (u.active ? " is deactivated." : " is active again.")); return reload(true); }).catch(fail);
+  }
+  function resetPassword(u) {
+    var typed = window.prompt("New password for " + u.display_name + " (at least 10 characters).\nLeave empty to have one made for you.", "");
+    if (typed === null) return;
+    if (typed && typed.length < 10) { say("err", "A password needs at least 10 characters."); return; }
+    api("POST", "/staff/" + u.id + "/reset-password", typed ? { password: typed } : {}).then(function (r) {
+      say("ok", "Password reset for " + u.username + "; they are signed out everywhere." + (r.password ? " New password:" : ""), r.password);
+      return reload(true);
+    }).catch(fail);
+  }
+
+  function renderRoles(open) {
+    var host = $("roles"); host.textContent = "";
+    state.roles.forEach(function (r) {
+      var checks = {};
+      var groups = {};
+      state.perms.forEach(function (p) { (groups[p.group] = groups[p.group] || []).push(p); });
+      var sets = Object.keys(groups).map(function (g) {
+        return el("fieldset", {}, [el("legend", { text: g })].concat(groups[g].map(function (p) {
+          var cb = el("input", { type: "checkbox", checked: r.permissions.indexOf(p.id) >= 0, value: p.id });
+          checks[p.id] = cb;
+          return el("label", { class: "perm" }, [cb, el("span", {}, [p.label + " ", el("small", { text: p.about })])]);
+        })));
+      });
+      var nameBox = el("input", { type: "text", value: r.name, minlength: 2, maxlength: 40, "aria-label": "Role name" });
+      var save = el("button", { type: "button", text: "Save changes", on: { click: function () {
+        var perms = Object.keys(checks).filter(function (k) { return checks[k].checked; });
+        save.disabled = true;
+        api("PATCH", "/roles/" + r.id, { name: nameBox.value.trim(), permissions: perms })
+          .then(function () { say("ok", "Saved the role " + nameBox.value.trim() + "."); return reload(true); })
+          .catch(function (e) { fail(e); save.disabled = false; });
+      } } });
+      var del = el("button", { type: "button", class: "danger", text: "Delete role", disabled: r.users > 0,
+        title: r.users > 0 ? "Move the people on this role to another role first" : null,
+        on: { click: function () {
+          if (!window.confirm("Delete the role " + r.name + "?")) return;
+          api("DELETE", "/roles/" + r.id).then(function () { say("ok", "Deleted the role " + r.name + "."); return reload(); }).catch(fail);
+        } } });
+      var d = el("details", { class: "role", "data-id": r.id, open: !!open[r.id] }, [
+        el("summary", {}, [el("b", { text: r.name }), el("span", { text: r.users + (r.users === 1 ? " person" : " people") + " · " + r.permissions.length + " permissions" })]),
+        el("div", { class: "role-body" }, [el("label", {}, ["Role name", nameBox])].concat(sets, [el("div", { class: "row" }, [save, del])]))
+      ]);
+      host.appendChild(d);
+    });
+  }
+
+  function renderLog(items) {
+    var host = $("log"); host.textContent = "";
+    if (!items.length) { host.appendChild(el("div", { class: "empty", text: "No changes yet." })); return; }
+    var ul = el("ul", { class: "log" });
+    items.forEach(function (a) { ul.appendChild(el("li", {}, [el("time", { text: when(a.happened_at) }), a.message])); });
+    host.appendChild(ul);
+  }
+
+  $("addStaff").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var body = { username: $("nu").value.trim(), display_name: $("nn").value.trim(), role_id: $("nr").value };
+    if ($("np").value) body.password = $("np").value;
+    api("POST", "/staff", body).then(function (r) {
+      say("ok", "Created the login " + r.username + "." + (r.password ? " Password:" : ""), r.password);
+      $("addStaff").reset(); return reload(true);
+    }).catch(fail);
+  });
+  $("addRole").addEventListener("submit", function (e) {
+    e.preventDefault();
+    var body = { name: $("rn").value.trim() };
+    if ($("rc").value) body.copy_from = $("rc").value;
+    api("POST", "/roles", body).then(function (r) {
+      say("ok", "Created the role " + r.name + ". Open it below to tick what it may do.");
+      $("addRole").reset(); return reload(true);
+    }).catch(fail);
+  });
+
+  reload().catch(function (e) { $("staff").textContent = ""; $("roles").textContent = ""; fail(e); });
+})();
+</script>
+</body>
+</html>

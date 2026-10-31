@@ -9,7 +9,7 @@ import { join } from "node:path";
 import pg from "pg";
 import { createClinic, createUser } from "../src/admin.js";
 import { required } from "../src/env.js";
-import type { Role } from "../src/db/schema.js";
+
 
 const owner = required("OWNER_DATABASE_URL");
 const c = new pg.Client({ connectionString: owner });
@@ -30,7 +30,7 @@ if (existsSync(file)) {
 
 const clinicId = await createClinic(owner, { code: "kbdev", name: "KB Dental (development)" });
 const lines = ["Development logins for http://127.0.0.1:8080 (clinic code: kbdev)"];
-for (const role of ["admin", "doctor", "reception", "accounts"] as Role[]) {
+for (const role of ["admin", "doctor", "reception", "accounts"] ) {
   const password = previous.get(`dev-${role}`) ?? randomBytes(9).toString("base64url");
   await createUser(owner, clinicId, { username: `dev-${role}`, displayName: `Dev ${role}`, password, role });
   lines.push(`${role.padEnd(10)} username dev-${role}   password ${password}`);

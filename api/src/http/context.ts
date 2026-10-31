@@ -25,7 +25,7 @@ export async function asActor<T>(
   return db.transaction().execute(async (tx) => {
     const actor = await resumeSession(tx, hashToken(token));
     if (!actor) throw new HttpError(401, "signed_out", "Your session has ended. Please sign in again.");
-    if (permission && !can(actor.role, permission)) {
+    if (permission && !can(actor, permission)) {
       throw new HttpError(403, "forbidden", "Your role does not allow this");
     }
     return fn(tx, actor);

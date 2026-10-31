@@ -5,6 +5,6 @@ import { read, type ActionTable } from "./types.js";
 export const session: ActionTable = {
   whoAmI: read(async (_p, { tx, actor }) => {
     const clinic = (await sql<{ name: string }>`SELECT name FROM clinic_profile()`.execute(tx)).rows[0]?.name ?? "";
-    return { success: true, name: actor.displayName, role: actor.role, clinic };
+    return { success: true, name: actor.displayName, role: actor.role, permissions: [...actor.permissions], clinic };
   })
 };

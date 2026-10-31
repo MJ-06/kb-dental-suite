@@ -92,7 +92,7 @@ export const finance: ActionTable = {
   // clinic's need the right to read the books.
   getReceipts: read(async (p, { tx, actor }) => {
     const uhid = uhidOf(p.uhid);
-    if (!uhid && !can(actor.role, "finance:read")) {
+    if (!uhid && !can(actor, "finance:read")) {
       return { success: false, error: "Your role does not allow this", forbidden: true };
     }
     const rows = await receiptsBetween(tx, isoDay(p.fromDate), isoDay(p.toDate), uhid);

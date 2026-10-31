@@ -138,7 +138,7 @@ describe("labels and the signed-in user", () => {
   });
 
   it("tells the dashboard who is signed in", async () => {
-    expect(await exec(w, admin, "whoAmI")).toEqual({ success: true, name: "a admin", role: "admin", clinic: "Alpha Dental" });
+    expect(await exec(w, admin, "whoAmI")).toMatchObject({ success: true, name: "a admin", role: "admin", clinic: "Alpha Dental" });
     expect(await exec(w, desk, "whoAmI")).toMatchObject({ role: "reception" });
   });
 });

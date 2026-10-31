@@ -23,7 +23,7 @@ export interface AppUsersTable extends Tenant, Housekeeping {
   username: string;
   display_name: string;
   password_hash: string;
-  role: Role;
+  role_id: string;
   active: Generated<boolean>;
   failed_attempts: Generated<number>;
   locked_until: Date | null;
@@ -113,7 +113,6 @@ export interface AuditLogTable {
   after_row: unknown;
 }
 
-export type Role = "admin" | "doctor" | "reception" | "accounts";
 export type AppointmentStatus = "Scheduled" | "Checked In" | "In Chair" | "Completed" | "Cancelled" | "No Show";
 
 export interface DB {

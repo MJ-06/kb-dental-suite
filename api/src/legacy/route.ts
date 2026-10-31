@@ -68,7 +68,7 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
       return await db.transaction().execute(async (tx) => {
         const actor = await resumeSession(tx, hashToken(token));
         if (!actor) return AUTH_REQUIRED;
-        if (def.permission && !can(actor.role, def.permission)) {
+        if (def.permission && !can(actor, def.permission)) {
           return { success: false, error: "Your role does not allow this", forbidden: true };
         }
         const out = await def.run(params, { tx, actor });
@@ -118,7 +118,7 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
     // a marker the screens treat as "signed in".
     (req as FastifyRequest & { _setSession?: string })._setSession = outcome.token;
     return { success: true, token: "session-cookie", expiresAt: Date.now() + SESSION_TTL_MS,
-      user: { name: outcome.me.displayName, role: outcome.me.role } };
+      user: { name: outcome.me.displayName, role: outcome.me.role, permissions: [...outcome.me.permissions] } };
   }
 
   async function staffLogout(req: FastifyRequest): Promise<Result> {

@@ -51,9 +51,13 @@ export async function makeWorld(): Promise<World> {
   return { app, db, clinicA, clinicB, close: async () => { await app.close(); await db.destroy(); } };
 }
 
+let ipCounter = 0;
+export const nextIp = () => `10.1.${Math.floor(++ipCounter / 250)}.${ipCounter % 250 + 1}`;
+
 /** Signs in and returns the cookie header to send with later requests. */
 export async function signIn(app: FastifyInstance, clinic: string, username: string, password = PASSWORD): Promise<string> {
-  const res = await app.inject({ method: "POST", url: "/api/v1/auth/login", payload: { clinic, username, password } });
+  // Each sign-in comes from its own address, so the per-address login limit never trips a test that signs in a lot.
+  const res = await app.inject({ method: "POST", url: "/api/v1/auth/login", headers: { "x-forwarded-for": nextIp() }, payload: { clinic, username, password } });
   if (res.statusCode !== 200) throw new Error(`login failed: ${res.statusCode} ${res.body}`);
   const cookie = res.cookies.find((c) => c.name === "kb_session");
   if (!cookie) throw new Error("no session cookie");

@@ -7,7 +7,8 @@
 // and RLS shows it nothing until it proves who it is.
 import { Kysely, PostgresDialect, sql, type Transaction } from "kysely";
 import pg from "pg";
-import type { DB, Role } from "./schema.js";
+import { isPermission, type Permission } from "../auth/permissions.js";
+import type { DB } from "./schema.js";
 
 // DATE columns come back as 'YYYY-MM-DD' strings, not JS Dates at local
 // midnight, which would shift a date of birth by a day west of Greenwich.
@@ -18,7 +19,10 @@ export type Tx = Transaction<DB>;
 export interface Actor {
   userId: string;
   clinicId: string;
-  role: Role;
+  roleId: string;
+  /** The role's name, for display. What the person may do is `permissions`. */
+  role: string;
+  permissions: ReadonlySet<Permission>;
   displayName: string;
   username: string;
   timezone: string;
@@ -40,12 +44,13 @@ export function createDb(connectionString: string, max = 10): Kysely<DB> {
 /** Resumes the session in this transaction. Returns null when signed out. */
 export async function resumeSession(tx: Tx, tokenHash: Buffer): Promise<Actor | null> {
   const r = await sql<{
-    user_id: string; clinic_id: string; role: Role; display_name: string; username: string; timezone: string;
+    user_id: string; clinic_id: string; role_id: string; role: string; permissions: string[]; display_name: string; username: string; timezone: string;
   }>`SELECT * FROM session_resume(${tokenHash})`.execute(tx);
   const row = r.rows[0];
   if (!row) return null;
   return {
-    userId: row.user_id, clinicId: row.clinic_id, role: row.role,
+    userId: row.user_id, clinicId: row.clinic_id, roleId: row.role_id, role: row.role,
+    permissions: new Set(row.permissions.filter(isPermission)),
     displayName: row.display_name, username: row.username, timezone: row.timezone
   };
 }

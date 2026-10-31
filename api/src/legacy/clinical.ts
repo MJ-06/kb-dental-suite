@@ -172,7 +172,7 @@ export const clinical: ActionTable = {
     // Payments appear only for roles that handle money, or when the clinic has chosen to show a
     // patient's own payments to clinical staff (setting progress_shows_payments, off until the owner
     // decides). Never the clinic's collections.
-    const showPayments = can(actor.role, "payments:collect") || can(actor.role, "finance:read") ||
+    const showPayments = can(actor, "payments:collect") || can(actor, "finance:read") ||
       (await sql<{ v: unknown }>`SELECT value AS v FROM clinic_settings WHERE key = 'progress_shows_payments'`.execute(tx)).rows[0]?.v === true;
     // What this patient paid, by day: the visit's first register entry carries the day's total (two
     // payments on a day are added); a payment on a day with no register entry gets a row of its own.

@@ -56,6 +56,6 @@ export const authRoutes: FastifyPluginAsyncTypebox<AppOptions> = async (app, opt
   });
 };
 
-function publicActor(a: { userId: string; displayName: string; username: string; role: string; timezone: string }) {
-  return { id: a.userId, name: a.displayName, username: a.username, role: a.role, timezone: a.timezone };
+function publicActor(a: { userId: string; displayName: string; username: string; role: string; permissions: ReadonlySet<string>; timezone: string }) {
+  return { id: a.userId, name: a.displayName, username: a.username, role: a.role, permissions: [...a.permissions], timezone: a.timezone };
 }
