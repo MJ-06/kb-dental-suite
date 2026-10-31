@@ -16,6 +16,7 @@ import type { FastifyPluginAsyncTypebox } from "@fastify/type-provider-typebox";
 import { sql } from "kysely";
 import type { AppOptions } from "../app.js";
 import { hashPassword } from "../auth/password.js";
+import { hashToken, SESSION_COOKIE } from "../auth/tokens.js";
 import { isPermission, PERMISSION_INFO, type Permission } from "../auth/permissions.js";
 import type { Actor, Tx } from "../db/index.js";
 import { asActor } from "../http/context.js";
@@ -220,7 +221,9 @@ export const accessRoutes: FastifyPluginAsyncTypebox<AppOptions> = async (app, {
     const password = req.body.password ?? newPassword();
     // The reset also clears a lock from too many wrong tries, and signs the person out everywhere.
     await sql`UPDATE app_users SET password_hash = ${await hashPassword(password)}, failed_attempts = 0, locked_until = NULL WHERE id = ${user.id}`.execute(tx);
-    await sql`DELETE FROM sessions WHERE user_id = ${user.id} AND NOT (user_id = ${actor.userId})`.execute(tx);
+    // Resetting your own password keeps only the session making the request; every other one of yours ends.
+    const mine = user.id === actor.userId ? hashToken(req.cookies[SESSION_COOKIE] ?? "") : null;
+    await sql`DELETE FROM sessions WHERE user_id = ${user.id} AND token_hash IS DISTINCT FROM ${mine}`.execute(tx);
     await recordEvent(tx, "access", "staff.password_reset", `${actor.username} reset the password of ${user.username}`, { username: user.username });
     return { id: user.id, username: user.username, ...(req.body.password ? {} : { password }) };
   }));

@@ -280,3 +280,14 @@ describe("audit", () => {
     expect(JSON.stringify(log)).not.toMatch(/scrypt\$/);
   });
 });
+
+describe("resetting your own password", () => {
+  it("ends your other sessions but keeps the one you are using", async () => {
+    await call(admin, "POST", "/staff", { username: "a-self", display_name: "Self", role_id: await roleId("admin"), password: PASSWORD });
+    const here = await signIn(w.app, "alpha", "a-self"), elsewhere = await signIn(w.app, "alpha", "a-self");
+    const res = await call(here, "POST", `/staff/${await userId("a-self")}/reset-password`, { password: "a brand new password" });
+    expect(res.statusCode).toBe(200);
+    expect((await w.app.inject({ url: "/api/v1/auth/me", headers: { cookie: here } })).statusCode).toBe(200);
+    expect((await w.app.inject({ url: "/api/v1/auth/me", headers: { cookie: elsewhere } })).statusCode).toBe(401);
+  });
+});
