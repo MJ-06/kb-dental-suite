@@ -236,7 +236,7 @@ describe("storage", () => {
     });
 
     it("moves existing files with checksums, logs the one that fails, and carries on", async () => {
-      const broken = (await rows(sql<{ id: string; storage_key: string }>`SELECT id, storage_key FROM patient_documents ORDER BY id`))[1]!;
+      const broken = (await rows(sql<{ id: string; storage_key: string }>`SELECT id, storage_key FROM patient_documents WHERE uhid = ${uhids[1]!}`))[0]!; // the second patient's scan (document ids are random, so pick by patient)
       writeFileSync(join(store, ...broken.storage_key.split("/")), Buffer.from("not the scan any more"));
       const r = (await api(admin, "POST", "/copy", { to: "s3" })).json();
       expect(r).toMatchObject({ success: true, moved: 2, failed: 1, remaining: 1, lastId: null });
@@ -309,6 +309,7 @@ describe("storage", () => {
       const docs = (await exec(w, admin, "getPatientDocuments", { uhid: uhids[2] })).documents as { id: string }[];
       for (const d of docs) {
         const got = await exec(w, admin, "getPatientDocumentContent", { id: d.id });
+        expect(got, JSON.stringify(got)).toMatchObject({ success: true });
         expect(Buffer.from(got.base64, "base64").equals(PNG)).toBe(true);
       }
     });

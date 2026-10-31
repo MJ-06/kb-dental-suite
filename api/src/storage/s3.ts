@@ -20,6 +20,8 @@ export interface S3Config {
 }
 export interface S3Secret { accessKeyId: string; secretAccessKey: string }
 
+// Uploads are capped at 25 MB; a little more allows for generated PDFs.
+const MAX_OBJECT_BYTES = 30 * 1024 * 1024;
 const BUCKET = /^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/;
 const REGION = /^[a-z0-9-]{2,30}$/;
 const PREFIX = /^[A-Za-z0-9._\-/]{0,100}$/;
@@ -49,7 +51,9 @@ export function assertEndpoint(endpoint: string): URL {
 const internal = new BlockList();
 for (const [net, bits] of [["0.0.0.0", 8], ["10.0.0.0", 8], ["100.64.0.0", 10], ["127.0.0.0", 8], ["169.254.0.0", 16], ["172.16.0.0", 12],
   ["192.0.0.0", 24], ["192.168.0.0", 16], ["198.18.0.0", 15], ["224.0.0.0", 4], ["240.0.0.0", 4]] as const) internal.addSubnet(net, bits, "ipv4");
-for (const [net, bits] of [["::", 128], ["::1", 128], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8], ["::ffff:0:0", 96]] as const) internal.addSubnet(net, bits, "ipv6");
+for (const [net, bits] of [["::", 128], ["::1", 128], ["fc00::", 7], ["fe80::", 10], ["ff00::", 8], ["::ffff:0:0", 96],
+  // forms that embed or tunnel an IPv4 address, which would otherwise slip past the IPv4 list
+  ["::", 96], ["64:ff9b::", 96], ["64:ff9b:1::", 48], ["2002::", 16], ["2001::", 32], ["100::", 64]] as const) internal.addSubnet(net, bits, "ipv6");
 
 /** Resolves at connection time and refuses internal results, so the address checked is the address used (no rebinding gap). */
 const publicLookup: typeof dnsLookup = ((host: string, opts: unknown, cb: (...a: unknown[]) => void) => {
@@ -68,19 +72,29 @@ const publicLookup: typeof dnsLookup = ((host: string, opts: unknown, cb: (...a:
 interface Reply { ok: boolean; status: number; body: Buffer }
 
 /** One signed request. No redirects are followed: they would carry the signature somewhere unchecked. */
-function send(url: URL, method: string, headers: Record<string, string>, body: Buffer): Promise<Reply> {
+function send(url: URL, method: string, headers: Record<string, string>, body: Buffer, maxReply: number): Promise<Reply> {
   const local = process.env.STORAGE_ALLOW_LOCAL_ENDPOINTS === "true";
   const request = url.protocol === "https:" ? httpsRequest : httpRequest;
   return new Promise((resolve, reject) => {
     const req = request(url, { method, headers: { ...headers, "content-length": String(body.length) }, lookup: local ? undefined : publicLookup, timeout: 60_000 }, (res) => {
+      // The bucket is the clinic's to name, so a reply is read only up to what we could ever expect.
+      if (Number(res.headers["content-length"] ?? 0) > maxReply) return req.destroy(new Error("The bucket sent a larger reply than expected"));
       const chunks: Buffer[] = [];
-      res.on("data", (c: Buffer) => chunks.push(c)).on("end", () => {
+      let got = 0;
+      res.on("data", (c: Buffer) => {
+        got += c.length;
+        if (got > maxReply) return req.destroy(new Error("The bucket sent a larger reply than expected"));
+        chunks.push(c);
+      }).on("end", () => {
+        clearTimeout(deadline);
         const status = res.statusCode ?? 0;
         resolve({ ok: status >= 200 && status < 300, status, body: Buffer.concat(chunks) });
       });
     });
+    // An idle timeout alone lets a slow trickle hold the request open for ever.
+    const deadline = setTimeout(() => req.destroy(new Error("The bucket took too long to answer")), 120_000);
     req.on("timeout", () => req.destroy(new Error("The bucket did not answer in time")));
-    req.on("error", reject);
+    req.on("error", (e) => { clearTimeout(deadline); reject(e); });
     req.end(body);
   });
 }
@@ -102,7 +116,7 @@ export function s3Backend(cfg: S3Config, secret: S3Secret): Backend {
   const pathStyle = cfg.pathStyle !== false;
   const prefix = cfg.prefix ?? "";
 
-  async function request(method: "PUT" | "GET", objectName: string, body: Buffer = Buffer.alloc(0)): Promise<Reply> {
+  async function request(method: "PUT" | "GET", objectName: string, body: Buffer = Buffer.alloc(0), maxReply = 64 * 1024): Promise<Reply> {
     const host = pathStyle ? base.host : `${cfg.bucket}.${base.host}`;
     const path = (pathStyle ? `/${cfg.bucket}/` : "/") + objectName.split("/").map(enc).join("/");
     const amzDate = new Date().toISOString().replace(/[:-]|\.\d{3}/g, "");
@@ -118,7 +132,7 @@ export function s3Backend(cfg: S3Config, secret: S3Secret): Backend {
       "x-amz-date": amzDate,
       "x-amz-content-sha256": payload,
       authorization: `AWS4-HMAC-SHA256 Credential=${secret.accessKeyId}/${scope}, SignedHeaders=${signed}, Signature=${signature}`
-    }, body);
+    }, body, maxReply);
   }
 
   const nameOf = (key: string) => (assertKey(key), `${prefix}clinics/${key}`);
@@ -135,7 +149,7 @@ export function s3Backend(cfg: S3Config, secret: S3Secret): Backend {
       return null;
     },
     async get(key) {
-      const res = await request("GET", nameOf(key));
+      const res = await request("GET", nameOf(key), undefined, MAX_OBJECT_BYTES);
       if (!res.ok) throw fail("the download", res);
       return res.body;
     },
