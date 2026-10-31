@@ -92,34 +92,8 @@ def at(d, t): return dt.datetime.combine(d, t, tzinfo=TZ)
 def yes(v): return s(v).lower() in ("yes", "y", "true", "1")
 def split(v): return [x.strip() for x in re.split(r"[,;\n]", s(v)) if x.strip() and x.strip().lower() not in ("none", "no", "nil", "na", "n/a")]
 
-# Coarse service groups. The first group whose keywords appear wins, in this order, so
-# "Consultation + Extraction" counts as Extraction and "RCT + Crown" as Crown & Bridge.
-service_other = collections.Counter()
-SERVICE_GROUPS = [
-    ("Implant", r"implant|alpha ?bio|nobel|straumann|sinus|bone graft"),
-    ("Orthodontics", r"invisal|aligner|brace|ortho|damon|retainer"),
-    ("Crown & Bridge", r"crown|bridge|fpd|fmr|zirconi|e-?max|veneer|laminate|inlay|onlay|pfm|cementation|recement|prep|impression|prosthes[ie]s|prosthis|prosthises"),
-    ("Root Canal (RCT)", r"\brc\b|rct|root canal|obturation|bmp|irrigation|rc open|pulp|apico|post ?& ?core|post and core"),
-    ("Denture", r"denture|rpd|\bcd\b|reline"),
-    ("Extraction & Surgery", r"extract|extration|extrac|impaction|surgery|suture|frenectomy|gingivectomy|flap|curettage|wisdom"),
-    ("Restoration", r"restoration|filling|composite|gic|build ?up"),
-    ("Gum care & Scaling", r"scal|prophyl|prophal|prophy|\bo\.?p\b|perio|polish|gum|depigment|laser|lllt|brush"),
-    ("Imaging", r"iopa|rvg|opg|cbct|x-?ray|radiograph|digital scan|scan|ceph"),
-    ("Whitening & Cosmetic", r"whiten|bleach|smile|zoom"),
-    ("Appliances", r"night ?g|guard|splint|tmd|tens|appliance|space maintain|jaw relation"),
-    ("Membership", r"member"),
-    ("Consultation & Follow-up", r"consu|check ?up|follow|review|emergency|dressing"),
-]
-def service_group(text):
-    g = _service_group(text)
-    if g == "Other": service_other[text] += 1
-    return g
-def _service_group(text):
-    t = re.sub(r"\s+", " ", (text or "").lower())
-    if not t.strip(): return None
-    for name, pat in SERVICE_GROUPS:
-        if re.search(pat, t): return name
-    return "Other"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from service_groups import service_group, service_other  # noqa: E402
 
 rejects, dup_rows, orphans, date_issues, notes, overlaps, bad_uhids, service_review = [], [], [], [], [], [], [], []
 def reject(table, key, reason): rejects.append({"table": table, "row": key, "reason": reason})
@@ -214,7 +188,11 @@ with psycopg.connect(url, autocommit=False) as conn:
         if not u: reject("patients", f"{src}: {s(r[2])}", "no UHID"); continue
         groups.setdefault(u, []).append((src, r))
     FIELDS = {"name": 2, "gender": 3, "dob": 4, "mobile": 9}
-    def norm(v): return re.sub(r"[^a-z0-9]", "", (str(day(v)) if isinstance(v, (dt.datetime, dt.date)) else s(v)).lower())
+    def norm(v):
+        t = (str(day(v)) if isinstance(v, (dt.datetime, dt.date)) else s(v)).lower()
+        t = re.sub(r"\b(mohd|md|mohammed|muhammad|mohamad)\b\.?", "mohammad", t)      # one spelling of Mohammad
+        t = re.sub(r"\b(dr|mr|mrs|ms|smt|shri|master|baby)\b\.?", "", t)             # salutations
+        return re.sub(r"[^a-z0-9]", "", t)
     pid = {}
     for u, items in groups.items():
         items.sort(key=lambda x: (x[1][0] is None, x[1][0] if isinstance(x[1][0], dt.datetime) else dt.datetime.max))
@@ -370,10 +348,10 @@ with psycopg.connect(url, autocommit=False) as conn:
         if kind == "m": mn += 1; legacy = f"MANUAL-{mn}"
         else: legacy = x["legacy"]
         no += 1
-        res = one("""INSERT INTO receipts (receipt_no, receipt_date, patient_id, uhid, patient_name, service, mode1, amount1, mode2, amount2, remarks, legacy_receipt_no, service_group)
-                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+        res = one("""INSERT INTO receipts (receipt_no, receipt_date, patient_id, uhid, patient_name, service, mode1, amount1, mode2, amount2, remarks, legacy_receipt_no, service_group, service_source)
+                     VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
                   (no, x["date"], known(x["uhid"], "receipts"), x["uhid"] or None, x["name"] or None, x["service"] or None, x["mode1"] or None,
-                   x["amt1"], x["mode2"] or None, x["amt2"], x["remarks"] or None, legacy, service_group(x["service"])), "receipts", legacy or f"{x['date']} {x['uhid']}")
+                   x["amt1"], x["mode2"] or None, x["amt2"], x["remarks"] or None, legacy, service_group(x["service"]), "typed" if x["service"] else None), "receipts", legacy or f"{x['date']} {x['uhid']}")
         ok += bool(res)
     service_review.extend({"service_as_typed": k, "receipts": n, "group": "Other"} for k, n in service_other.most_common())
     cur.execute("INSERT INTO receipt_counters (last_value) VALUES (%s) ON CONFLICT (clinic_id) DO UPDATE SET last_value = EXCLUDED.last_value", (no,))
@@ -391,6 +369,32 @@ with psycopg.connect(url, autocommit=False) as conn:
         ok += bool(res)
     counts["expenses"] = (len(rows), ok)
 
+    # Older expenses from the Expense Form's "Expense Form Old" tab (Oct 2024 to Feb 2025). The Finance
+    # Expense tab only starts on 29 Jan 2025, so most of these are in no other tab. A row that already has
+    # a Finance Expense row with the same day and amount (and usually name) is skipped, the rest are
+    # imported as their own batch and marked as such.
+    try:
+        old_rows = load("K. B. Dental - Expense Form (Responses).xlsx", "Expense Form Old")
+    except (FileNotFoundError, KeyError):
+        old_rows = []; notes.append("Expense Form (Responses) workbook not found: older expenses not imported")
+    if old_rows:
+        nm = lambda v: re.sub(r"[^a-z0-9]", "", s(v).lower())
+        have = collections.Counter((day(r[1]) or day(r[0]), num(r[5]), nm(r[3])) for r in rows)
+        have2 = collections.Counter((day(r[1]) or day(r[0]), num(r[5])) for r in rows)
+        ok_old = skipped = 0
+        for i, r in enumerate(old_rows, 2):
+            d = day(r[1]); amt = num(r[6])
+            if not d: reject("expenses", f"old row {i}", "no readable date"); continue
+            key = (d, amt, nm(r[3]))
+            if have[key] > 0: have[key] -= 1; skipped += 1; continue
+            if have2.get((d, amt), 0) > 0: skipped += 1; continue
+            res = one("""INSERT INTO expenses (expense_date, paid_by, expense_name, amount, mode, remarks, legacy_id, category)
+                         VALUES (%s,%s,%s,%s,%s,%s,%s,%s) RETURNING id""",
+                      (d, s(r[2]) or None, s(r[3]) or None, amt, s(r[7]) or None, "[from Expense Form Old]" + ((" " + s(r[4])) if s(r[4]) else ""), f"OLD-{i}", s(r[5]) or None), "expenses", f"old row {i}")
+            ok_old += bool(res)
+        counts["expenses (Expense Form Old)"] = (len(old_rows), ok_old)
+        notes.append(f"older expenses: {ok_old} imported, {skipped} already in the Finance Expense tab")
+
     # ── verification inside the same transaction ──
     cur.execute("SELECT count(*), coalesce(sum(amount1 + amount2), 0) FROM receipts")
     rc, rsum = cur.fetchone()
@@ -399,7 +403,7 @@ with psycopg.connect(url, autocommit=False) as conn:
     exp_sheet_sum = round(sum(num(r[5]) for r in rows), 2)
     sheet_e = round(sum(x["amt1"] + x["amt2"] for x in receipts), 2)
     notes.append(f"check: entries + e-receipt-only rows {sheet_e:,.2f}; all receipts loaded {float(rsum):,.2f} (includes {sum(x['amt1'] for x in manual):,.2f} manual)")
-    notes.append(f"check: expenses in sheet {exp_sheet_sum:,.2f}; loaded {float(esum):,.2f}")
+    notes.append(f"check: Finance Expense tab {exp_sheet_sum:,.2f}; loaded (including older expenses imported separately) {float(esum):,.2f}")
     conn.commit()
 
 def write(name, rows):

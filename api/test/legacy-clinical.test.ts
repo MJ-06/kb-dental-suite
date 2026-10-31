@@ -121,6 +121,19 @@ describe("consents and progress", () => {
   });
 });
 
+describe("treatment progress shows this patient's payments", () => {
+  it("puts the day's total on the visit (two payments added), and gives a payment with no visit its own row", async () => {
+    await exec(w, desk, "saveToDailyRegister", { date: "2026-10-22", uhid, patientName: "Clinical Patient", procedureDone: "Crown prep" });
+    await exec(w, desk, "saveReceipt", { uhid, patientName: "Clinical Patient", service: "Crown", mode1: "Cash", amount1: 1000, date: "2026-10-22" });
+    await exec(w, desk, "saveReceipt", { uhid, patientName: "Clinical Patient", service: "Crown", mode1: "UPI", amount1: 500, date: "2026-10-22" });
+    await exec(w, desk, "saveReceipt", { uhid, patientName: "Clinical Patient", service: "Consultation", mode1: "Cash", amount1: 300, date: "2026-10-25" });
+    const res = await exec(w, admin, "getTreatmentProgress", { uhid });
+    const day22 = res.entries.filter((e: { date: string }) => e.date === "2026-10-22");
+    expect(day22.map((e: { amountReceived: string }) => e.amountReceived)).toEqual(["1500"]); // two payments are added, once
+    expect(res.entries.at(-1)).toMatchObject({ date: "2026-10-25", treatmentRendered: "(no procedure recorded)", amountReceived: "300" });
+  });
+});
+
 describe("consent narrative", () => {
   it("says plainly when no key is set", async () => {
     expect(await exec(w, admin, "generateSOAPNotes", { name: "X" })).toMatchObject({ success: false, error: "ANTHROPIC_API_KEY is not set on the server" });

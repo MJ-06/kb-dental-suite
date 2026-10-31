@@ -18,6 +18,15 @@ if not re.search(r"@(localhost|127\.0\.0\.1)(:\d+)?/kb_rehearsal$", url): sys.ex
 norm = lambda t: re.sub(r"[^a-z]", "", re.sub(r"\b(dr|mr|mrs|ms|master|baby|smt|shri)\b\.?", "", (t or "").lower()))
 digits = lambda t: (re.sub(r"\D", "", t or "")[-10:] if t else "")
 OK = re.compile(r"^A[A-L](0[1-9]|1[0-2])\d{2,3}$")
+def one_edit(a, b):
+    """True when a and b differ by one wrong, missing or extra character, or two swapped neighbours."""
+    if a == b: return False
+    if abs(len(a) - len(b)) > 1: return False
+    if len(a) == len(b):
+        diff = [i for i in range(len(a)) if a[i] != b[i]]
+        return len(diff) == 1 or (len(diff) == 2 and diff[1] == diff[0] + 1 and a[diff[0]] == b[diff[1]] and a[diff[1]] == b[diff[0]])
+    short, long_ = (a, b) if len(a) < len(b) else (b, a)
+    return any(long_[:i] + long_[i + 1:] == short for i in range(len(long_)))
 
 with psycopg.connect(url) as c:
     cur = c.cursor()
@@ -55,17 +64,22 @@ for u, d in seen.items():
         for cu, cn in by_mobile.get(m, []):
             if cn in {norm(n) for n in names} or not names:
                 cand[cu] += 2; basis[cu] = "name + mobile" if cn in {norm(n) for n in names} else "mobile only"
-    if not cand: prop, why = "", "no match"
+    if u.startswith("TEST"): prop, why, tier = "", "test row: leave out", "exclude"
+    elif not cand: prop, why, tier = "", "no match", "none"
     else:
         top = cand.most_common(2)
-        if len(top) > 1 and top[0][1] == top[1][1]: prop, why = "", "ambiguous: " + ", ".join(x for x, _ in top)
-        else: prop, why = top[0][0], basis[top[0][0]]
+        if len(top) > 1 and top[0][1] == top[1][1]: prop, why, tier = "", "ambiguous: " + ", ".join(x for x, _ in top), "ambiguous"
+        else:
+            prop, why = top[0][0], basis[top[0][0]]
+            tier = "strong" if why == "name + mobile" else ("medium" if why == "name" and one_edit(u, prop) else "weak")
     rows.append({"uhid_as_typed": u, "well_formed": "yes" if OK.match(u) else "NO", "rows": "; ".join(f"{t} {n}" for t, n in sorted(d["tables"].items())),
-                 "names_seen": " | ".join(names), "mobiles_seen": " | ".join(mobiles), "proposed_uhid": prop, "basis": why, "reviewer_decision": ""})
+                 "names_seen": " | ".join(names), "mobiles_seen": " | ".join(mobiles), "proposed_uhid": prop, "basis": why, "tier": tier, "reviewer_decision": ""})
 rows.sort(key=lambda r: (r["well_formed"] == "yes", r["uhid_as_typed"]))
 out = Path("migration/data/out/orphan-uhids-proposed-fixes.csv")
 with open(out, "w", newline="", encoding="utf-8-sig") as f:
     w = csv.DictWriter(f, fieldnames=list(rows[0].keys())); w.writeheader(); w.writerows(rows)
 bad = [r for r in rows if r["well_formed"] == "NO"]
 print(f"orphan UHIDs {len(rows)}: malformed {len(bad)} (proposed {sum(1 for r in bad if r['proposed_uhid'])}), well-formed {len(rows) - len(bad)} (a name matches a registered patient for {sum(1 for r in rows if r['well_formed']=='yes' and r['proposed_uhid'])})")
-print("basis (malformed):", dict(collections.Counter(r["basis"].split(":")[0] for r in bad)))
+print("tiers (malformed):", dict(collections.Counter(r["tier"] for r in bad)))
+good = [r for r in rows if r["well_formed"] == "yes"]
+print("tiers (well-formed):", dict(collections.Counter(r["tier"] for r in good)), "| stub candidates (well-formed, no registered patient of that name):", sum(1 for r in good if r["tier"] in ("none",)))

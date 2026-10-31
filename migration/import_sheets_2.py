@@ -249,6 +249,28 @@ with psycopg.connect(url, autocommit=False) as conn:
     cur.execute("SELECT count(*) FILTER (WHERE form->>'reg_date_source' = 'first_data'), count(*) FILTER (WHERE form->>'reg_date_source' = 'uhid_month'), count(*) FILTER (WHERE form->>'reg_date_source' = 'timestamp') FROM patient_registrations")
     a, b, c = cur.fetchone(); counts["Registration day (first data / UHID month / recorded)"] = (a, f"{b} / {c}")
 
+    # ── receipts with no service typed: fill from the Daily Register ──
+    # Same patient and day first; else the nearest register entry within 3 days. Only a suggestion:
+    # service_source says where each filled service came from ("register", "register_near").
+    sys.path.insert(0, str(Path(__file__).resolve().parent))
+    from service_groups import service_group
+    cur.execute("SELECT uhid, visit_date, procedure_done FROM daily_register WHERE uhid IS NOT NULL AND coalesce(trim(procedure_done), '') <> ''")
+    reg_by_uhid = collections.defaultdict(list)
+    for u, d, proc in cur.fetchall(): reg_by_uhid[u.upper()].append((d, proc.strip()))
+    cur.execute("SELECT id, upper(uhid), receipt_date FROM receipts WHERE coalesce(trim(service), '') = '' AND uhid IS NOT NULL")
+    same = near = 0
+    for rid, u, d in cur.fetchall():
+        entries = reg_by_uhid.get(u, [])
+        todays = list(dict.fromkeys(p for dd, p in entries if dd == d))
+        if todays: svc, src = " + ".join(todays), "register"; same += 1
+        else:
+            within = sorted(((abs((dd - d).days), dd, p) for dd, p in entries if abs((dd - d).days) <= 3))
+            if not within: continue
+            best = within[0][1]; svc = " + ".join(dict.fromkeys(p for n, dd, p in within if dd == best)); src = "register_near"; near += 1
+        cur.execute("UPDATE receipts SET service = %s, service_group = %s, service_source = %s WHERE id = %s", (svc, service_group(svc), src, rid))
+    cur.execute("SELECT count(*) FROM receipts WHERE coalesce(trim(service), '') = ''"); left = cur.fetchone()[0]
+    counts["Receipts with no service: filled same day / nearest visit"] = (same, f"{near} (still blank: {left})")
+
     # ── CRM ──
     pos = 0
     for coll in ("pipelines", "leads", "contacts", "companies", "followups", "products", "activities", "payments", "sources"):

@@ -162,19 +162,38 @@ export const clinical: ActionTable = {
 
   // What the day's register says was done, for the treatment-progress table.
   getTreatmentProgress: read(async (p, { tx }) => {
+    const uhid = uhidOf(p.uhid);
     const r = await sql<{ sno: number | null; date: string; tooth: string | null; proc: string | null; work: string | null; doctor: string | null; mode: string | null }>`
       SELECT serial_no AS sno, visit_date::text AS date, tooth_no AS tooth, procedure_done AS proc,
              work_done AS work, operating_doctor AS doctor, mode_of_payment AS mode
-        FROM daily_register WHERE upper(uhid) = ${uhidOf(p.uhid)}
+        FROM daily_register WHERE upper(uhid) = ${uhid}
        ORDER BY visit_date, created_at`.execute(tx);
-    return {
-      success: true,
-      entries: r.rows.map((e) => ({
+    // What this patient paid, by day: the visit's first register entry carries the day's total (two
+    // payments on a day are added); a payment on a day with no register entry gets a row of its own.
+    // Only this patient's payments, never the clinic's collections.
+    const paid = await sql<{ date: string; total: number; modes: string | null }>`
+      SELECT receipt_date::text AS date, sum(amount1 + amount2)::float8 AS total,
+             string_agg(DISTINCT concat_ws(' + ', mode1, mode2), ', ') AS modes
+        FROM receipts WHERE upper(uhid) = ${uhid} GROUP BY receipt_date`.execute(tx);
+    const byDay = new Map(paid.rows.map((x) => [x.date, x]));
+    const entries: Array<{ date: string } & Record<string, string>> = [];
+    const used = new Set<string>();
+    for (const e of r.rows) {
+      const pay = !used.has(e.date) ? byDay.get(e.date) : undefined;
+      if (pay) used.add(e.date);
+      entries.push({
         sno: e.sno === null ? "" : String(e.sno), date: e.date, toothNo: e.tooth ?? "",
         treatmentRendered: e.proc ?? "", clinicalNotes: e.work ?? "", workDone: e.work ?? "",
-        doctor: e.doctor ?? "", paymentMode: e.mode ?? "", amountReceived: "", sigDataUrl: ""
-      }))
-    };
+        doctor: e.doctor ?? "", paymentMode: e.mode || pay?.modes || "", amountReceived: pay ? String(pay.total) : "", sigDataUrl: ""
+      });
+    }
+    for (const pay of paid.rows) {
+      if (used.has(pay.date)) continue;
+      entries.push({ sno: "", date: pay.date, toothNo: "", treatmentRendered: "(no procedure recorded)", clinicalNotes: "", workDone: "",
+                     doctor: "", paymentMode: pay.modes ?? "", amountReceived: String(pay.total), sigDataUrl: "" });
+    }
+    entries.sort((x, y) => x.date.localeCompare(y.date));
+    return { success: true, entries };
   }, "clinical:read"),
 
   generateSOAPNotes: write("clinical:write", async (p, { tx, actor }) => {
