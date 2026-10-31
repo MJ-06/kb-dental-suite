@@ -16,9 +16,11 @@ export const LOCK_MINUTES = 15;
 export const WRONG =
   "Clinic code, username or password is wrong. After 5 wrong tries the account is paused for 15 minutes.";
 
-export type LoginOutcome = { ok: true; token: string; me: Actor } | { ok: false; message: string };
+export type LoginOutcome = { ok: true; token: string; me: Actor; maxAgeSeconds: number } | { ok: false; message: string };
 
-export async function attemptLogin(tx: Tx, clinic: string, username: string, password: string): Promise<LoginOutcome> {
+export async function attemptLogin(
+  tx: Tx, clinic: string, username: string, password: string, device: "desk" | "phone" = "desk"
+): Promise<LoginOutcome> {
   const cid = (await sql<{ id: string | null }>`SELECT begin_login(${clinic}) AS id`.execute(tx)).rows[0]?.id;
   const user = cid
     ? (await sql<{ id: string; password_hash: string; active: boolean; locked_until: Date | null }>`
@@ -52,14 +54,19 @@ export async function attemptLogin(tx: Tx, clinic: string, username: string, pas
   await sql`UPDATE app_users SET failed_attempts = 0, locked_until = NULL
              WHERE id = ${user.id} AND (failed_attempts <> 0 OR locked_until IS NOT NULL)`.execute(tx);
   const token = newToken();
-  await tx.insertInto("sessions")
-    .values({ token_hash: hashToken(token), user_id: user.id, expires_at: new Date(Date.now() + SESSION_TTL_MS) })
-    .execute();
+  // A phone session ends a day after sign-in (the clinic may change that) and
+  // after an hour unused; see phone_session_expire().
+  const hours = device === "phone"
+    ? (await sql<{ h: number | null }>`SELECT (value #>> '{}')::int AS h FROM clinic_settings WHERE key = 'phone_session_hours'`.execute(tx)).rows[0]?.h ?? 24
+    : null;
+  const ttl = hours === null ? SESSION_TTL_MS : hours * 3_600_000;
+  await sql`INSERT INTO sessions (token_hash, user_id, expires_at, kind)
+            VALUES (${hashToken(token)}, ${user.id}, ${new Date(Date.now() + ttl)}, ${device})`.execute(tx);
   // Old sessions go now rather than on a schedule.
   await tx.deleteFrom("sessions").where("expires_at", "<=", new Date()).execute();
   const me = await resumeSession(tx, hashToken(token));
   if (!me) throw new Error("A session just created could not be resumed");
-  return { ok: true, token, me };
+  return { ok: true, token, me, maxAgeSeconds: Math.floor(ttl / 1000) };
 }
 
 /** Sign-in attempts per address in the last minute, bounded in memory. */

@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#123d3a">
+  <title>Organization workspace · KB Dental</title>
+  <link rel="stylesheet" href="/organization.css">
+  <script src="/organization.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to workspace</a>
+  <div id="announcer" class="sr-only" aria-live="polite"></div>
+  <section id="login-screen" class="login-screen" aria-labelledby="login-title">
+    <div class="login-brand"><span class="brand-symbol" aria-hidden="true">K</span><span>KB Dental<br><small>Practice workspace</small></span></div>
+    <div class="login-layout">
+      <div class="login-intro"><span class="eyebrow">CARE, CONNECTED.</span><h1>One organization.<br>Every clinic in view.</h1><p>A considered workspace for the people, appointments and care that connect your clinics.</p><div class="login-note"><span class="dot"></span>Synthetic demonstration · Local workspace</div></div>
+      <form id="login-form" class="login-card">
+        <span class="eyebrow">WELCOME BACK</span><h2 id="login-title">Sign in to your organization</h2><p class="muted">Use the account provided for this organization's demonstration.</p>
+        <label>Username<input name="username" autocomplete="username" required maxlength="100" autofocus></label>
+        <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+        <p id="login-error" class="error" role="alert" hidden></p>
+        <button class="primary" type="submit">Sign in <span aria-hidden="true">→</span></button>
+        <p class="fine-print">Your account opens only the clinics and records you are permitted to access.</p>
+        <details class="login-accounts"><summary>Demonstration accounts</summary><p><strong>admin</strong> — organization setup and metrics<br><strong>doctor</strong> — care across permitted clinics<br><strong>doctor-one</strong> — care in the first clinic<br><strong>reception</strong> — registration and appointments<br><strong>accounts</strong> — clinic receipts and balances<br><strong>clinic-admin</strong> — clinic settings</p><p>Use the demonstration password provided separately.</p></details>
+      </form>
+    </div>
+  </section>
+  <div id="workspace" class="workspace" hidden>
+    <aside class="sidebar" aria-label="Workspace navigation">
+      <a class="brand" href="/organization.html"><span class="brand-symbol" aria-hidden="true">K</span><span>KB Dental<small>Organization workspace</small></span></a>
+      <div class="sidebar-section-label">WORKSPACE</div>
+      <nav id="navigation" aria-label="Main navigation"></nav>
+      <div class="sidebar-bottom"><span class="demo-chip">SYNTHETIC DEMO</span><p>Thoughtful care.<br>Connected clinics.</p></div>
+    </aside>
+    <div class="workspace-body">
+      <header class="topbar">
+        <div class="organization-label"><span class="tiny-label">ORGANIZATION</span><strong id="organization-name">Workspace</strong></div>
+        <div class="clinic-context"><label for="clinic-select">Working clinic</label><select id="clinic-select" aria-describedby="clinic-context-note"></select><span id="single-clinic" hidden></span><span id="clinic-context-note" class="sr-only">This selection applies only to this browser tab.</span></div>
+        <div class="account"><span id="account-name"></span><button id="logout-button" class="text-button" type="button">Sign out</button></div>
+      </header>
+      <main id="main" tabindex="-1">
+        <div id="page-heading" class="page-heading"></div>
+        <div id="page-feedback" class="feedback" role="status" hidden></div>
+        <div id="page-content"></div>
+      </main>
+      <footer class="workspace-footer"><span>Synthetic records only</span><span>Organization-isolated workspace <span aria-hidden="true">·</span> INR / Asia/Kolkata</span></footer>
+    </div>
+  </div>
+  <dialog id="modal" aria-labelledby="modal-title"><div id="modal-content"></div></dialog>
+</body>
+</html>

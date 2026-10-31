@@ -1,5 +1,48 @@
 # Handover for the next tool (31 Oct 2026)
 
+## Latest priority: portable handoff and patient-centred clinical CRM
+
+Read `docs/PATIENT-CRM-DIRECTION.md`: keep familiar clinical screens and organize
+care around the patient's longitudinal history, visits, clinic, treating doctor,
+treatments and items used. Doctor/item histories and care-history metrics follow
+the same records. The contact-centre analogy is inheritance only, not the product UX.
+The current admin demo is not the finished clinical CRM. Before redesigning, inspect
+the existing suite and Apps Script behavior. Labs remain future scope.
+
+The user requested relevant code be committed/pushed so BOTH versions can run on
+another laptop. `docs/ANOTHER-LAPTOP.md` is the fresh-install/run/agent handoff guide.
+Generated credentials, databases, real spreadsheets and patient files are not in Git.
+
+## Current implementation milestone
+
+Organization demo vertical slice is implemented and running locally: A at
+http://org-a.localhost:8101 (two clinics), B at http://org-b.localhost:8102 (one).
+See `docs/DEMO-VERIFICATION.md` for actual checks: final suite 269/269 tests in
+21 files, typecheck and JS syntax pass, plus 33 live HTTP/database checks.
+Organization A admin browser acceptance now passes (including two rendering fixes);
+clinical/accounts-role and organization B browser checks remain pending. Do not
+infer those from API tests. Generated credentials/documents stay in ignored directories.
+New modules and screens preserve the original clinic code during transition.
+
+## Latest accepted direction: organization tenancy
+
+Demo scope now confirmed: Organization A with two clinics and Organization B with
+one clinic. Labs are future scope. All D01-D18 in `docs/DEMO-DECISIONS.md` are now
+approved and implementation is authorized. Existing source data/files may inform
+realistic synthetic examples through read-only pattern/aggregate inspection.
+
+The user's later clarification supersedes the per-clinic database/instance proposal
+below. Each ORGANIZATION has its own database, credentials, sessions, storage, subdomain and
+configuration. An organization contains operating units (clinics, labs, other types), with
+shared customers and organization defaults plus only permitted unit overrides. The organization
+console is its admin panel with unit sections/metrics and centrally authored forms
+assigned to units. Releases, migrations and baseline recovery are per organization.
+Read `docs/BRAND-CLINIC-PLAN.md` for the revised target and implementation sequence.
+This is a test product and implementations may be refactored/replaced for the target;
+existing uncommitted work, data safety and applied-migration safeguards remain intact.
+The sections below describe historical decisions and current code, not a competing
+requirement to retain per-clinic databases.
+
 Written so OpenAI Codex, or anyone, can continue without the chat history. Rules and
 commands are in `AGENTS.md`; the long-form status and decisions are in `STATUS.md`.
 The root `HANDOVER.md` is the older Apps Script handover and is out of date for this branch.
@@ -65,7 +108,8 @@ From `STATUS.md`, the migration answer files and the review thread (Diya, 31 Oct
   session/account, move state-changing calls to POST, upgrade jsPDF, move letterhead and
   signature lines into clinic settings, longer separate limit for reports. Extra security work
   waits until the product is ready to ship. Cleanup of `nul` and the old nested copies: back up,
-  delete, then delete the backup. A per-clinic database is a **real requirement**, not an option.
+  delete, then delete the backup. The earlier per-clinic database requirement was
+  superseded by the brand-level database decision at the top of this handover.
 
 ## Workstreams
 
@@ -73,12 +117,12 @@ From `STATUS.md`, the migration answer files and the review thread (Diya, 31 Oct
 | --- | --- |
 | Roles and access | **Done**: `f080c43`, `607fc42` (migration 0020, roles page, password reset ends other sessions). |
 | Document storage | **Done**: `98c438e`, `1153a0b` (migration 0022, `/api/v1/storage`, `scripts/copy-documents.ts`). Fake S3/Drive servers in tests; not tried against a real bucket or Drive. No screen yet. |
-| Custom forms and mobile entry | **Code written, not committed.** Untracked: `api/migrations/0021_forms.sql`, `api/src/forms/`, `api/src/routes/forms.ts`, `api/test/forms.test.ts`, `forms.html`. Modified and uncommitted: `api/src/app.ts`, `auth/login.ts`, `db/index.ts`, `http/pages.ts`, `routes/auth.ts` (phone sessions). Tests have not been run: they wait on Diya's OK because they use the shared test DB. Must use `storeFor(tx)` for photo and signature fields. Review finding to fix: form rules store role names (`fill_roles`, `view_roles`); change to permissions or role ids. |
+| Custom forms and mobile entry | **Code written, not committed.** Existing uncommitted form/phone work preserved. Main coordinator ran tests after implementation authorization: forms17/17 pass after correcting test helper tenant context; final full suite269/269 pass. Current forms use stable role IDs rather than the older review's role-name finding. Real-provider/browser acceptance remains separate. |
 | Drive backup | **Waiting on Viveyk**: is his Google Drive personal Gmail (use OAuth, one-time approval) or Workspace with a Shared Drive (use a service account)? Defaults agreed otherwise. There is no backup script or restore drill in the repo. |
 | Data import and hardening | Importer and rehearsal tooling are in `migration/` and `api/scripts/` (rehearsal database `kb_rehearsal`, never committed). Waiting on Viveyk's answers (below). Demo checklist: screen share first; run the final import, then `api/scripts/fix-doctor-names.ts --apply`; check receipt totals against the sheet. Hardening still open: signed-in browser pass for CSP breakage, precompile chatbot JSX, `npm audit`, tighten rate limits. |
 | Review findings | `docs/REVIEW-2026-10-31.md` (20 items, severity-ranked). High: no ops artefacts (nginx, service, `pg_dump`, restore); per-clinic DB not wired (`clinics.database_url` unused); form role names; no `version` checks (lost updates); 2.7 MB uncompressed `index.html` and base64 uploads. |
 
-### Under discussion: one app instance per clinic
+### Historical proposal, superseded: one app instance per clinic
 
 Diya wants a router or, better, one app instance (own database, config folder and subdomain)
 per clinic, possibly in Docker. Claude's analysis: it fits 10 clinics, removes the need for a
@@ -106,7 +150,7 @@ For Viveyk (full list: `migration/data/VIVEYK-DECISIONS-AND-QUESTIONS-2026-10-31
 
 For Diya:
 1. Go-ahead to run `forms.test.ts` on the shared test DB, then commit the forms work.
-2. Per-clinic instances: confirm the plan, and Docker now or later.
+2. Brand instances are decided; hosting and Docker timing remain to be selected.
 3. Bucket provider and region for attachments; whether the AI consent narrative
    (sends case details to Anthropic) and a public chatbot stay off.
 4. Hosting target and who restores a backup at 9 pm, and how long the clinic may be without records.

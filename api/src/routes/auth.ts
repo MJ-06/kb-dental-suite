@@ -1,7 +1,7 @@
 import { Type } from "@sinclair/typebox";
 import type { FastifyPluginAsyncTypebox } from "@fastify/type-provider-typebox";
 import { attemptLogin } from "../auth/login.js";
-import { hashToken, SESSION_COOKIE, SESSION_TTL_MS } from "../auth/tokens.js";
+import { hashToken, SESSION_COOKIE } from "../auth/tokens.js";
 import { resumeSession } from "../db/index.js";
 import { asActor } from "../http/context.js";
 import { HttpError } from "../http/errors.js";
@@ -16,7 +16,8 @@ export const authRoutes: FastifyPluginAsyncTypebox<AppOptions> = async (app, opt
       body: Type.Object({
         clinic: Type.String({ minLength: 2, maxLength: 32 }),
         username: Type.String({ minLength: 2, maxLength: 40 }),
-        password: Type.String({ minLength: 1, maxLength: 200 })
+        password: Type.String({ minLength: 1, maxLength: 200 }),
+        device: Type.Optional(Type.Union([Type.Literal("desk"), Type.Literal("phone")]))
       })
     }
   }, async (req, reply) => {
@@ -24,7 +25,7 @@ export const authRoutes: FastifyPluginAsyncTypebox<AppOptions> = async (app, opt
 
     // Decided inside the transaction, thrown after it, so a failed
     // attempt's counter is committed rather than rolled back.
-    const outcome = await db.transaction().execute((tx) => attemptLogin(tx, clinic, username, password));
+    const outcome = await db.transaction().execute((tx) => attemptLogin(tx, clinic, username, password, req.body.device));
 
     if (!outcome.ok) throw new HttpError(401, "login_failed", outcome.message);
 
@@ -33,7 +34,7 @@ export const authRoutes: FastifyPluginAsyncTypebox<AppOptions> = async (app, opt
       secure: opts.cookieSecure,
       sameSite: "strict",
       path: "/",
-      maxAge: SESSION_TTL_MS / 1000
+      maxAge: outcome.maxAgeSeconds
     });
     return { user: publicActor(outcome.me) };
   });

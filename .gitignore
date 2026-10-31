@@ -1,3 +1,6 @@
 node_modules/
 
 migration/data/
+
+# Synthetic organization demo credentials/config/documents (local only).
+api/.organization-demo-runtime/

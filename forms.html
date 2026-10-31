@@ -1,0 +1,378 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="robots" content="noindex">
+<title>Clinical forms</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,600&family=Public+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+:root {
+  --bg: #f6f4ef; --surface: #ffffff; --ink: #1d2623; --muted: #5d6b66; --line: #d9d5ca;
+  --accent: #0f6b5c; --accent-ink: #ffffff; --danger: #a4262c; --ok: #1d6b3a; --warn-bg: #fdf2d6;
+  --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px;
+  --display: "Fraunces", Georgia, serif; --body: "Public Sans", system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --bg: #121715; --surface: #1b2220; --ink: #eceae3; --muted: #a2afa9; --line: #34403c;
+          --accent: #4fc1ad; --accent-ink: #0b1a16; --danger: #ff8b8f; --ok: #7fd49a; --warn-bg: #3b3316; }
+}
+* { box-sizing: border-box; }
+html { -webkit-text-size-adjust: 100%; }
+body { margin: 0; background: var(--bg); color: var(--ink); font: 16px/1.5 var(--body); padding-bottom: env(safe-area-inset-bottom); }
+header { position: sticky; top: 0; z-index: 5; background: var(--bg); border-bottom: 1px solid var(--line);
+         display: flex; align-items: center; gap: var(--s3); padding: var(--s3) var(--s4); min-height: 56px; }
+header h1 { font: 600 20px/1.2 var(--display); margin: 0; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+main { padding: var(--s4); max-width: 640px; margin: 0 auto; }
+label, .lbl { display: block; font-weight: 600; font-size: 15px; margin: var(--s4) 0 var(--s1); }
+.req::after { content: " *"; color: var(--danger); }
+.help { color: var(--muted); font-size: 14px; margin: 0 0 var(--s1); }
+input, select, textarea { width: 100%; font: inherit; color: inherit; background: var(--surface); border: 1px solid var(--line);
+  border-radius: 8px; padding: 12px; min-height: 48px; }
+textarea { min-height: 96px; resize: vertical; }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, .tooth:focus-visible, canvas:focus-visible {
+  outline: 3px solid var(--accent); outline-offset: 2px; }
+button { font: 600 16px var(--body); min-height: 48px; padding: 0 var(--s4); border-radius: 8px; border: 1px solid var(--line);
+  background: var(--surface); color: var(--ink); cursor: pointer; }
+button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+button.link { border: 0; background: none; color: var(--accent); min-height: 44px; padding: 0 var(--s2); }
+button:disabled { opacity: .5; cursor: not-allowed; }
+button:active:not(:disabled) { transform: translateY(1px); }
+.row { display: flex; gap: var(--s3); }
+.row > * { flex: 1; }
+.list { list-style: none; margin: var(--s4) 0 0; padding: 0; }
+.list button { width: 100%; text-align: left; display: block; margin-bottom: var(--s2); padding: var(--s3) var(--s4); min-height: 56px; }
+.list small { display: block; color: var(--muted); font-weight: 400; }
+.msg { margin: var(--s4) 0; padding: var(--s3); border-radius: 8px; background: var(--warn-bg); }
+.msg.err { color: var(--danger); border: 1px solid var(--danger); background: transparent; }
+.msg.ok { color: var(--ok); border: 1px solid var(--ok); background: transparent; }
+.empty { color: var(--muted); text-align: center; padding: var(--s6) var(--s4); }
+section.sec { margin-top: var(--s5); }
+section.sec h2 { font: 600 18px/1.3 var(--display); margin: 0; padding-bottom: var(--s1); border-bottom: 1px solid var(--line); }
+.opt { display: flex; align-items: center; gap: var(--s3); padding: var(--s2) 0; min-height: 48px; font-weight: 400; margin: 0; }
+.opt input { width: 24px; height: 24px; min-height: 24px; flex: none; }
+.teeth { display: grid; grid-template-columns: repeat(8, 1fr); gap: 4px; margin-bottom: var(--s2); }
+.tooth { min-height: 44px; padding: 0; font-size: 13px; border-radius: 6px; position: relative; }
+.tooth[data-mark] { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+.tooth[data-mark="Missing"] { background: var(--muted); border-color: var(--muted); }
+.tooth[data-mark="Planned"] { background: var(--surface); color: var(--accent); border: 2px dashed var(--accent); }
+.tooth[data-mark="Needs attention"] { background: var(--danger); border-color: var(--danger); color: #fff; }
+.legend { font-size: 14px; color: var(--muted); margin: var(--s1) 0 var(--s3); }
+.thumbs { display: flex; flex-wrap: wrap; gap: var(--s2); margin-top: var(--s2); }
+.thumbs span { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: var(--s1) var(--s3); font-size: 14px; }
+canvas.sig { width: 100%; height: 160px; background: #fff; border: 1px solid var(--line); border-radius: 8px; touch-action: none; display: block; }
+.bar { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--line); padding: var(--s3) var(--s4);
+       padding-bottom: calc(var(--s3) + env(safe-area-inset-bottom)); display: flex; gap: var(--s3); }
+.bar button { flex: 1; }
+.view dt { font-weight: 600; margin-top: var(--s3); }
+.view dd { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
+</style>
+</head>
+<body>
+<header><button class="link" id="back" hidden aria-label="Back">&larr;</button><h1 id="title">Clinical forms</h1><button class="link" id="out" hidden>Sign out</button></header>
+<main id="app" aria-live="polite"></main>
+
+<script>
+(function () {
+  "use strict";
+  var app = document.getElementById("app"), titleEl = document.getElementById("title");
+  var backBtn = document.getElementById("back"), outBtn = document.getElementById("out");
+  var state = { user: null, patient: null, forms: [], backTo: null };
+
+  function el(tag, attrs, kids) {
+    var n = document.createElement(tag);
+    for (var k in (attrs || {})) {
+      if (k === "text") n.textContent = attrs[k];
+      else if (k.slice(0, 2) === "on") n.addEventListener(k.slice(2), attrs[k]);
+      else if (attrs[k] === true) n.setAttribute(k, "");
+      else if (attrs[k] !== false && attrs[k] != null) n.setAttribute(k, attrs[k]);
+    }
+    (kids || []).forEach(function (c) { if (c) n.appendChild(typeof c === "string" ? document.createTextNode(c) : c); });
+    return n;
+  }
+  function show(title, back) {
+    titleEl.textContent = title; app.textContent = ""; window.scrollTo(0, 0);
+    state.backTo = back || null; backBtn.hidden = !back; outBtn.hidden = !state.user;
+  }
+  backBtn.onclick = function () { if (state.backTo) state.backTo(); };
+  function note(text, cls) { return el("div", { class: "msg " + (cls || ""), role: cls === "err" ? "alert" : "status", text: text }); }
+
+  function api(method, path, body) {
+    return fetch(path, { method: method, credentials: "same-origin",
+      headers: body ? { "Content-Type": "application/json" } : {}, body: body ? JSON.stringify(body) : undefined })
+      .then(function (r) {
+        return r.json().catch(function () { return {}; }).then(function (j) {
+          if (r.status === 401 && state.user) { state.user = null; signIn("Your session ended. Please sign in again."); }
+          if (!r.ok) { var e = new Error((j.error && j.error.message) || "Something went wrong"); e.status = r.status; throw e; }
+          return j;
+        });
+      });
+  }
+
+  // ---- sign in -------------------------------------------------------------
+  function signIn(message) {
+    show("Sign in");
+    var clinic = el("input", { id: "c", autocomplete: "organization", autocapitalize: "none", required: true });
+    var user = el("input", { id: "u", autocomplete: "username", autocapitalize: "none", required: true });
+    var pass = el("input", { id: "p", type: "password", autocomplete: "current-password", required: true });
+    try { clinic.value = localStorage.getItem("kb_clinic") || ""; } catch (e) {}
+    var err = el("div");
+    var go = el("button", { class: "primary", type: "submit", text: "Sign in" });
+    var form = el("form", { onsubmit: function (ev) {
+      ev.preventDefault(); go.disabled = true; err.textContent = "";
+      api("POST", "/api/v1/auth/login", { clinic: clinic.value.trim(), username: user.value.trim(), password: pass.value, device: "phone" })
+        .then(function (j) { state.user = j.user; try { localStorage.setItem("kb_clinic", clinic.value.trim()); } catch (e) {} home(); })
+        .catch(function (e) { go.disabled = false; err.appendChild(note(e.message, "err")); });
+    } }, [
+      message ? note(message) : null,
+      el("label", { for: "c", text: "Clinic code" }), clinic,
+      el("label", { for: "u", text: "Username" }), user,
+      el("label", { for: "p", text: "Password" }), pass, err,
+      el("div", { style: "margin-top:16px" }, [go])
+    ]);
+    form.querySelector("button").style.width = "100%";
+    app.appendChild(form);
+  }
+  outBtn.onclick = function () { api("POST", "/api/v1/auth/logout", {}).finally(function () { state.user = null; state.patient = null; signIn(); }); };
+
+  // ---- choose a patient ----------------------------------------------------
+  function home() {
+    show("Choose patient");
+    var q = el("input", { type: "search", id: "q", placeholder: "UHID, name or mobile", autocomplete: "off", "aria-label": "Search patients" });
+    var res = el("ul", { class: "list" }), timer;
+    function run() {
+      var v = q.value.trim(); res.textContent = "";
+      if (v.length < 2) return;
+      api("GET", "/api/v1/patients?q=" + encodeURIComponent(v) + "&limit=15").then(function (j) {
+        res.textContent = "";
+        if (!j.patients.length) res.appendChild(el("li", { class: "empty", text: "No patient found" }));
+        j.patients.forEach(function (p) {
+          res.appendChild(el("li", {}, [el("button", { onclick: function () { state.patient = p; formList(); } },
+            [p.full_name, el("small", { text: p.uhid + (p.mobile ? " · " + p.mobile : "") })])]));
+        });
+      }).catch(function (e) { res.appendChild(note(e.message, "err")); });
+    }
+    q.addEventListener("input", function () { clearTimeout(timer); timer = setTimeout(run, 250); });
+    app.appendChild(q); app.appendChild(res); q.focus();
+  }
+
+  // ---- choose a form -------------------------------------------------------
+  function formList() {
+    var p = state.patient;
+    show(p.full_name, home);
+    app.appendChild(el("p", { class: "help", text: p.uhid + " · choose a form" }));
+    var ul = el("ul", { class: "list" }); app.appendChild(ul);
+    api("GET", "/api/v1/forms").then(function (j) {
+      state.forms = j.forms;
+      if (!j.forms.length) ul.appendChild(el("li", { class: "empty", text: "No forms are open to your role." }));
+      j.forms.forEach(function (f) {
+        ul.appendChild(el("li", {}, [el("button", { onclick: function () { openForm(f.key); } },
+          [f.title, el("small", { text: f.canFill ? "Fill in" : "View only" })])]));
+      });
+    }).catch(function (e) { ul.appendChild(note(e.message, "err")); });
+  }
+
+  function openForm(key) {
+    show("Loading…", formList);
+    Promise.all([api("GET", "/api/v1/forms/" + encodeURIComponent(key)),
+                 api("GET", "/api/v1/forms/" + encodeURIComponent(key) + "/submissions?uhid=" + encodeURIComponent(state.patient.uhid))])
+      .then(function (r) { formHome(r[0].form, r[1].submissions); })
+      .catch(function (e) { show("Form", formList); app.appendChild(note(e.message, "err")); });
+  }
+
+  function when(s) { var d = new Date(s.submitted_at || s.created_at); return isNaN(d) ? "" : d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" }); }
+
+  function formHome(form, subs) {
+    show(form.title, formList);
+    if (form.canFill) app.appendChild(el("button", { class: "primary", style: "width:100%", text: "New record", onclick: function () { fill(form, null); } }));
+    var ul = el("ul", { class: "list" }); app.appendChild(ul);
+    if (!subs.length) ul.appendChild(el("li", { class: "empty", text: "Nothing recorded for this patient yet." }));
+    subs.forEach(function (s) {
+      var draft = s.status === "draft";
+      ul.appendChild(el("li", {}, [el("button", { onclick: function () { draft && form.canFill ? fill(form, s) : view(form, s); } },
+        [when(s) + (draft ? " · draft" : ""), el("small", { text: (s.by || "") + (s.form_version !== form.version ? " · version " + s.form_version : "") })])]));
+    });
+  }
+
+  function view(form, s) {
+    show(form.title, function () { openForm(form.key); });
+    var dl = el("dl", { class: "view" });
+    var v = s.values || {};
+    form.sections.forEach(function (sec) { sec.fields.forEach(function (f) {
+      if (v[f.key] === undefined) return;
+      var t = Array.isArray(v[f.key]) ? v[f.key].length + (f.type === "photo" ? " photo(s) on file" : "") + (f.type === "multi_choice" ? "" : "")
+        : f.type === "tooth_chart" ? Object.keys(v[f.key]).map(function (k) { return k + " " + v[f.key][k]; }).join(", ")
+        : f.type === "signature" ? "Signed" : String(v[f.key]);
+      if (f.type === "multi_choice") t = v[f.key].join(", ");
+      dl.appendChild(el("dt", { text: f.label })); dl.appendChild(el("dd", { text: t }));
+    }); });
+    if (v._legacy) Object.keys(v._legacy).forEach(function (k) {
+      dl.appendChild(el("dt", { text: k })); dl.appendChild(el("dd", { text: typeof v._legacy[k] === "object" ? "Earlier tooth chart on file" : String(v._legacy[k]) }));
+    });
+    app.appendChild(el("p", { class: "help", text: when(s) + (s.by ? " · " + s.by : "") + (s.status === "final" ? " · final" : "") }));
+    app.appendChild(dl);
+  }
+
+  // ---- fill ----------------------------------------------------------------
+  var FDI = [["18","17","16","15","14","13","12","11"],["21","22","23","24","25","26","27","28"],
+             ["48","47","46","45","44","43","42","41"],["31","32","33","34","35","36","37","38"]];
+
+  function fill(form, draft) {
+    show(form.title, function () { openForm(form.key); });
+    var values = draft ? JSON.parse(JSON.stringify(draft.values || {})) : {};
+    var getters = {};
+    var status = el("div");
+    app.appendChild(el("p", { class: "help", text: state.patient.full_name + " · " + state.patient.uhid }));
+    form.sections.forEach(function (sec) {
+      var box = el("section", { class: "sec" }, [el("h2", { text: sec.title })]);
+      sec.fields.forEach(function (f) { box.appendChild(field(f, values, getters)); });
+      app.appendChild(box);
+    });
+    app.appendChild(status);
+    var save = function (final) {
+      var out = {};
+      Object.keys(getters).forEach(function (k) { var v = getters[k](); if (v !== undefined) out[k] = v; });
+      busy(true); status.textContent = "";
+      api("POST", "/api/v1/forms/" + encodeURIComponent(form.key) + "/submissions",
+        { uhid: state.patient.uhid, values: out, final: final, id: draft ? draft.id : undefined })
+        .then(function (j) {
+          if (final) { openForm(form.key); return; }
+          draft = { id: j.submission.id, values: out }; busy(false);
+          status.appendChild(note("Draft saved", "ok"));
+        })
+        .catch(function (e) { busy(false); status.appendChild(note(e.message, "err")); });
+    };
+    var d = el("button", { text: "Save draft", onclick: function () { save(false); } });
+    var f = el("button", { class: "primary", text: "Save record", onclick: function () {
+      if (confirm("Save this record? A saved record cannot be edited afterwards.")) save(true); } });
+    function busy(b) { d.disabled = f.disabled = b; }
+    app.appendChild(el("div", { class: "bar" }, [d, f]));
+  }
+
+  function field(f, values, getters) {
+    var id = "f_" + f.key, wrap = el("div"), cur = values[f.key];
+    var lab = el("label", { for: id, class: f.required ? "req" : "", text: f.label });
+    if (f.type === "multi_choice" || f.type === "tooth_chart" || f.type === "photo" || f.type === "signature") {
+      lab = el("div", { class: "lbl" + (f.required ? " req" : ""), id: id + "_l", text: f.label });
+    }
+    wrap.appendChild(lab);
+    if (f.help) wrap.appendChild(el("p", { class: "help", text: f.help }));
+    var input;
+    switch (f.type) {
+      case "text":
+        input = f.multiline ? el("textarea", { id: id }) : el("input", { id: id, type: "text", autocomplete: "off" });
+        input.value = cur || ""; wrap.appendChild(input);
+        getters[f.key] = function () { return input.value.trim() || undefined; };
+        break;
+      case "number":
+        input = el("input", { id: id, type: "number", inputmode: "decimal", step: "any" });
+        input.value = cur === undefined ? "" : cur; wrap.appendChild(input);
+        getters[f.key] = function () { return input.value === "" ? undefined : Number(input.value); };
+        break;
+      case "date":
+        input = el("input", { id: id, type: "date" }); input.value = /^\d{4}-\d{2}-\d{2}$/.test(cur || "") ? cur : ""; wrap.appendChild(input);
+        getters[f.key] = function () { return input.value || undefined; };
+        break;
+      case "choice":
+        input = el("select", { id: id }, [el("option", { value: "", text: "Choose…" })].concat(f.options.map(function (o) { return el("option", { value: o, text: o }); })));
+        input.value = cur || ""; wrap.appendChild(input);
+        getters[f.key] = function () { return input.value || undefined; };
+        break;
+      case "multi_choice":
+        var boxes = f.options.map(function (o, i) {
+          var cb = el("input", { type: "checkbox", value: o, id: id + "_" + i }); cb.checked = (cur || []).indexOf(o) >= 0;
+          wrap.appendChild(el("label", { class: "opt", for: id + "_" + i }, [cb, o])); return cb;
+        });
+        getters[f.key] = function () { var r = boxes.filter(function (b) { return b.checked; }).map(function (b) { return b.value; }); return r.length ? r : undefined; };
+        break;
+      case "tooth_chart": wrap.appendChild(toothChart(f, cur, getters)); break;
+      case "photo": wrap.appendChild(photos(f, cur, getters)); break;
+      case "signature": wrap.appendChild(signature(f, cur, getters)); break;
+    }
+    return wrap;
+  }
+
+  function toothChart(f, cur, getters) {
+    var marks = f.options || ["Treated", "Planned", "Missing", "Needs attention"], chart = Object.assign({}, cur || {});
+    var box = el("div");
+    box.appendChild(el("p", { class: "legend", text: "Tap a tooth to mark it: " + marks.join(" → ") + " → clear. Upper teeth first." }));
+    FDI.forEach(function (row) {
+      var g = el("div", { class: "teeth" });
+      row.forEach(function (t) {
+        var b = el("button", { type: "button", class: "tooth", text: t, "aria-label": "Tooth " + t });
+        function paint() { if (chart[t]) { b.setAttribute("data-mark", chart[t]); b.setAttribute("aria-label", "Tooth " + t + ", " + chart[t]); }
+                           else { b.removeAttribute("data-mark"); b.setAttribute("aria-label", "Tooth " + t); } }
+        b.onclick = function () { var i = marks.indexOf(chart[t]); if (i + 1 < marks.length) chart[t] = marks[i + 1]; else delete chart[t]; paint(); };
+        paint(); g.appendChild(b);
+      });
+      box.appendChild(g);
+    });
+    getters[f.key] = function () { return Object.keys(chart).length ? chart : undefined; };
+    return box;
+  }
+
+  // Phone photos are large; shrink before sending so the upload is small and quick.
+  function shrink(file) {
+    return new Promise(function (resolve, reject) {
+      var url = URL.createObjectURL(file), img = new Image();
+      img.onload = function () {
+        var scale = Math.min(1, 1600 / Math.max(img.width, img.height)), c = document.createElement("canvas");
+        c.width = Math.round(img.width * scale); c.height = Math.round(img.height * scale);
+        c.getContext("2d").drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+        var q = 0.8, data;
+        do { data = c.toDataURL("image/jpeg", q); q -= 0.1; } while (data.length > 900000 && q > 0.2);
+        data.length > 900000 ? reject(new Error("That photo is too large")) : resolve(data.split(",")[1]);
+      };
+      img.onerror = function () { URL.revokeObjectURL(url); reject(new Error("That file is not a photo")); };
+      img.src = url;
+    });
+  }
+  function photos(f, cur, getters) {
+    var ids = (cur || []).slice(), max = f.max || 6, box = el("div"), thumbs = el("div", { class: "thumbs" }), msg = el("div");
+    var pick = el("input", { type: "file", accept: "image/*", capture: "environment", id: "f_" + f.key, hidden: true });
+    var add = el("button", { type: "button", text: "Take or choose photo" });
+    function paint() { thumbs.textContent = ""; ids.forEach(function (id, i) {
+      thumbs.appendChild(el("span", {}, ["Photo " + (i + 1) + " ", el("button", { type: "button", class: "link", "aria-label": "Remove photo " + (i + 1), text: "Remove", onclick: function () { ids.splice(i, 1); paint(); } })]));
+    }); add.disabled = ids.length >= max; }
+    add.onclick = function () { pick.click(); };
+    pick.onchange = function () {
+      var file = pick.files[0]; pick.value = ""; if (!file) return;
+      msg.textContent = ""; add.disabled = true; add.textContent = "Uploading…";
+      shrink(file).then(function (b64) {
+        // Filed through the same document storage as every other patient file.
+        return fetch("/exec", { method: "POST", credentials: "same-origin", headers: { "Content-Type": "text/plain;charset=utf-8" },
+          body: JSON.stringify({ action: "uploadPatientDocument", uhid: state.patient.uhid, fileName: f.key + ".jpg", mimeType: "image/jpeg", category: "Form photo", base64Data: b64 }) })
+          .then(function (r) { return r.json(); });
+      }).then(function (j) { if (!j.success) throw new Error(j.error || "Upload failed"); ids.push(j.id); })
+        .catch(function (e) { msg.appendChild(note(e.message, "err")); })
+        .finally(function () { add.textContent = "Take or choose photo"; paint(); });
+    };
+    paint(); box.appendChild(add); box.appendChild(pick); box.appendChild(msg); box.appendChild(thumbs);
+    getters[f.key] = function () { return ids.length ? ids : undefined; };
+    return box;
+  }
+
+  function signature(f, cur, getters) {
+    var box = el("div"), c = el("canvas", { class: "sig", width: 600, height: 240, role: "img", "aria-label": "Signature area" });
+    var ctx = c.getContext("2d"), drawing = false, dirty = false, had = !!cur;
+    ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height); ctx.lineWidth = 3; ctx.lineCap = "round"; ctx.strokeStyle = "#111";
+    if (cur) { var im = new Image(); im.onload = function () { ctx.drawImage(im, 0, 0, c.width, c.height); }; im.src = cur; }
+    function pos(e) { var r = c.getBoundingClientRect(); return [(e.clientX - r.left) * c.width / r.width, (e.clientY - r.top) * c.height / r.height]; }
+    c.addEventListener("pointerdown", function (e) { drawing = true; c.setPointerCapture(e.pointerId); var p = pos(e); ctx.beginPath(); ctx.moveTo(p[0], p[1]); });
+    c.addEventListener("pointermove", function (e) { if (!drawing) return; var p = pos(e); ctx.lineTo(p[0], p[1]); ctx.stroke(); dirty = true; });
+    ["pointerup", "pointercancel"].forEach(function (n) { c.addEventListener(n, function () { drawing = false; }); });
+    box.appendChild(c);
+    box.appendChild(el("button", { type: "button", class: "link", text: "Clear signature", onclick: function () {
+      ctx.fillStyle = "#fff"; ctx.fillRect(0, 0, c.width, c.height); dirty = false; had = false; } }));
+    getters[f.key] = function () { return dirty || had ? c.toDataURL("image/png") : undefined; };
+    return box;
+  }
+
+  // ---- start ---------------------------------------------------------------
+  api("GET", "/api/v1/auth/me").then(function (j) { state.user = j.user; home(); }).catch(function () { signIn(); });
+})();
+</script>
+</body>
+</html>

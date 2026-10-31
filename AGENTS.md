@@ -3,6 +3,30 @@
 Instructions for AI coding agents (OpenAI Codex and others) working in this repo.
 Read `docs/HANDOVER.md` first for the goal, decisions and workstream status.
 
+Latest product/UI correction: read `docs/PATIENT-CRM-DIRECTION.md`. Preserve familiar
+clinical workflows and centre the product on patient history, visits attributed to
+clinic/treating doctor, treatments and items used, with doctor/item history views.
+The contact-centre analogy concerns inheritance only; it is not a UX brief. Active
+patient counts are not the primary product concept. Complete visit/material history
+is next work, not a feature already delivered by the organization admin demo.
+For fresh-machine setup of BOTH versions, see `docs/ANOTHER-LAPTOP.md`.
+
+## Accepted product direction (31 Oct 2026, latest user clarification)
+
+Demonstration scope: Organization A with two clinics, Organization B with one.
+Labs are future scope. Read `docs/DEMO-DECISIONS.md`; D01-D18 are now approved and
+implementation is authorized. This chat is the main coordination chat.
+
+Read `docs/BRAND-CLINIC-PLAN.md` for the current target. An ORGANIZATION, not a clinic,
+is the database, credentials, sessions, storage, subdomain and deployment boundary.
+An organization contains operating units (clinics, labs, other types), shares customers and
+organization defaults, and permits only explicitly allowed unit overrides. The organization
+console is its admin panel, including unit metrics and organization-created forms assigned
+to units. This supersedes older per-clinic database/instance proposals.
+The code below still reflects the earlier clinic tenancy. This is a test product:
+refactoring/replacement is allowed; compatibility with old implementation is not a
+requirement. Preserve data safety, unrelated uncommitted work and migration safeguards.
+
 ## What this is
 
 KB Dental's practice management system, being rebuilt as a multi-clinic product.

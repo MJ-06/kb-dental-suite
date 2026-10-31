@@ -10,6 +10,7 @@ import { appointmentRoutes } from "./routes/appointments.js";
 import { pageRoutes } from "./http/pages.js";
 import { legacyRoutes } from "./legacy/route.js";
 import { authRoutes } from "./routes/auth.js";
+import { formRoutes } from "./routes/forms.js";
 import { patientRoutes } from "./routes/patients.js";
 import { adminReportRoutes } from "./routes/admin-reports.js";
 import { accessRoutes } from "./routes/access.js";
@@ -68,6 +69,7 @@ export async function buildApp(opts: AppOptions & { logger?: boolean }) {
   await app.register(authRoutes, { ...opts, prefix: "/api/v1/auth" });
   await app.register(patientRoutes, { ...opts, prefix: "/api/v1/patients" });
   await app.register(appointmentRoutes, { ...opts, prefix: "/api/v1/appointments" });
+  await app.register(formRoutes, { ...opts, prefix: "/api/v1/forms" });
   await app.register(adminReportRoutes, { ...opts, prefix: "/api/v1/admin" });
   await app.register(accessRoutes, { ...opts, prefix: "/api/v1/access" });
   await app.register(storageRoutes, { ...opts, prefix: "/api/v1/storage" });

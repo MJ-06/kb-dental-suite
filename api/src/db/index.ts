@@ -43,6 +43,8 @@ export function createDb(connectionString: string, max = 10): Kysely<DB> {
 
 /** Resumes the session in this transaction. Returns null when signed out. */
 export async function resumeSession(tx: Tx, tokenHash: Buffer): Promise<Actor | null> {
+  // A phone session left idle too long is removed here, before it can resume.
+  await sql`SELECT phone_session_expire(${tokenHash})`.execute(tx);
   const r = await sql<{
     user_id: string; clinic_id: string; role_id: string; role: string; permissions: string[]; display_name: string; username: string; timezone: string;
   }>`SELECT * FROM session_resume(${tokenHash})`.execute(tx);

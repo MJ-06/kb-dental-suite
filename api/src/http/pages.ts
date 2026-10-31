@@ -22,6 +22,7 @@ const PAGES: Record<string, string> = {
   "/expense.html": "expense.html",
   "/admin.html": "admin.html",
   "/system-log.html": "system-log.html",
+  "/forms.html": "forms.html",
   "/roles.html": "roles.html"
 };
 // CDN address (as written in the pages) -> file inside node_modules.
