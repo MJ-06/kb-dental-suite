@@ -3,6 +3,7 @@
 // progress and the consent narrative writer, answering as the live Apps
 // Script does.
 import { sql } from "kysely";
+import { can } from "../auth/permissions.js";
 import { callLimiter, complete, LlmError } from "../llm.js";
 import { RECORD_FORMS, RECORD_HEADINGS, RECORD_TABS } from "./clinical-forms.js";
 import { read, write, DeskError, type ActionTable, type Params } from "./types.js";
@@ -161,20 +162,25 @@ export const clinical: ActionTable = {
   }),
 
   // What the day's register says was done, for the treatment-progress table.
-  getTreatmentProgress: read(async (p, { tx }) => {
+  getTreatmentProgress: read(async (p, { tx, actor }) => {
     const uhid = uhidOf(p.uhid);
     const r = await sql<{ sno: number | null; date: string; tooth: string | null; proc: string | null; work: string | null; doctor: string | null; mode: string | null }>`
       SELECT serial_no AS sno, visit_date::text AS date, tooth_no AS tooth, procedure_done AS proc,
              work_done AS work, operating_doctor AS doctor, mode_of_payment AS mode
         FROM daily_register WHERE upper(uhid) = ${uhid}
        ORDER BY visit_date, created_at`.execute(tx);
+    // Payments appear only for roles that handle money, or when the clinic has chosen to show a
+    // patient's own payments to clinical staff (setting progress_shows_payments, off until the owner
+    // decides). Never the clinic's collections.
+    const showPayments = can(actor.role, "payments:collect") || can(actor.role, "finance:read") ||
+      (await sql<{ v: unknown }>`SELECT value AS v FROM clinic_settings WHERE key = 'progress_shows_payments'`.execute(tx)).rows[0]?.v === true;
     // What this patient paid, by day: the visit's first register entry carries the day's total (two
     // payments on a day are added); a payment on a day with no register entry gets a row of its own.
     // Only this patient's payments, never the clinic's collections.
     const paid = await sql<{ date: string; total: number; modes: string | null }>`
       SELECT receipt_date::text AS date, sum(amount1 + amount2)::float8 AS total,
              string_agg(DISTINCT concat_ws(' + ', mode1, mode2), ', ') AS modes
-        FROM receipts WHERE upper(uhid) = ${uhid} GROUP BY receipt_date`.execute(tx);
+        FROM receipts WHERE ${showPayments} AND upper(uhid) = ${uhid} GROUP BY receipt_date`.execute(tx);
     const byDay = new Map(paid.rows.map((x) => [x.date, x]));
     const entries: Array<{ date: string } & Record<string, string>> = [];
     const used = new Set<string>();

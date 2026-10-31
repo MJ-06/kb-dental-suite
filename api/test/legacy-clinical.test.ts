@@ -1,7 +1,8 @@
 // Clinical forms, tooth-chart sheets, care plans, consents and progress through /exec.
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import { exec, execLogin } from "./legacy.js";
-import { makeWorld, type World } from "./setup.js";
+import { createUser } from "../src/admin.js";
+import { makeWorld, OWNER_URL, PASSWORD, type World } from "./setup.js";
 
 let w: World;
 let admin: string;
@@ -131,6 +132,22 @@ describe("treatment progress shows this patient's payments", () => {
     const day22 = res.entries.filter((e: { date: string }) => e.date === "2026-10-22");
     expect(day22.map((e: { amountReceived: string }) => e.amountReceived)).toEqual(["1500"]); // two payments are added, once
     expect(res.entries.at(-1)).toMatchObject({ date: "2026-10-25", treatmentRendered: "(no procedure recorded)", amountReceived: "300" });
+  });
+});
+
+describe("who sees payments on the progress notes", () => {
+  it("hides them from a doctor until the clinic turns the setting on", async () => {
+    await createUser(OWNER_URL, w.clinicA, { username: "a-doc2", displayName: "Dr. Two", password: PASSWORD, role: "doctor" });
+    const doc = await execLogin(w, "alpha", "a-doc2");
+    const amounts = async (who: string) => (await exec(w, who, "getTreatmentProgress", { uhid })).entries.map((e: { amountReceived: string }) => e.amountReceived).filter(Boolean);
+    expect(await amounts(doc)).toEqual([]);                     // clinical staff: no payments
+    expect((await amounts(admin)).length).toBeGreaterThan(0);
+    const { default: pg } = await import("pg");
+    const c = new pg.Client({ connectionString: OWNER_URL }); await c.connect();
+    await c.query("SELECT set_config('app.clinic_id', $1, false)", [w.clinicA]);
+    await c.query("INSERT INTO clinic_settings (key, value) VALUES ('progress_shows_payments', 'true'::jsonb)");
+    await c.end();
+    expect((await amounts(doc)).length).toBeGreaterThan(0);     // the owner chose to show them
   });
 });
 
