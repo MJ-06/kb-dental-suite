@@ -5,7 +5,7 @@ import { randomUUID } from "node:crypto";
 import { sql } from "kysely";
 import type { Tx } from "../db/index.js";
 import { htmlToPdf, PdfUnavailable } from "../pdf.js";
-import { storage } from "../storage.js";
+import { sha256Hex, storeFor, type Kind } from "../storage/index.js";
 import { read, write, DeskError, type ActionTable } from "./types.js";
 import { nz, str, uhidOf } from "./util.js";
 
@@ -51,6 +51,7 @@ const mb = (n: number) => (n / 1048576).toFixed(1);
 interface DocRow {
   id: string; uhid: string; file_name: string; mime_type: string; category: string;
   storage_key: string; size_bytes: number; uploaded: string;
+  storage_backend: Kind; storage_ref: string | null; checksum_sha256: string | null;
 }
 
 async function fileAway(tx: Tx, clinicId: string, p: {
@@ -58,11 +59,17 @@ async function fileAway(tx: Tx, clinicId: string, p: {
 }): Promise<string> {
   const id = randomUUID();
   const key = `${clinicId}/${id}`;
-  await storage.put(key, p.bytes);
-  const patient = (await sql<{ id: string }>`SELECT id FROM patients WHERE uhid = ${p.uhid}`.execute(tx)).rows[0];
+  const patient = (await sql<{ id: string; full_name: string }>`SELECT id, full_name FROM patients WHERE uhid = ${p.uhid}`.execute(tx)).rows[0];
+  const store = await storeFor(tx);
+  // Drive is browsed by people, so it gets the familiar <UHID_Name>/<Category> folders.
+  const ref = await store.put(key, p.bytes, {
+    name: p.name, mime: p.mime, folder: [patient ? `${p.uhid}_${patient.full_name}` : p.uhid, p.category]
+  });
   await sql`
-    INSERT INTO patient_documents (id, uhid, patient_id, file_name, mime_type, category, storage_key, size_bytes, doc_key)
-    VALUES (${id}, ${p.uhid}, ${patient?.id ?? null}, ${p.name}, ${p.mime}, ${p.category}, ${key}, ${p.bytes.length}, ${p.docKey ?? null})`.execute(tx);
+    INSERT INTO patient_documents (id, uhid, patient_id, file_name, mime_type, category, storage_key, size_bytes, doc_key,
+                                   storage_backend, storage_ref, checksum_sha256)
+    VALUES (${id}, ${p.uhid}, ${patient?.id ?? null}, ${p.name}, ${p.mime}, ${p.category}, ${key}, ${p.bytes.length}, ${p.docKey ?? null},
+            ${store.kind}, ${ref}, ${sha256Hex(p.bytes)})`.execute(tx);
   return id;
 }
 
@@ -111,7 +118,7 @@ export const documents: ActionTable = {
     if (!id) return { success: false, error: "Document id required" };
     const doc = UUID.test(id)
       ? (await sql<DocRow>`
-          SELECT id, uhid, file_name, mime_type, storage_key, size_bytes
+          SELECT id, uhid, file_name, mime_type, storage_key, size_bytes, storage_backend, storage_ref, checksum_sha256
             FROM patient_documents WHERE id = ${id} AND deleted_at IS NULL`.execute(tx)).rows[0]
       : undefined;
     if (!doc) return { success: false, error: "Document not found" };
@@ -124,7 +131,8 @@ export const documents: ActionTable = {
       };
     }
     try {
-      const bytes = await storage.get(doc.storage_key);
+      const bytes = await (await storeFor(tx, doc.storage_backend)).get(doc.storage_key, doc.storage_ref);
+      if (doc.checksum_sha256 && sha256Hex(bytes) !== doc.checksum_sha256) return { success: false, error: "File failed its integrity check and was not opened" };
       return { success: true, fileName: doc.file_name, mimeType: doc.mime_type, uhid: doc.uhid, base64: bytes.toString("base64") };
     } catch {
       return { success: false, error: "File unavailable" };

@@ -66,3 +66,12 @@ export async function recordEvent(tx: Tx, kind: string, action: string, message:
     INSERT INTO system_log (level, kind, action, status, message, detail)
     VALUES ('info', ${kind}, ${action}, 200, ${scrub(message)}, ${JSON.stringify(detail)}::jsonb)`.execute(tx);
 }
+
+/** A failure worth an admin's attention found by a background job (not a request), in the caller's transaction. */
+export async function recordJobFailure(tx: Tx, kind: string, action: string, message: string, detail: Record<string, unknown> = {}): Promise<string> {
+  const ref = newRef();
+  await sql`
+    INSERT INTO system_log (level, kind, ref, action, status, message, detail)
+    VALUES ('error', ${kind}, ${ref}, ${action}, 500, ${scrub(message)}, ${JSON.stringify(detail)}::jsonb)`.execute(tx);
+  return ref;
+}

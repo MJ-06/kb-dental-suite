@@ -13,6 +13,7 @@ import { authRoutes } from "./routes/auth.js";
 import { patientRoutes } from "./routes/patients.js";
 import { adminReportRoutes } from "./routes/admin-reports.js";
 import { accessRoutes } from "./routes/access.js";
+import { storageRoutes } from "./routes/storage.js";
 import { systemLogRoutes } from "./routes/system-log.js";
 import { configureSystemLog } from "./syslog.js";
 
@@ -69,6 +70,7 @@ export async function buildApp(opts: AppOptions & { logger?: boolean }) {
   await app.register(appointmentRoutes, { ...opts, prefix: "/api/v1/appointments" });
   await app.register(adminReportRoutes, { ...opts, prefix: "/api/v1/admin" });
   await app.register(accessRoutes, { ...opts, prefix: "/api/v1/access" });
+  await app.register(storageRoutes, { ...opts, prefix: "/api/v1/storage" });
   await app.register(systemLogRoutes, { ...opts, prefix: "/api/v1/system-log" });
   await app.register(legacyRoutes, opts);
   await app.register(pageRoutes);

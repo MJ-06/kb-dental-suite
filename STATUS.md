@@ -129,6 +129,15 @@ files instead of the ones above.
 - **Checked** against kb_rehearsal (never committed): dashboard, a report and the full workbook, at desktop and 375px, light and dark; the full workbook (11 sheets, ~80 KB) downloads in under 0.2 s. 
 - Tests: `api/test/reports.test.ts` (17). Run with the full suite: 195 pass.
 
+## Attachment storage per clinic (31 Oct)
+
+Each clinic chooses where its files live: the server folder (default), an S3-compatible bucket, or Google Drive (folder "KB Dental - Patient Documents", laid out `<UHID_Name>/<Category>/` as the Apps Script did). Admin API under `/api/v1/storage` (needs `roles:manage`): `GET /`, `PUT /:kind` (s3|drive; credentials are sealed with `KB_SECRETS_KEY`, never shown again), `POST /:kind/check` (writes and reads back a test file; a switch needs it to pass), `POST /active`, `POST /copy` (a batch at a time; repeat with `lastId`). There is no screen for it yet.
+- Code: `api/src/storage/` (local, s3, drive behind one `put/get/check`; `storeFor(tx)` picks the clinic's), `api/src/drive/client.ts` (shared Drive client; takes OAuth or service-account credentials), `api/src/secrets.ts`, migration 0022.
+- Each document records its backend, Drive id and SHA-256, so a switch never strands old files and every open verifies the checksum.
+- One-off move: `npx tsx scripts/copy-documents.ts --clinic=kb --to=drive [--apply]` (or the API). Reads each file, checks size and checksum, writes it, reads it back and compares, and only then repoints the row. Nothing is deleted from the old place; failures go to the system log (kind `storage_copy`) and the rest carry on.
+- Bucket addresses are checked against internal networks at connection time. The test suite uses fake S3 and Drive servers (`test/storage.test.ts`); not yet tried against a real bucket or real Drive.
+- Open: Drive sign-in type (a service account needs a Shared Drive; OAuth suits a personal Drive); bucket provider and region.
+
 ## Left, in this order
 
 1. Run every flow in the Flow test report in a browser (Playwright), against
