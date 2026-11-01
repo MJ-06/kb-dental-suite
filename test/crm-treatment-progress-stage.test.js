@@ -32,7 +32,9 @@ const crm = (() => {
 ok('the CRM was decoded', crm.length > 200000, crm.length);
 
 // ── the migration, lifted out and run ────────────────────────────────────
-const FROM = crm.indexOf("  var TP_NAME = 'Treatment Progress';");
+// From the constants, because sameName lives with them now -- it is used
+// by the panel-pipeline routing as well as by this migration.
+const FROM = crm.indexOf("  var PANEL_PIPELINE_ID = 'p_panel';");
 const TO = crm.indexOf('  function initPipelines(){', FROM);
 ok('the migration was found', FROM > 0 && TO > FROM, `${FROM}..${TO}`);
 
@@ -147,10 +149,10 @@ eq('undefined is not a crash', add(undefined).changed, false);
 ok('a brand new CRM gets the stage in its default pipeline',
    /\{id:'s3',name:'Treatment Planning',type:'open'\},\s*\n\s*\{id:'s6',name:'Treatment Progress',type:'open'\},/.test(crm));
 ok('a pipeline already saved on this computer is brought up to date',
-   /var up = addTreatmentProgress\(saved\);/.test(crm));
+   /var up = upgradePipelines\(saved\);/.test(crm));
 // The book's copy is what every other machine reads. Without this, the
 // stage would show here and vanish on the next sync.
-ok('and so is the clinic book’s copy', /addTreatmentProgress\(patch\.pipelines\)/.test(crm));
+ok('and so is the clinic book’s copy', /upgradePipelines\(patch\.pipelines\)/.test(crm));
 ok('which is sent straight back up', /crmSaveOne\('pipelines', up\.pipelines\)/.test(crm));
 ok('and cached locally too', /lsSet\(CK\.pipelines, up\.pipelines\)/.test(crm));
 
