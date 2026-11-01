@@ -152,8 +152,10 @@ ok('a pipeline already saved on this computer is brought up to date',
    /var up = upgradePipelines\(saved\);/.test(crm));
 // The book's copy is what every other machine reads. Without this, the
 // stage would show here and vanish on the next sync.
-ok('and so is the clinic book’s copy', /upgradePipelines\(patch\.pipelines\)/.test(crm));
-ok('which is sent straight back up', /crmSaveOne\('pipelines', up\.pipelines\)/.test(crm));
+ok('and so is the clinic book’s copy', /upgradePipelines\(cur\.pipelines\)/.test(crm));
+ok('which is sent straight back up',
+   /cur\.pipelines = up\.pipelines; dirty\.pipelines = true;/.test(crm) &&
+   /patch\[k\] = rows; lsSet\(CK\[k\], rows\); crmSaveOne\(k, rows\);/.test(crm));
 ok('and cached locally too', /lsSet\(CK\.pipelines, up\.pipelines\)/.test(crm));
 
 console.log('  ' + pass + ' passed, ' + fail + ' failed');

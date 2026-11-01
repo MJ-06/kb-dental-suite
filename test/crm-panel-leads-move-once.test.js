@@ -258,13 +258,20 @@ eq('no leads at all is not a crash',
 ok('the move runs when the CRM loads', /var mv = movePanelLeads\(/.test(crm));
 ok('after the boards are brought up to date',
    crm.indexOf('upgradePipelines(patch.pipelines)') < crm.indexOf('var mv = movePanelLeads('));
-ok('the marked board goes back to the clinic book',
-   /crmSaveOne\('pipelines', mv\.pipelines\)/.test(crm));
-ok('and so do the moved leads', /crmSaveOne\('leads', mv\.leads\)/.test(crm));
-ok('and the moved follow-ups', /crmSaveOne\('followups', mv\.followups\)/.test(crm));
-ok('all three are cached on this computer too',
-   /lsSet\(CK\.leads, mv\.leads\)/.test(crm) && /lsSet\(CK\.followups, mv\.followups\)/.test(crm) &&
-   /lsSet\(CK\.pipelines, mv\.pipelines\)/.test(crm));
+// What it changed is taken into the lists being carried through the open,
+// and written once at the end -- see the single-write check below.
+ok('the marked board is carried through',
+   /cur\.pipelines = mv\.pipelines; dirty\.pipelines = true;/.test(crm));
+ok('and so are the moved leads', /cur\.leads = mv\.leads; dirty\.leads = true;/.test(crm));
+ok('and the moved follow-ups', /cur\.followups = mv\.followups; dirty\.followups = true;/.test(crm));
+ok('each changed list is cached here and sent up, in one place',
+   /patch\[k\] = rows; lsSet\(CK\[k\], rows\); crmSaveOne\(k, rows\);/.test(crm));
+// saveCrmCollection rewrites a whole tab, so writing one list twice on a
+// single open is a race: the slower, earlier, less complete write landing
+// last would throw away a repair while its marker said it was done.
+// Three mentions and no more: the definition, the loop, and persist().
+eq('nothing writes a list twice on one open',
+   (crm.match(/crmSaveOne\(/g) || []).length, 3);
 // The marker must live in the book, not just here, or the next computer to
 // open the CRM would do it all again.
 ok('the marker travels with the pipeline record',
@@ -274,8 +281,13 @@ ok('the marker travels with the pipeline record',
 // Appended, not assigned: the duplicate-board fold writes to the same bar
 // on the same open, and whichever ran first must not be wiped.
 ok('a bulk change to live leads is announced',
-   /patch\.moveMsg = \(patch\.moveMsg \? patch\.moveMsg \+ '  ' : ''\)\s*\n\s*\+ mv\.moved \+/.test(crm));
-ok('naming the board they went to', /PANEL_PIPELINE_NAME \+ '\\u201d, each at the stage it was already on'/.test(crm));
+   /told\.push\(mv\.moved \+ ' lead\(s\) for panel patients moved to/.test(crm));
+// The board it ACTUALLY went to. This used to print PANEL_PIPELINE_NAME,
+// which after the duplicate boards were folded together named a board that
+// no longer exists.
+ok('naming the board they went to, not a hardcoded one',
+   /moved to \u201c' \+ mv\.into/.test(crm) &&
+   !/PANEL_PIPELINE_NAME \+ '\u201d, each at the stage/.test(crm));
 ok('the notice can be dismissed', /onClick:function\(\)\{ upd\(\{moveMsg:''\}\); \}/.test(crm));
 ok('and it is not a toast that disappears on its own',
    /var moveEl = st\.moveMsg/.test(crm) && /moveEl,/.test(crm));
