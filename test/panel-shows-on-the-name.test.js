@@ -74,8 +74,10 @@ ok("and a contact is saved from those fields, not from what is displayed",
 const uses = (CODE.match(/contactName\(/g) || []).length;
 ok("the one rule is used in several places, not copied", uses >= 7, uses);
 ok("the contacts list uses it", /\n\s*contactName\(c\)\n/.test(CODE) || /,contactName\(c\)\)/.test(CODE));
+// The key comes from the record rather than its id -- two contacts can
+// share an id, and React then leaves one of their rows on the screen.
 ok("the lead's contact dropdown uses it",
-   /e\('option',\{key:c\.id,value:c\.id\},contactName\(c\)/.test(CODE));
+   /e\('option',\{key:rk\(c\),value:c\.id\},contactName\(c\)/.test(CODE));
 ok("the lead card uses it", /contactName\(contact\)\+\(contact\.phone/.test(CODE));
 ok("the contact's own page uses it",
    /flex:1\}\},contactName\(c\)\)/.test(CODE));
