@@ -142,8 +142,10 @@ ok('neither picks one board before the loop any more',
 
 // ── it is applied everywhere the pipelines live ──────────────────────────
 ok('this browser’s saved copy is upgraded', /var up = upgradePipelines\(saved\);/.test(crm));
-ok('and the clinic book’s copy', /upgradePipelines\(patch\.pipelines\)/.test(crm));
-ok('which is sent back up', /crmSaveOne\('pipelines', up\.pipelines\)/.test(crm));
+ok('and the clinic book’s copy', /upgradePipelines\(cur\.pipelines\)/.test(crm));
+ok('which is sent back up',
+   /cur\.pipelines = up\.pipelines; dirty\.pipelines = true;/.test(crm) &&
+   /patch\[k\] = rows; lsSet\(CK\[k\], rows\); crmSaveOne\(k, rows\);/.test(crm));
 // Order matters: the panel board is copied from the regular one, so the
 // regular one must gain Treatment Progress first or the copy lacks it.
 ok('the stage is added before the board is copied from it',

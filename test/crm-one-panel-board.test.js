@@ -312,18 +312,18 @@ ok('a new board goes on the END of the list',
 ok('the fold runs when the CRM loads', /var fold = foldGeneratedPanelBoard\(/.test(crm));
 ok('before the panel patients are moved',
    crm.indexOf('var fold = foldGeneratedPanelBoard(') < crm.indexOf('var mv = movePanelLeads('));
-ok('the surviving boards go back to the clinic book',
-   /crmSaveOne\('pipelines', fold\.pipelines\)/.test(crm));
-ok('with the moved leads', /crmSaveOne\('leads', fold\.leads\)/.test(crm));
-ok('and the moved follow-ups', /crmSaveOne\('followups', fold\.followups\)/.test(crm));
+ok('the surviving boards are carried through the open',
+   /cur\.pipelines = fold\.pipelines; dirty\.pipelines = true;/.test(crm));
+ok('with the moved leads', /cur\.leads = fold\.leads; dirty\.leads = true;/.test(crm));
+ok('and the moved follow-ups', /cur\.followups = fold\.followups; dirty\.followups = true;/.test(crm));
 // By ID. A board is looked up by id, so naming one here left getPipeline
 // with nothing and the view fell back to whichever board came first.
 ok('a board being looked at when it disappears is swapped out, by id',
    /if\(patch\.selPipeline === PANEL_PIPELINE_ID\) patch\.selPipeline = fold\.intoId;/.test(crm));
 ok('the clinic is told a duplicate board was removed',
    /There were two panel boards/.test(crm));
-ok('and the other notice is not wiped by it',
-   /patch\.moveMsg = \(patch\.moveMsg \? patch\.moveMsg \+ '  ' : ''\)/.test(crm));
+ok('and the other notices are not wiped by it',
+   /told\.push\(/.test(crm) && /patch\.moveMsg = told\.join\('  '\);/.test(crm));
 
 console.log('  ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);
