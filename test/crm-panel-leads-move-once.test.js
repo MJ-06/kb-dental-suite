@@ -271,7 +271,10 @@ ok('the marker travels with the pipeline record',
    /var mark = \{\}; mark\[PANEL_MOVED_FIELD\] = when;/.test(crm));
 
 // ── and it says so, until somebody closes it ─────────────────────────────
-ok('a bulk change to live leads is announced', /patch\.moveMsg = mv\.moved \+/.test(crm));
+// Appended, not assigned: the duplicate-board fold writes to the same bar
+// on the same open, and whichever ran first must not be wiped.
+ok('a bulk change to live leads is announced',
+   /patch\.moveMsg = \(patch\.moveMsg \? patch\.moveMsg \+ '  ' : ''\)\s*\n\s*\+ mv\.moved \+/.test(crm));
 ok('naming the board they went to', /PANEL_PIPELINE_NAME \+ '\\u201d, each at the stage it was already on'/.test(crm));
 ok('the notice can be dismissed', /onClick:function\(\)\{ upd\(\{moveMsg:''\}\); \}/.test(crm));
 ok('and it is not a toast that disappears on its own',
