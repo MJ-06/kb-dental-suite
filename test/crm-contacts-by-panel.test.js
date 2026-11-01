@@ -87,15 +87,17 @@ ok("the result says how many went under a panel", /onPanel \+ ' under a panel'/.
 // ── and the list can be split by panel ────────────────────────────────────
 ok("Contacts has a panel filter", /st\.contactCompany/.test(CRM));
 ok("'All' shows everybody", /e\('option',\{value:''\},'All contacts/.test(CRM));
+// Decided by the panel the contact is actually on, not by whether the
+// company link happens to have been filled in -- see panelOf.
 ok("there is an option for the patients on no panel",
-   /if\(want==='none'\) return !c\.companyId;/.test(CRM) && /No panel \\u2014 private/.test(CRM));
-ok("each panel shows how many are on it", /compCounts\[co\.id\]\|\|0/.test(CRM));
-ok("choosing a panel shows only its patients", /return c\.companyId===want;/.test(CRM));
+   /if\(want === 'none'\) return !p;/.test(CRM) && /No panel \\u2014 private/.test(CRM));
+ok("each panel shows how many are on it", /\(compCounts\[nm\]\|\|0\)/.test(CRM));
+ok("choosing a panel shows only its patients", /return sameName\(p, want\);/.test(CRM));
 ok("the search now finds a patient by UHID and surname too",
    /String\(c\.uhid\|\|''\)\.toLowerCase\(\)\.indexOf\(s\)>=0/.test(CRM) &&
    /\(c\.lastName\|\|''\)\.toLowerCase\(\)\.indexOf\(s\)>=0/.test(CRM));
 ok("a contact on no panel still reads Individual in the list",
-   /:'Individual'\)/.test(CRM));
+   /panelOf\(c, st\.companies\)\|\|'Individual'/.test(CRM));
 ok("the company stays editable by hand, as it always was",
    /ir\('Company',e\('div'/.test(CRM));
 
