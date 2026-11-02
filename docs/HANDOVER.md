@@ -1,5 +1,17 @@
 # Handover for the next tool (31 Oct 2026)
 
+## Latest decision — 3 November 2026
+
+Read `docs/LOCAL-CLINICAL-BASELINE.md` first. Preserve Viveyk's existing clinical UI.
+The standalone redesign proposal is deferred. His active feature branch at eac924d
+has been merged into saas/multi-clinic. Local frontend/API/PostgreSQL is the immediate
+baseline. Bottom-left Clinic replaces the Google Sheets status; currently it shows
+only the session's clinic (disabled until organization adapter/grant integration).
+Master > Organization with a separate server-enforced password is planned, not yet
+implemented. Full parity for newly merged Master/document/report actions remains.
+This supersedes the layout-review checkpoint below as the immediate priority.
+
+
 ## UI / UX review checkpoint (1 November 2026)
 
 The user requested review of the familiar8080/live clinical UI before implementation.

@@ -9,6 +9,13 @@ afterAll(() => w.close());
 const page = (url: string) => w.app.inject({ method: "GET", url });
 
 describe("page security", () => {
+  it("configures both backend-address conventions for merged clinical screens", async () => {
+    for (const url of ["/", "/register.html", "/expense.html", "/chatbot.html"]) {
+      const body = (await page(url)).body;
+      expect(body.includes('window.KB_SERVER_URL = window.KB_SCRIPT_URL_OVERRIDE')).toBe(true);
+    }
+  });
+
   it("sends a CSP whose nonce matches every script tag, with a new nonce each time", async () => {
     const a = await page("/");
     const nonce = /'nonce-([^']+)'/.exec(String(a.headers["content-security-policy"]))![1];

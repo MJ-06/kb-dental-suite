@@ -42,7 +42,7 @@ const CDN_SRC = [
   [/https:\/\/unpkg\.com\/react-dom@[^"']+/g, "/vendor/react-dom.js"],
   [/https:\/\/unpkg\.com\/@babel\/standalone[^"']*/g, "/vendor/babel.js"]
 ] as const;
-const OVERRIDE = `<script>window.KB_SCRIPT_URL_OVERRIDE = location.origin + "/exec";</script>`;
+const OVERRIDE = `<script>window.KB_SCRIPT_URL_OVERRIDE = location.origin + "/exec"; window.KB_SERVER_URL = window.KB_SCRIPT_URL_OVERRIDE;</script>`;
 
 // index.html carries its mini-apps (CRM, the clinical forms) as base64 HTML and opens
 // them in blob: iframes. A blob document inherits the page's CSP, so its inline
