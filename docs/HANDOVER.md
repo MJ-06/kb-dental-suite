@@ -1,5 +1,15 @@
 # Handover for the next tool (31 Oct 2026)
 
+## Latest planning direction — passive linking, unchanged entry flow
+
+User clarified on3 November2026: keep current recording screens and passive linking;
+records can be associated later, and a unified flow is a future UI improvement.
+Do not impose mandatory visit-first entry or required visit IDs. Keep UHID visible;
+reuse existing internal canonical/source IDs and retain historical aliases. See
+`docs/BACKEND-PASSIVE-LINKING-ROADMAP.md` for the backend-only review inventory and
+proposed sequence. This roadmap is not an implementation/completion claim.
+
+
 ## Latest correction and delivery — one central patient, clinic care (3 November 2026)
 
 Read `docs/CENTRAL-PATIENT-HISTORY.md`. User explicitly clarified that the patient is
