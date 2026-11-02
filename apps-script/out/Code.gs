@@ -475,6 +475,18 @@ function migrateDocumentSharing_(dryRun) {
   return summary;
 }
 
+// Safety flags: what the staff need to know about a patient BEFORE they sit
+// down -- that they are apprehensive, or on psychiatric treatment. Kept as a
+// master list so the clinic adds its own rather than living with mine.
+var SAFETY_FLAGS_SHEET = "Safety Flags";
+var DEFAULT_SAFETY_FLAGS = [
+  "Apprehensive",
+  "Mentally Challenged",
+  "Neurological Issue",
+  "Physically Challenged",
+  "Psychiatric Treatment"
+];
+
 var DOC_CATEGORIES_SHEET = "Document Categories";
 var DEFAULT_DOC_CATEGORIES = [
   "X-Ray / RVG", "OPG", "CBCT", "Blood Reports", "Clinical Photograph",
@@ -506,6 +518,32 @@ function parseList_(raw, label) {
   }
   if (!Array.isArray(arr)) return { __bad: "the " + label + " was not a list" };
   return arr;
+}
+
+function getSafetyFlagsList() {
+  var sh = getSheet(SAFETY_FLAGS_SHEET);
+  // A tab nobody has filled in starts with the usual five rather than
+  // nothing at all, the same way the document categories do.
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(["Flag", "Updated At"]);
+    var now = new Date().toISOString();
+    DEFAULT_SAFETY_FLAGS.forEach(function(f) { sh.appendRow([f, now]); });
+  }
+  var data = sh.getDataRange().getValues();
+  var items = [];
+  for (var i = 1; i < data.length; i++) { if (data[i][0]) items.push(String(data[i][0])); }
+  return { success: true, flags: items };
+}
+
+function saveSafetyFlagsList(p) {
+  var arr = parseList_(p.flags, "safety flags");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
+  var sh = getSheet(SAFETY_FLAGS_SHEET);
+  sh.clearContents();
+  sh.appendRow(["Flag", "Updated At"]);
+  var now = new Date().toISOString();
+  arr.forEach(function(v) { sh.appendRow([v, now]); });
+  return { success: true };
 }
 
 function getDocumentCategoriesList() {
@@ -771,6 +809,8 @@ function route(p) {
       case "deletePatientDocument": return deletePatientDocument(p);
       case "getDocumentCategoriesList":  return getDocumentCategoriesList();
       case "saveDocumentCategoriesList": return saveDocumentCategoriesList(p);
+      case "getSafetyFlagsList":         return getSafetyFlagsList();
+      case "saveSafetyFlagsList":        return saveSafetyFlagsList(p);
       case "createDocumentPDF":         return createDocumentPDF(p);
       case "getPatientDocumentContent": return getPatientDocumentContent(p);
 
