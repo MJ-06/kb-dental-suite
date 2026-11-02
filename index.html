@@ -27555,6 +27555,20 @@ function PatientDocuments({ globalPat }) {
   // left it empty and the screen said "No documents uploaded yet." -- telling
   // the clinic a patient has no X-rays when the truth is that nobody could
   // look. On a patient's imaging that is the worst answer available.
+  // Whether this browser holds a sign-in at all. Re-read after signing in
+  // and after locking, because neither changes any state this page owns.
+  const [unlocked, setUnlocked] = React.useState(() => !!getSessionToken());
+  const lockDocuments = async () => {
+    const tok = getSessionToken();
+    setSessionToken("");
+    setUnlocked(false);
+    setDocs([]);
+    setDocsError("Documents are locked. Sign in with the password from Master \u203A Security to see them.");
+    // Told to forget it at the other end too, so a token copied out of this
+    // browser is no use afterwards.
+    if (tok) { try { await api("staffLogout", { token: tok }); } catch (e) {} }
+  };
+
   const loadDocs = (uhid) => {
     setLoading(true); setDocsError("");
     api("getPatientDocuments", { uhid }).then(res => {
@@ -27576,7 +27590,7 @@ function PatientDocuments({ globalPat }) {
   // The documents were refused for want of the password, the box came up,
   // and it has just been typed. Ask again -- that is what it was typed for.
   React.useEffect(() => {
-    const again = () => { if (pat && pat.uhid) loadDocs(pat.uhid); };
+    const again = () => { setUnlocked(true); if (pat && pat.uhid) loadDocs(pat.uhid); };
     window.addEventListener("kb-signed-in", again);
     return () => window.removeEventListener("kb-signed-in", again);
   }, [pat]);
@@ -27691,8 +27705,19 @@ function PatientDocuments({ globalPat }) {
   return React.createElement("div", null,
     React.createElement(ClinicHeader, null),
     React.createElement("div", { style:{ fontSize:18, fontWeight:700, marginBottom:4 } }, "📎 Documents"),
-    React.createElement("div", { style:{ fontSize:13, color:"#444444", marginBottom:16 } },
-      "X-rays, scans and reports for this patient — uploaded once, viewable any time."),
+    React.createElement("div", { style:{ fontSize:13, color:"#444444", marginBottom:16, display:"flex",
+      alignItems:"center", gap:12, flexWrap:"wrap" } },
+      React.createElement("span", null,
+        "X-rays, scans and reports for this patient — uploaded once, viewable any time."),
+      // Shown only while there is a sign-in to end. It lasts twelve hours,
+      // and until now the only way to end it was to close the tab -- so a
+      // front desk nobody is sitting at stayed open, and there was no way
+      // to check the lock still worked.
+      unlocked && React.createElement("button", { onClick:lockDocuments,
+        title:"End this sign-in. The password will be asked for again.",
+        style:{ padding:"4px 12px", fontSize:12.5, border:`1px solid ${BORDER}`, borderRadius:6,
+                background:"#fff", color:"#8A4B00", fontWeight:700, cursor:"pointer", whiteSpace:"nowrap" } },
+        "\uD83D\uDD12 Lock documents")),
 
     !globalPat && React.createElement("div", { style:{ display:"flex", gap:10, marginBottom:16, alignItems:"center" } },
       React.createElement("input", { style:{...inp, maxWidth:220}, value:uhidInput, placeholder:"Enter patient UHID",
