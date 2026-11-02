@@ -208,6 +208,49 @@ function lsKey(name) { return scopedKey("kbdc_" + name); }
 var KB_DOCTORS = [];
 function getDoctors() { return KB_DOCTORS.slice(); }
 
+// WHO SIGNS A FORM.
+//
+// Every signature line in this app carried one doctor's name, typed into the
+// markup. On a consent form that is not a cosmetic problem: it is a document
+// saying a NAMED doctor explained the risks, printed for a patient a
+// different doctor is treating.
+//
+// The app already knew who that was -- treatingDoctorFor() reads today's
+// appointment for the patient and falls back to the first doctor in Master.
+// It was only being used for the forms inside the iframe. The patient's
+// screen resolves it when they are loaded and leaves it here, because the
+// print builders are plain functions with no patient in scope.
+var KB_SIGNING_DOCTOR = "";
+function setSigningDoctor(name) { KB_SIGNING_DOCTOR = String(name || "").trim(); }
+// "Dr." only if the name does not already carry it: Master holds whatever
+// the clinic typed, and "Dr. Dr. Mehta" is nobody.
+function withDr(name) {
+  var n = String(name || "").trim();
+  if (!n) return "";
+  return /^(dr|prof|professor)\b\.?/i.test(n) ? n : "Dr. " + n;
+}
+function signingDoctor() { return withDr(KB_SIGNING_DOCTOR || getDoctors()[0] || ""); }
+// The line under a signature box. With nothing to go on the name is left
+// OUT, not guessed: a blank line for somebody to write on is right, and
+// another doctor's name on a consent form is not.
+function signatureLine(date) {
+  var d = signingDoctor();
+  return (d ? d + " | " : "") + "Date: " + date;
+}
+// Resolves who is treating this patient and leaves it where the print
+// builders can find it. Clearing it matters as much as setting it: moving
+// off a patient must not leave their doctor on the next form printed.
+function useSigningDoctor(uhid) {
+  React.useEffect(() => {
+    let alive = true;
+    const id = String(uhid || "").trim();
+    if (!id) { setSigningDoctor(""); return; }
+    treatingDoctorFor(id).then(name => { if (alive) setSigningDoctor(name); })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, [uhid]);
+}
+
 // Who actually treated this patient today.
 //
 // Every clinical form used to be handed getDoctors()[0] -- the first name on
@@ -1870,6 +1913,10 @@ function Registration({
 }) {
   const [step, setStep] = useState(0);
   const [uhid, setUhid] = useState("");
+  // A patient being registered has no appointment yet, so this resolves to
+  // the clinic's first doctor -- but a RE-registration (NABH, a correction)
+  // is for somebody who may well be in a chair right now.
+  useSigningDoctor(uhid);
   const [dup, setDup] = useState(null);
   const [isEditing, setIsEditing] = useState(false);
   const [P, setP] = useState(emptyP);
@@ -2346,7 +2393,7 @@ function Registration({
   const buildPrintHTML = () => {
     const condList = M.conditions.length ? M.conditions.join(" · ") : "None reported";
     const allergyList = M.allergies.length ? M.allergies.join(", ") : "None";
-    return pW(pH(window.LOGO_B64, "KBDC/FORMS/REG-01") + `<div class="dtitle">Patient Registration</div><div class="g3"><div class="fl"><div class="lbl">Full Name</div><div class="val" style="font-size:12pt;font-weight:700">${P.name}</div></div><div class="fl"><div class="lbl">UHID</div><div class="val" style="font-weight:700">${uhid}</div></div><div class="fl"><div class="lbl">Date</div><div class="val">${TODAY}</div></div></div>` + `<div class="g4"><div class="fl"><div class="lbl">Gender</div><div class="val">${P.gender || "—"}</div></div><div class="fl"><div class="lbl">Date of Birth</div><div class="val">${P.dob || "—"}</div></div><div class="fl"><div class="lbl">Age</div><div class="val">${calcAge(P.dob) || "—"} yrs</div></div><div class="fl"><div class="lbl">Blood Group</div><div class="val">${P.bloodGroup || "—"}</div></div></div>` + `<div class="g3"><div class="fl"><div class="lbl">Occupation</div><div class="val">${P.occupation || "—"}</div></div><div class="fl"><div class="lbl">Marital Status</div><div class="val">${P.maritalStatus || "—"}</div></div><div class="fl"><div class="lbl">Referred By</div><div class="val">${P.referredBy || "—"}</div></div></div>` + `<div class="fl"><div class="lbl">Address</div><div class="val">${P.address || "—"}</div></div>` + `<div class="g3"><div class="fl"><div class="lbl">Mobile</div><div class="val">${P.mobile}</div></div><div class="fl"><div class="lbl">WhatsApp</div><div class="val">${P.whatsapp}</div></div><div class="fl"><div class="lbl">Email</div><div class="val">${P.email}</div></div></div>` + `<div class="g3"><div class="fl"><div class="lbl">Emergency Contact</div><div class="val">${P.emergencyName}</div></div><div class="fl"><div class="lbl">Relation</div><div class="val">${P.emergencyRelation}</div></div><div class="fl"><div class="lbl">Contact No.</div><div class="val">${P.emergencyContact}</div></div></div>` + `<div class="sec">Medical Information</div><div class="fl"><div class="lbl">Medical Conditions — Positive Findings</div><div class="vb">${condList}</div></div>` + `<div class="g2"><div class="fl"><div class="lbl">Any other condition</div><div class="val">${M.anyOther || "—"}</div></div><div class="fl"><div class="lbl">Medicines currently taking</div><div class="val">${M.medicines || "—"}</div></div></div>` + `<div class="g4"><div class="fl"><div class="lbl">Pregnant</div><div class="val">${M.pregnant}${M.pregnant === "Yes" && M.dueDate ? " · " + M.dueDate : ""}</div></div><div class="fl"><div class="lbl">Feeding Mother</div><div class="val">${M.feedingMother}</div></div><div class="fl"><div class="lbl">Smoke/Beedi</div><div class="val">${M.smoke}${M.smoke === "Yes" ? " · " + M.smokeFreq + "/day" : ""}</div></div><div class="fl"><div class="lbl">Alcohol</div><div class="val">${M.alcohol}${M.alcohol === "Yes" ? " · " + M.alcoholFreq + "/week" : ""}</div></div></div>` + `<div class="fl"><div class="lbl">Allergies</div><div class="val">${allergyList}${M.otherAllergy ? " · " + M.otherAllergy : ""}</div></div>` + `<div class="sec">Dental Information</div><div class="fl"><div class="lbl">How did you know about us</div><div class="val">${D.howKnown.join(", ") || "—"}</div></div><div class="fl"><div class="lbl">Chief Complaint</div><div class="vb">${D.complaint || "&nbsp;"}</div></div>` + `<div class="sec">Pain Management Chart</div><div style="font-size:11pt">Are you in Pain? <strong>${pain.inPain || "—"}</strong>${pain.inPain === "Yes" && pain.level !== null ? ` &nbsp;|&nbsp; Level: <strong>${pain.level} — ${PAIN_L[pain.level]}</strong>` : ""}</div>` + `<div class="pb">${pH(window.LOGO_B64, "KBDC/FORMS/REG-01")}<div class="sec">General Consent Form</div><div style="font-size:11pt;margin-bottom:10pt">I <strong>${P.name}</strong>, desire to avail dental services at this facility and give my agreement to accept their services related to diagnosis and care of my dental condition.</div><div style="font-size:10pt;color:#333;line-height:1.7;margin-bottom:14pt"><p style="margin-bottom:7pt">I understand that this consent is a general consent and it includes routine procedures and treatments such as physical examination, drawing blood for lab tests, medication administration, taking x-rays, use of local anaesthesia and conduct any non-invasive procedure etc.</p><p style="margin-bottom:7pt">I also understand that in case high risk or invasive procedure is required to be done, whether for investigation or treatment, I will be asked to sign a separate consent form.</p><p style="margin-bottom:7pt">I acknowledge that result of the treatment in this clinic are not guaranteed and I cannot hold clinic or its doctor or any other staff liable for the outcome, unless and until it is because of negligence.</p><p style="margin-bottom:7pt">I also authorize the clinic to collect and maintain a record of my basic information and medical information. I understand that this information is confidential and will be shared only with healthcare providers at K. B. Dental Clinic only and used only for my treatment purpose.</p><p style="margin-bottom:7pt">I assume full responsibility of my personal belongings and valuables and clinic will not be responsible for loss of any personal item.</p><p>I undertake that I will abide by the rules and byelaws of the clinic.</p></div><div class="sigrow"><div><div class="lbl">Patient / Guardian Signature &amp; Name</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">Name: ${P.name} | Date: ${TODAY}</div></div><div><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">Dr. Viveyk Mittel | Date: ${TODAY}</div></div></div></div>`, "KBDC/FORMS/REG-01");
+    return pW(pH(window.LOGO_B64, "KBDC/FORMS/REG-01") + `<div class="dtitle">Patient Registration</div><div class="g3"><div class="fl"><div class="lbl">Full Name</div><div class="val" style="font-size:12pt;font-weight:700">${P.name}</div></div><div class="fl"><div class="lbl">UHID</div><div class="val" style="font-weight:700">${uhid}</div></div><div class="fl"><div class="lbl">Date</div><div class="val">${TODAY}</div></div></div>` + `<div class="g4"><div class="fl"><div class="lbl">Gender</div><div class="val">${P.gender || "—"}</div></div><div class="fl"><div class="lbl">Date of Birth</div><div class="val">${P.dob || "—"}</div></div><div class="fl"><div class="lbl">Age</div><div class="val">${calcAge(P.dob) || "—"} yrs</div></div><div class="fl"><div class="lbl">Blood Group</div><div class="val">${P.bloodGroup || "—"}</div></div></div>` + `<div class="g3"><div class="fl"><div class="lbl">Occupation</div><div class="val">${P.occupation || "—"}</div></div><div class="fl"><div class="lbl">Marital Status</div><div class="val">${P.maritalStatus || "—"}</div></div><div class="fl"><div class="lbl">Referred By</div><div class="val">${P.referredBy || "—"}</div></div></div>` + `<div class="fl"><div class="lbl">Address</div><div class="val">${P.address || "—"}</div></div>` + `<div class="g3"><div class="fl"><div class="lbl">Mobile</div><div class="val">${P.mobile}</div></div><div class="fl"><div class="lbl">WhatsApp</div><div class="val">${P.whatsapp}</div></div><div class="fl"><div class="lbl">Email</div><div class="val">${P.email}</div></div></div>` + `<div class="g3"><div class="fl"><div class="lbl">Emergency Contact</div><div class="val">${P.emergencyName}</div></div><div class="fl"><div class="lbl">Relation</div><div class="val">${P.emergencyRelation}</div></div><div class="fl"><div class="lbl">Contact No.</div><div class="val">${P.emergencyContact}</div></div></div>` + `<div class="sec">Medical Information</div><div class="fl"><div class="lbl">Medical Conditions — Positive Findings</div><div class="vb">${condList}</div></div>` + `<div class="g2"><div class="fl"><div class="lbl">Any other condition</div><div class="val">${M.anyOther || "—"}</div></div><div class="fl"><div class="lbl">Medicines currently taking</div><div class="val">${M.medicines || "—"}</div></div></div>` + `<div class="g4"><div class="fl"><div class="lbl">Pregnant</div><div class="val">${M.pregnant}${M.pregnant === "Yes" && M.dueDate ? " · " + M.dueDate : ""}</div></div><div class="fl"><div class="lbl">Feeding Mother</div><div class="val">${M.feedingMother}</div></div><div class="fl"><div class="lbl">Smoke/Beedi</div><div class="val">${M.smoke}${M.smoke === "Yes" ? " · " + M.smokeFreq + "/day" : ""}</div></div><div class="fl"><div class="lbl">Alcohol</div><div class="val">${M.alcohol}${M.alcohol === "Yes" ? " · " + M.alcoholFreq + "/week" : ""}</div></div></div>` + `<div class="fl"><div class="lbl">Allergies</div><div class="val">${allergyList}${M.otherAllergy ? " · " + M.otherAllergy : ""}</div></div>` + `<div class="sec">Dental Information</div><div class="fl"><div class="lbl">How did you know about us</div><div class="val">${D.howKnown.join(", ") || "—"}</div></div><div class="fl"><div class="lbl">Chief Complaint</div><div class="vb">${D.complaint || "&nbsp;"}</div></div>` + `<div class="sec">Pain Management Chart</div><div style="font-size:11pt">Are you in Pain? <strong>${pain.inPain || "—"}</strong>${pain.inPain === "Yes" && pain.level !== null ? ` &nbsp;|&nbsp; Level: <strong>${pain.level} — ${PAIN_L[pain.level]}</strong>` : ""}</div>` + `<div class="pb">${pH(window.LOGO_B64, "KBDC/FORMS/REG-01")}<div class="sec">General Consent Form</div><div style="font-size:11pt;margin-bottom:10pt">I <strong>${P.name}</strong>, desire to avail dental services at this facility and give my agreement to accept their services related to diagnosis and care of my dental condition.</div><div style="font-size:10pt;color:#333;line-height:1.7;margin-bottom:14pt"><p style="margin-bottom:7pt">I understand that this consent is a general consent and it includes routine procedures and treatments such as physical examination, drawing blood for lab tests, medication administration, taking x-rays, use of local anaesthesia and conduct any non-invasive procedure etc.</p><p style="margin-bottom:7pt">I also understand that in case high risk or invasive procedure is required to be done, whether for investigation or treatment, I will be asked to sign a separate consent form.</p><p style="margin-bottom:7pt">I acknowledge that result of the treatment in this clinic are not guaranteed and I cannot hold clinic or its doctor or any other staff liable for the outcome, unless and until it is because of negligence.</p><p style="margin-bottom:7pt">I also authorize the clinic to collect and maintain a record of my basic information and medical information. I understand that this information is confidential and will be shared only with healthcare providers at K. B. Dental Clinic only and used only for my treatment purpose.</p><p style="margin-bottom:7pt">I assume full responsibility of my personal belongings and valuables and clinic will not be responsible for loss of any personal item.</p><p>I undertake that I will abide by the rules and byelaws of the clinic.</p></div><div class="sigrow"><div><div class="lbl">Patient / Guardian Signature &amp; Name</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">Name: ${P.name} | Date: ${TODAY}</div></div><div><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">${signatureLine(TODAY)}</div></div></div></div>`, "KBDC/FORMS/REG-01");
   };
   const NavRow = ({
     back,
@@ -3648,7 +3695,7 @@ function Registration({
       background: BGS,
       color: "#2e2e2e"
     },
-    value: "Dr. Viveyk Mittel",
+    value: signingDoctor(),
     readOnly: true
   })))), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -3974,6 +4021,7 @@ function CarePlan({
 }) {
   const [uhidInput, setUhidInput] = useState(globalPat?.uhid || "");
   const [pat, setPat] = useState(globalPat || null);
+  useSigningDoctor(pat && pat.uhid);
   const [notFound, setNotFound] = useState(false);
   const [cpPage, setCpPage] = useState(1);
   const [p1, setP1] = useState(emptyCP1);
@@ -4205,16 +4253,16 @@ function CarePlan({
     });
   };
   function buildCPPage1HTML() {
-    return pW(pH(window.LOGO_B64, "KBDC/FORMS/CP-01") + `<div class="dtitle">Oral Health Assessment — Care Plan</div><div class="g3"><div class="fl"><div class="lbl">Name</div><div class="val" style="font-size:12pt;font-weight:700">${pat ? pat.name : "—"}</div></div><div class="fl"><div class="lbl">UHID</div><div class="val" style="font-weight:700">${pat ? pat.uhid : "—"}</div></div><div class="fl"><div class="lbl">Date</div><div class="val">${TODAY}</div></div></div><div class="fl"><div class="lbl">Chief Complaint</div><div class="vb">${p1.chiefComplaint || "&nbsp;"}</div></div><div class="sec">History</div><div class="g2">${[["medHistory", "Medical History"], ["habits", "Habits"], ["oralHabits", "Oral Habits"], ["allergies", "Allergies"], ["familyHistory", "Family History"], ["dentalHistory", "Dental History"]].map(([k, l]) => `<div class="fl"><div class="lbl">${l}</div><div class="vb">${p1[k] || "—"}</div></div>`).join("")}</div><div class="sec">Clinical Examination of Chief Complaint</div>${[["affectedArea", "Affected Area"], ["duration", "Duration & Progression"], ["aggravating", "Aggravating & Relieving Factors"], ["extraOral", "Extra Oral Examination"], ["intraOral", "Intra Oral Examination"]].map(([k, l]) => `<div class="fl"><div class="lbl">${l}</div><div class="vb">${p1[k] || "&nbsp;"}</div></div>`).join("")}<div class="fl"><div class="lbl">Provisional Diagnosis</div><div class="vb">${p1.provisionalDiagnosis || "&nbsp;"}</div></div><div class="sec">Suggested Treatment(s)</div><table><thead><tr><th>Treatment Options</th><th>Prognosis</th><th>Possible Outcome</th><th>Charges (₹)</th></tr></thead><tbody>${p1.treatments.map(t => `<tr><td>${t.option || "&nbsp;"}</td><td>${t.prognosis || "&nbsp;"}</td><td>${t.outcome || "&nbsp;"}</td><td>${t.charges || "&nbsp;"}</td></tr>`).join("")}</tbody></table><div class="sigrow"><div><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">Dr. Viveyk Mittel | Date: ${TODAY}</div></div></div>`, "KBDC/FORMS/CP-01");
+    return pW(pH(window.LOGO_B64, "KBDC/FORMS/CP-01") + `<div class="dtitle">Oral Health Assessment — Care Plan</div><div class="g3"><div class="fl"><div class="lbl">Name</div><div class="val" style="font-size:12pt;font-weight:700">${pat ? pat.name : "—"}</div></div><div class="fl"><div class="lbl">UHID</div><div class="val" style="font-weight:700">${pat ? pat.uhid : "—"}</div></div><div class="fl"><div class="lbl">Date</div><div class="val">${TODAY}</div></div></div><div class="fl"><div class="lbl">Chief Complaint</div><div class="vb">${p1.chiefComplaint || "&nbsp;"}</div></div><div class="sec">History</div><div class="g2">${[["medHistory", "Medical History"], ["habits", "Habits"], ["oralHabits", "Oral Habits"], ["allergies", "Allergies"], ["familyHistory", "Family History"], ["dentalHistory", "Dental History"]].map(([k, l]) => `<div class="fl"><div class="lbl">${l}</div><div class="vb">${p1[k] || "—"}</div></div>`).join("")}</div><div class="sec">Clinical Examination of Chief Complaint</div>${[["affectedArea", "Affected Area"], ["duration", "Duration & Progression"], ["aggravating", "Aggravating & Relieving Factors"], ["extraOral", "Extra Oral Examination"], ["intraOral", "Intra Oral Examination"]].map(([k, l]) => `<div class="fl"><div class="lbl">${l}</div><div class="vb">${p1[k] || "&nbsp;"}</div></div>`).join("")}<div class="fl"><div class="lbl">Provisional Diagnosis</div><div class="vb">${p1.provisionalDiagnosis || "&nbsp;"}</div></div><div class="sec">Suggested Treatment(s)</div><table><thead><tr><th>Treatment Options</th><th>Prognosis</th><th>Possible Outcome</th><th>Charges (₹)</th></tr></thead><tbody>${p1.treatments.map(t => `<tr><td>${t.option || "&nbsp;"}</td><td>${t.prognosis || "&nbsp;"}</td><td>${t.outcome || "&nbsp;"}</td><td>${t.charges || "&nbsp;"}</td></tr>`).join("")}</tbody></table><div class="sigrow"><div><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">${signatureLine(TODAY)}</div></div></div>`, "KBDC/FORMS/CP-01");
   }
   function buildCPPage2HTML() {
     const hf = v => v.healthy ? "Healthy" : `Obs: ${v.observation || "—"}`;
     const pf = v => v.present ? `Present${v.area ? " — " + v.area : ""}` : "-";
     const invKeys = [["iopa", "IOPA"], ["opg", "OPG"], ["latCeph", "Lat. Ceph"], ["digScan", "Digital Scan"], ["mri", "MRI"], ["tScan", "T-Scan"], ["cbct", "CBCT"], ["intraOralPics", "Intra Oral Pics"], ["extraOralPics", "Extra Oral Pics"]];
-    return pW(pH(window.LOGO_B64, "KBDC/FORMS/CP-01") + `<div class="sec">Extra-Oral Check</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4pt 8pt;margin-bottom:6pt"><div class="fl"><div class="lbl">Jaw Joints</div><div class="val">${hf(p2.jawJoints)}</div></div><div class="fl"><div class="lbl">Lymph Nodes</div><div class="val">${hf(p2.lymphNodes)}</div></div><div class="fl"><div class="lbl">Facial Profile</div><div class="val">${p2.facialProfile || "—"}</div></div><div class="fl"><div class="lbl">Facial Asymmetry</div><div class="val">${pf(p2.facialAsymmetry)}</div></div><div class="fl"><div class="lbl">Swelling</div><div class="val">${pf(p2.swelling)}</div></div><div class="fl"><div class="lbl">Lip Competency</div><div class="val">${pf(p2.lipCompetency)}</div></div></div><div class="sec">Intra-Oral — Soft Tissue</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4pt 8pt;margin-bottom:6pt"><div class="fl"><div class="lbl">Tongue</div><div class="val">${hf(p2.tongue)}</div></div><div class="fl"><div class="lbl">Palate</div><div class="val">${hf(p2.palate)}</div></div><div class="fl"><div class="lbl">Floor of Mouth</div><div class="val">${hf(p2.floorMouth)}</div></div><div class="fl"><div class="lbl">Buccal Mucosa</div><div class="val">${hf(p2.buccalMucosa)}</div></div><div class="fl"><div class="lbl">Frenum</div><div class="val">${p2.frenum || "—"}</div></div><div class="fl"><div class="lbl">Pigmentation</div><div class="val">${p2.pigmentation || "—"}</div></div></div><div class="sec">Intra-Oral — Hard Tissue</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4pt 8pt;margin-bottom:6pt">${[["silverFillings", "Silver Fillings"], ["whiteFillings", "White Fillings"], ["decayedTeeth", "Decayed Teeth"], ["chippedTeeth", "Chipped Teeth"], ["missingTeeth", "Missing Teeth"], ["crowns", "Crowns"], ["bridges", "Bridges"], ["veneers", "Veneers"], ["crowding", "Crowding"], ["dentures", "Dentures"], ["stainsCalculus", "Stains & Calculus"]].map(([k, l]) => `<div class="fl"><div class="lbl">${l}</div><div class="val">${pf(p2[k])}</div></div>`).join("")}</div><div class="sec">Gum &amp; Parafunctional &amp; Wasting</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4pt 8pt;margin-bottom:6pt"><div class="fl"><div class="lbl">Bleeding on Probing</div><div class="val">${pf(p2.bleedingProbing)}</div></div><div class="fl"><div class="lbl">Gum Recession</div><div class="val">${pf(p2.gumRecession)}</div></div><div class="fl"><div class="lbl">Furcation</div><div class="val">${pf(p2.furcation)}</div></div><div class="fl"><div class="lbl">Mobility</div><div class="val">${pf(p2.mobility)}</div></div><div class="fl"><div class="lbl">Parafunctional</div><div class="val">${p2.parafunctional.present ? "Present" + (p2.parafunctional.description ? " — " + p2.parafunctional.description : "") : "-"}</div></div><div class="fl"><div class="lbl">Abrasion</div><div class="val">${pf(p2.abrasion)}</div></div><div class="fl"><div class="lbl">Attrition</div><div class="val">${pf(p2.attrition)}</div></div><div class="fl"><div class="lbl">Abfraction</div><div class="val">${pf(p2.abfraction)}</div></div><div class="fl"><div class="lbl">Erosion</div><div class="val">${pf(p2.erosion)}</div></div></div><div class="sec">Investigations Required</div><div style="margin-bottom:5pt">${invKeys.map(([k, l]) => `<span style="display:inline-block;padding:2pt 7pt;margin:2pt;border-radius:3pt;font-size:8pt;font-weight:${p2.inv[k] ? 700 : 400};background:${p2.inv[k] ? "#DCF4FB" : "#f5f5f5"};color:${p2.inv[k] ? "#0078B4" : "#aaa"};border:0.5pt solid ${p2.inv[k] ? "#0090CC" : "#ddd"}">${l}</span>`).join("")}${p2.inv.blood ? `<span style="display:inline-block;padding:2pt 7pt;margin:2pt;border-radius:3pt;font-size:8pt;font-weight:700;background:#DCF4FB;color:#0078B4;border:0.5pt solid #0090CC">Blood Exam${p2.inv.bloodText ? " — " + p2.inv.bloodText : ""}</span>` : ""}</div><div class="sec">Post Radiograph Findings</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4pt 8pt;margin-bottom:5pt"><div class="fl"><div class="lbl">RCT</div><div class="val">${p2.rct || "—"}</div></div><div class="fl"><div class="lbl">Implants</div><div class="val">${p2.implants || "—"}</div></div><div class="fl"><div class="lbl">Shade of Teeth</div><div class="val">${p2.shadeOfTeeth || "—"}</div></div></div>${p2.otherFindings ? `<div class="fl"><div class="lbl">Any Other Findings</div><div class="val">${p2.otherFindings}</div></div>` : ""}<div class="sigrow"><div><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">Dr. Viveyk Mittel | Date: ${TODAY}</div></div></div>`, "KBDC/FORMS/CP-01");
+    return pW(pH(window.LOGO_B64, "KBDC/FORMS/CP-01") + `<div class="sec">Extra-Oral Check</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4pt 8pt;margin-bottom:6pt"><div class="fl"><div class="lbl">Jaw Joints</div><div class="val">${hf(p2.jawJoints)}</div></div><div class="fl"><div class="lbl">Lymph Nodes</div><div class="val">${hf(p2.lymphNodes)}</div></div><div class="fl"><div class="lbl">Facial Profile</div><div class="val">${p2.facialProfile || "—"}</div></div><div class="fl"><div class="lbl">Facial Asymmetry</div><div class="val">${pf(p2.facialAsymmetry)}</div></div><div class="fl"><div class="lbl">Swelling</div><div class="val">${pf(p2.swelling)}</div></div><div class="fl"><div class="lbl">Lip Competency</div><div class="val">${pf(p2.lipCompetency)}</div></div></div><div class="sec">Intra-Oral — Soft Tissue</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4pt 8pt;margin-bottom:6pt"><div class="fl"><div class="lbl">Tongue</div><div class="val">${hf(p2.tongue)}</div></div><div class="fl"><div class="lbl">Palate</div><div class="val">${hf(p2.palate)}</div></div><div class="fl"><div class="lbl">Floor of Mouth</div><div class="val">${hf(p2.floorMouth)}</div></div><div class="fl"><div class="lbl">Buccal Mucosa</div><div class="val">${hf(p2.buccalMucosa)}</div></div><div class="fl"><div class="lbl">Frenum</div><div class="val">${p2.frenum || "—"}</div></div><div class="fl"><div class="lbl">Pigmentation</div><div class="val">${p2.pigmentation || "—"}</div></div></div><div class="sec">Intra-Oral — Hard Tissue</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4pt 8pt;margin-bottom:6pt">${[["silverFillings", "Silver Fillings"], ["whiteFillings", "White Fillings"], ["decayedTeeth", "Decayed Teeth"], ["chippedTeeth", "Chipped Teeth"], ["missingTeeth", "Missing Teeth"], ["crowns", "Crowns"], ["bridges", "Bridges"], ["veneers", "Veneers"], ["crowding", "Crowding"], ["dentures", "Dentures"], ["stainsCalculus", "Stains & Calculus"]].map(([k, l]) => `<div class="fl"><div class="lbl">${l}</div><div class="val">${pf(p2[k])}</div></div>`).join("")}</div><div class="sec">Gum &amp; Parafunctional &amp; Wasting</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:4pt 8pt;margin-bottom:6pt"><div class="fl"><div class="lbl">Bleeding on Probing</div><div class="val">${pf(p2.bleedingProbing)}</div></div><div class="fl"><div class="lbl">Gum Recession</div><div class="val">${pf(p2.gumRecession)}</div></div><div class="fl"><div class="lbl">Furcation</div><div class="val">${pf(p2.furcation)}</div></div><div class="fl"><div class="lbl">Mobility</div><div class="val">${pf(p2.mobility)}</div></div><div class="fl"><div class="lbl">Parafunctional</div><div class="val">${p2.parafunctional.present ? "Present" + (p2.parafunctional.description ? " — " + p2.parafunctional.description : "") : "-"}</div></div><div class="fl"><div class="lbl">Abrasion</div><div class="val">${pf(p2.abrasion)}</div></div><div class="fl"><div class="lbl">Attrition</div><div class="val">${pf(p2.attrition)}</div></div><div class="fl"><div class="lbl">Abfraction</div><div class="val">${pf(p2.abfraction)}</div></div><div class="fl"><div class="lbl">Erosion</div><div class="val">${pf(p2.erosion)}</div></div></div><div class="sec">Investigations Required</div><div style="margin-bottom:5pt">${invKeys.map(([k, l]) => `<span style="display:inline-block;padding:2pt 7pt;margin:2pt;border-radius:3pt;font-size:8pt;font-weight:${p2.inv[k] ? 700 : 400};background:${p2.inv[k] ? "#DCF4FB" : "#f5f5f5"};color:${p2.inv[k] ? "#0078B4" : "#aaa"};border:0.5pt solid ${p2.inv[k] ? "#0090CC" : "#ddd"}">${l}</span>`).join("")}${p2.inv.blood ? `<span style="display:inline-block;padding:2pt 7pt;margin:2pt;border-radius:3pt;font-size:8pt;font-weight:700;background:#DCF4FB;color:#0078B4;border:0.5pt solid #0090CC">Blood Exam${p2.inv.bloodText ? " — " + p2.inv.bloodText : ""}</span>` : ""}</div><div class="sec">Post Radiograph Findings</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:4pt 8pt;margin-bottom:5pt"><div class="fl"><div class="lbl">RCT</div><div class="val">${p2.rct || "—"}</div></div><div class="fl"><div class="lbl">Implants</div><div class="val">${p2.implants || "—"}</div></div><div class="fl"><div class="lbl">Shade of Teeth</div><div class="val">${p2.shadeOfTeeth || "—"}</div></div></div>${p2.otherFindings ? `<div class="fl"><div class="lbl">Any Other Findings</div><div class="val">${p2.otherFindings}</div></div>` : ""}<div class="sigrow"><div><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">${signatureLine(TODAY)}</div></div></div>`, "KBDC/FORMS/CP-01");
   }
   function buildCPPage3HTML() {
-    return pW(pH(window.LOGO_B64, "KBDC/FORMS/CP-01") + `<div class="sec">Radiograph Findings</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8pt;margin-bottom:10pt">${[["iopa", "IOPA"], ["opg", "OPG"], ["latCeph", "Lateral Cephalogram"], ["cbct", "CBCT"], ["digScan", "Digital Scan"]].map(([k, l]) => `<div class="fl"><div class="lbl">${l}</div><div class="vb" style="min-height:50pt">${p3[k] || "&nbsp;"}</div></div>`).join("")}</div><div class="sec">Medication Record</div><table><thead><tr><th style="width:38%">Name of Drug</th><th style="width:14%">Dose</th><th style="width:18%">Route</th><th style="width:30%">Frequency</th></tr></thead><tbody>${p3.meds.filter(m => m.drug).map(m => `<tr><td>${m.drug}</td><td>${m.dose}</td><td>${m.route}</td><td>${m.frequency}</td></tr>`).join("") || "<tr><td colspan='4' style='color:#5a5a5a;text-align:center;padding:8pt'>No medications recorded</td></tr>"}</tbody></table>${[["medCorrelation", "Medical Correlation (if any)"], ["provisionalDiagnosis", "Provisional Diagnosis"], ["specialNotes", "Special Notes (if any)"]].map(([k, l]) => `<div class="fl"><div class="lbl">${l}</div><div class="vb">${p3[k] || "&nbsp;"}</div></div>`).join("")}<div class="sigrow"><div><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">Dr. Viveyk Mittel | Date: ${TODAY}</div></div></div>`, "KBDC/FORMS/CP-01");
+    return pW(pH(window.LOGO_B64, "KBDC/FORMS/CP-01") + `<div class="sec">Radiograph Findings</div><div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8pt;margin-bottom:10pt">${[["iopa", "IOPA"], ["opg", "OPG"], ["latCeph", "Lateral Cephalogram"], ["cbct", "CBCT"], ["digScan", "Digital Scan"]].map(([k, l]) => `<div class="fl"><div class="lbl">${l}</div><div class="vb" style="min-height:50pt">${p3[k] || "&nbsp;"}</div></div>`).join("")}</div><div class="sec">Medication Record</div><table><thead><tr><th style="width:38%">Name of Drug</th><th style="width:14%">Dose</th><th style="width:18%">Route</th><th style="width:30%">Frequency</th></tr></thead><tbody>${p3.meds.filter(m => m.drug).map(m => `<tr><td>${m.drug}</td><td>${m.dose}</td><td>${m.route}</td><td>${m.frequency}</td></tr>`).join("") || "<tr><td colspan='4' style='color:#5a5a5a;text-align:center;padding:8pt'>No medications recorded</td></tr>"}</tbody></table>${[["medCorrelation", "Medical Correlation (if any)"], ["provisionalDiagnosis", "Provisional Diagnosis"], ["specialNotes", "Special Notes (if any)"]].map(([k, l]) => `<div class="fl"><div class="lbl">${l}</div><div class="vb">${p3[k] || "&nbsp;"}</div></div>`).join("")}<div class="sigrow"><div><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">${signatureLine(TODAY)}</div></div></div>`, "KBDC/FORMS/CP-01");
   }
   function buildCPPage4HTML() {
     const usedSet = new Set(p4.rows.map(r => parseInt(r.tooth)).filter(Boolean));
@@ -4223,7 +4271,7 @@ function CarePlan({
     const gap = '<td class="tg"></td>';
     const up = UPPER_T.slice(0, 8).map(cell).join("") + gap + UPPER_T.slice(8).map(cell).join("");
     const lo = LOWER_T.slice(0, 8).map(cell).join("") + gap + LOWER_T.slice(8).map(cell).join("");
-    return pW(pH(window.LOGO_B64, "KBDC/FORMS/CP-01") + `<div class="dtitle">Proposed / Suggested Treatment Plan</div><div class="g3" style="margin-bottom:8pt"><div class="fl"><div class="lbl">Name</div><div class="val" style="font-size:12pt;font-weight:700">${pat ? pat.name : "—"}</div></div><div class="fl"><div class="lbl">UHID</div><div class="val" style="font-weight:700">${pat ? pat.uhid : "—"}</div></div><div class="fl"><div class="lbl">Date</div><div class="val">${TODAY}</div></div></div><div class="sec">Dental Chart</div><div style="text-align:center;margin-bottom:8pt"><div style="font-size:7pt;font-weight:700;color:#0078B4;text-transform:uppercase;margin-bottom:2pt">Upper</div><table class="tgrid"><tr>${up}</tr></table><div style="border-top:1.5pt dashed #0078B4;margin:2pt auto;width:75%;opacity:0.4"></div><table class="tgrid"><tr>${lo}</tr></table><div style="font-size:7pt;font-weight:700;color:#0078B4;text-transform:uppercase;margin-top:2pt">Lower</div></div>${rows.length ? `<div class="sec">Treatment Plan</div><table><thead><tr><th style="width:12%">Tooth No.</th><th style="width:30%">Procedure</th><th>Treatment Details</th></tr></thead><tbody>${rows.map(r => `<tr><td style="text-align:center;font-weight:700;font-size:12pt">${r.tooth || "—"}</td><td>${r.procedure || "—"}</td><td>${r.details || "&nbsp;"}</td></tr>`).join("")}</tbody></table>` : `<div style="text-align:center;padding:16pt;color:#5a5a5a;border:0.5pt dashed #ddd;border-radius:4pt">No treatment plan entries</div>`}<div class="sigrow"><div><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">Dr. Viveyk Mittel | Date: ${TODAY}</div></div></div>`, "KBDC/FORMS/CP-01");
+    return pW(pH(window.LOGO_B64, "KBDC/FORMS/CP-01") + `<div class="dtitle">Proposed / Suggested Treatment Plan</div><div class="g3" style="margin-bottom:8pt"><div class="fl"><div class="lbl">Name</div><div class="val" style="font-size:12pt;font-weight:700">${pat ? pat.name : "—"}</div></div><div class="fl"><div class="lbl">UHID</div><div class="val" style="font-weight:700">${pat ? pat.uhid : "—"}</div></div><div class="fl"><div class="lbl">Date</div><div class="val">${TODAY}</div></div></div><div class="sec">Dental Chart</div><div style="text-align:center;margin-bottom:8pt"><div style="font-size:7pt;font-weight:700;color:#0078B4;text-transform:uppercase;margin-bottom:2pt">Upper</div><table class="tgrid"><tr>${up}</tr></table><div style="border-top:1.5pt dashed #0078B4;margin:2pt auto;width:75%;opacity:0.4"></div><table class="tgrid"><tr>${lo}</tr></table><div style="font-size:7pt;font-weight:700;color:#0078B4;text-transform:uppercase;margin-top:2pt">Lower</div></div>${rows.length ? `<div class="sec">Treatment Plan</div><table><thead><tr><th style="width:12%">Tooth No.</th><th style="width:30%">Procedure</th><th>Treatment Details</th></tr></thead><tbody>${rows.map(r => `<tr><td style="text-align:center;font-weight:700;font-size:12pt">${r.tooth || "—"}</td><td>${r.procedure || "—"}</td><td>${r.details || "&nbsp;"}</td></tr>`).join("")}</tbody></table>` : `<div style="text-align:center;padding:16pt;color:#5a5a5a;border:0.5pt dashed #ddd;border-radius:4pt">No treatment plan entries</div>`}<div class="sigrow"><div><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">${signatureLine(TODAY)}</div></div></div>`, "KBDC/FORMS/CP-01");
   }
   function buildAllCPHTML() {
     const b1 = buildCPPage1HTML().replace("</body></html>", "");
@@ -4261,7 +4309,7 @@ function CarePlan({
       color: "#2e2e2e",
       marginTop: 3
     }
-  }, "Dr. Viveyk Mittel | Date: ", TODAY)));
+  }, signatureLine(TODAY))));
   const cpTabs = ["1  Assessment", "2  Examination", "3  Findings", "4  Treatment Plan"];
   return /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(ClinicHeader, null), /*#__PURE__*/React.createElement(PatientBanner, {
     pat: pat,
@@ -5237,6 +5285,7 @@ function TreatmentPlan({
 }) {
   const [uhidInput, setUhidInput] = useState(globalPat?.uhid || "");
   const [pat, setPat] = useState(globalPat || null);
+  useSigningDoctor(pat && pat.uhid);
   const [notFound, setNotFound] = useState(false);
   const [tpRows, setTpRows] = useState([]);
   const [view, setView] = useState("plan");
@@ -5501,14 +5550,14 @@ function TreatmentPlan({
       }).join("");
       return `<div style="margin-bottom:6pt"><div class="ph" style="background:${pc}">${phase} — ${PHASE_DESC[phase]}</div><table><thead><tr><th style="width:6%">&nbsp;</th><th style="width:10%">Tooth</th><th>Procedure</th><th style="width:14%;text-align:right">Unit Price</th><th style="width:6%;text-align:right">Qty</th><th style="width:14%;text-align:right">Amount</th></tr></thead><tbody>${trs}</tbody></table></div>`;
     };
-    return pW(pH(window.LOGO_B64, "KBDC/FORMS/TP-01") + `<div class="dtitle">Treatment Plan</div><div style="display:grid;grid-template-columns:1fr auto auto;gap:8pt;margin-bottom:8pt"><div class="fl"><div class="lbl">Patient Name</div><div class="val" style="font-size:12pt;font-weight:700">${pat ? pat.name : "—"}</div></div><div class="fl"><div class="lbl">UHID</div><div class="val" style="font-weight:700">${pat ? pat.uhid : "—"}</div></div><div class="fl"><div class="lbl">Date</div><div class="val">${TODAY}</div></div></div><div class="note">Consultation charges inclusive if treatment starts within 15 days. Multiple options shown — patient to select preferred option.</div>` + toothG(tpRows) + PHASES.map(phBlock).join("") + `<div class="sigrow"><div><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">Dr. Viveyk Mittel | Date: ${TODAY}</div></div><div><div class="lbl">Patient / Guardian Acknowledgement</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">${pat ? pat.name : ""}</div></div></div>`, "KBDC/FORMS/TP-01");
+    return pW(pH(window.LOGO_B64, "KBDC/FORMS/TP-01") + `<div class="dtitle">Treatment Plan</div><div style="display:grid;grid-template-columns:1fr auto auto;gap:8pt;margin-bottom:8pt"><div class="fl"><div class="lbl">Patient Name</div><div class="val" style="font-size:12pt;font-weight:700">${pat ? pat.name : "—"}</div></div><div class="fl"><div class="lbl">UHID</div><div class="val" style="font-weight:700">${pat ? pat.uhid : "—"}</div></div><div class="fl"><div class="lbl">Date</div><div class="val">${TODAY}</div></div></div><div class="note">Consultation charges inclusive if treatment starts within 15 days. Multiple options shown — patient to select preferred option.</div>` + toothG(tpRows) + PHASES.map(phBlock).join("") + `<div class="sigrow"><div><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">${signatureLine(TODAY)}</div></div><div><div class="lbl">Patient / Guardian Acknowledgement</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">${pat ? pat.name : ""}</div></div></div>`, "KBDC/FORMS/TP-01");
   }
   function buildEstHTML() {
     const phRows = PHASES.map(phase => selRows.filter(r => r.phase === phase).map(r => {
       const amt = r.price && r.qty ? Number(r.price) * Number(r.qty) : 0;
       return `<tr><td style="font-weight:600;color:${PHASE_COL[phase] || T}">${phase}</td><td style="text-align:center;font-weight:700">${r.tooth || "—"}</td><td>${r.procedure}</td><td style="text-align:right">${r.qty}</td><td style="text-align:right;font-weight:700">₹${amt.toLocaleString("en-IN")}</td></tr>`;
     }).join("")).join("");
-    return pW(pH(window.LOGO_B64, "KBDC/FORMS/ES-01") + `<div class="dtitle">Estimated Cost Sheet</div><div style="display:grid;grid-template-columns:1fr auto auto;gap:8pt;margin-bottom:8pt"><div class="fl"><div class="lbl">Patient Name</div><div class="val" style="font-size:12pt;font-weight:700">${pat ? pat.name : "—"}</div></div><div class="fl"><div class="lbl">UHID</div><div class="val" style="font-weight:700">${pat ? pat.uhid : "—"}</div></div><div class="fl"><div class="lbl">Date</div><div class="val">${TODAY}</div></div></div><div class="note">Consultation charges inclusive if treatment starts within 15 days. This estimate is valid for 3 months.</div>` + toothG(selRows) + `<table><thead><tr><th style="width:14%">Phase</th><th style="width:10%">Tooth</th><th>Procedure</th><th style="width:8%;text-align:right">Qty</th><th style="width:16%;text-align:right">Amount</th></tr></thead><tbody>${phRows}</tbody></table><div class="tots"><div class="tr"><span>Subtotal</span><span>₹${sub.toLocaleString("en-IN")}</span></div>${membership && mAmt ? `<div class="tr" style="color:#059669"><span>Membership Plan Amount</span><span>₹${mAmt.toLocaleString("en-IN")}</span></div>` : ""}` + `${membership && disc ? `<div class="tr" style="color:#059669"><span>Membership Discount (${memberDisc}%)</span><span>− ₹${disc.toLocaleString("en-IN")}</span></div>` : ""}` + `${ccCharges && cc ? `<div class="tr" style="color:#D97706"><span>Credit Card Charges (2%)</span><span>+ ₹${cc.toLocaleString("en-IN")}</span></div>` : ""}<div class="tr trg"><span>Total Estimated Cost</span><span>₹${total.toLocaleString("en-IN")}</span></div></div><div style="margin-top:14pt;padding:8pt 10pt;background:#fffbf0;border:0.5pt solid #D97706;border-radius:4pt;font-size:9pt;color:#444444">[Payment terms and conditions to be added]</div><div class="sigrow"><div><div class="lbl">Patient / Guardian Signature &amp; Name</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">${pat ? pat.name : ""}</div></div><div><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">Dr. Viveyk Mittel | Date: ${TODAY}</div></div></div>`, "KBDC/FORMS/ES-01");
+    return pW(pH(window.LOGO_B64, "KBDC/FORMS/ES-01") + `<div class="dtitle">Estimated Cost Sheet</div><div style="display:grid;grid-template-columns:1fr auto auto;gap:8pt;margin-bottom:8pt"><div class="fl"><div class="lbl">Patient Name</div><div class="val" style="font-size:12pt;font-weight:700">${pat ? pat.name : "—"}</div></div><div class="fl"><div class="lbl">UHID</div><div class="val" style="font-weight:700">${pat ? pat.uhid : "—"}</div></div><div class="fl"><div class="lbl">Date</div><div class="val">${TODAY}</div></div></div><div class="note">Consultation charges inclusive if treatment starts within 15 days. This estimate is valid for 3 months.</div>` + toothG(selRows) + `<table><thead><tr><th style="width:14%">Phase</th><th style="width:10%">Tooth</th><th>Procedure</th><th style="width:8%;text-align:right">Qty</th><th style="width:16%;text-align:right">Amount</th></tr></thead><tbody>${phRows}</tbody></table><div class="tots"><div class="tr"><span>Subtotal</span><span>₹${sub.toLocaleString("en-IN")}</span></div>${membership && mAmt ? `<div class="tr" style="color:#059669"><span>Membership Plan Amount</span><span>₹${mAmt.toLocaleString("en-IN")}</span></div>` : ""}` + `${membership && disc ? `<div class="tr" style="color:#059669"><span>Membership Discount (${memberDisc}%)</span><span>− ₹${disc.toLocaleString("en-IN")}</span></div>` : ""}` + `${ccCharges && cc ? `<div class="tr" style="color:#D97706"><span>Credit Card Charges (2%)</span><span>+ ₹${cc.toLocaleString("en-IN")}</span></div>` : ""}<div class="tr trg"><span>Total Estimated Cost</span><span>₹${total.toLocaleString("en-IN")}</span></div></div><div style="margin-top:14pt;padding:8pt 10pt;background:#fffbf0;border:0.5pt solid #D97706;border-radius:4pt;font-size:9pt;color:#444444">[Payment terms and conditions to be added]</div><div class="sigrow"><div><div class="lbl">Patient / Guardian Signature &amp; Name</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">${pat ? pat.name : ""}</div></div><div><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">${signatureLine(TODAY)}</div></div></div>`, "KBDC/FORMS/ES-01");
   }
   const doPrint = which => {
     const h = which === "estimate" ? buildEstHTML() : buildPlanHTML();
@@ -5883,7 +5932,7 @@ function TreatmentPlan({
       color: "#2e2e2e",
       marginTop: 3
     }
-  }, "Dr. Viveyk Mittel | Date: ", TODAY)), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(SigPad, {
+  }, signatureLine(TODAY))), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(SigPad, {
     label: "Patient / Guardian Acknowledgement",
     w: 280
   }), /*#__PURE__*/React.createElement("div", {
@@ -6202,7 +6251,7 @@ function TreatmentPlan({
       color: "#2e2e2e",
       marginTop: 3
     }
-  }, "Dr. Viveyk Mittel | Date: ", TODAY))), /*#__PURE__*/React.createElement("div", {
+  }, signatureLine(TODAY)))), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "flex",
       gap: 8,
@@ -8447,6 +8496,21 @@ function BirthdayCorner({ birthdays }) {
   );
 }
 
+// The clinic's own name, from Master > Clinic > Clinic. A copy of this app
+// sold to another clinic shows THEIR name the moment they fill it in, which
+// is the point of it being a setting rather than a string in the markup.
+//
+// The time of day is read from the clock rather than assumed: this said
+// "Good morning" at half past ten at night.
+function greeting(now) {
+  const h = (now || new Date()).getHours();
+  const part = h < 12 ? "Good morning" : h < 17 ? "Good afternoon" : "Good evening";
+  const clinic = String((window.CLINIC && window.CLINIC.name) || "").trim();
+  // No clinic name set yet: greet without one rather than with somebody
+  // else's.
+  return clinic ? part + ", " + clinic : part;
+}
+
 function Dashboard({
   onNavigate
 }) {
@@ -8503,7 +8567,7 @@ function Dashboard({
       fontWeight: 700,
       marginBottom: 4
     }
-  }, "Good morning, Dr. Viveyk"), /*#__PURE__*/React.createElement("div", {
+  }, greeting()), /*#__PURE__*/React.createElement("div", {
     style: {
       fontSize: 14,
       color: "#444444",
@@ -9849,7 +9913,7 @@ function buildRCTConsentHTML(pat, soap, medHistory, medFlags, fee, payTerms, ext
     +sec(TX.secCompliance)+'<div style="page-break-inside:avoid">'+chk(TX.compliance)+'</div>'
     +sec(TX.secEndorsement)+'<p style="font-size:9pt;line-height:1.5;margin-bottom:8pt">'+TX.endorsement+'</p>'
     +'<div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:10pt;margin-top:8pt;padding-top:6pt;border-top:.5pt solid #ccc;page-break-inside:avoid">'
-    +[[TX.sigPatient,pat&&pat.name||""],[TX.sigWitness,""],[TX.sigDoctor,"Dr. Viveyk Mittel"],[TX.sigStaff,""]].map(function(pair){
+    +[[TX.sigPatient,pat&&pat.name||""],[TX.sigWitness,""],[TX.sigDoctor, signingDoctor()],[TX.sigStaff,""]].map(function(pair){
       return '<div><div style="border:.5pt solid #bbb;border-radius:3pt;height:40pt;background:#fafafa;margin-bottom:3pt"></div>'
         +'<div style="font-size:7.5pt;color:#2e2e2e;line-height:1.4;white-space:pre-line">'+pair[0]+'</div>'
         +(pair[1]?'<div style="font-size:8pt;color:#333;margin-top:1pt">'+pair[1]+'</div>':"")+'</div>';
@@ -9918,7 +9982,7 @@ function buildGenericConsentHTML(pat, consentKey, procedureTypeChecked, fee, pay
   var postComplianceNoteHtml = data.postComplianceNote ? '<div style="margin:4pt 0 6pt">'+data.postComplianceNote[lang].map(function(p){return '<p style="font-size:9pt;line-height:1.45;margin-bottom:3pt">'+p+'</p>';}).join("")+'</div>' : "";
 
   var sigBlockHtml = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14pt;margin-top:8pt;padding-top:6pt;border-top:.5pt solid #ccc">'
-    + [[C.sigPatient,pat&&pat.name||""],[C.sigDoctor,"Dr. Viveyk Mittel"]].map(function(pair){
+    + [[C.sigPatient,pat&&pat.name||""],[C.sigDoctor, signingDoctor()]].map(function(pair){
         return '<div><div style="border:.5pt solid #bbb;border-radius:3pt;height:40pt;background:#fafafa;margin-bottom:3pt"></div>'
           +'<div style="font-size:8pt;color:#2e2e2e;line-height:1.4">'+pair[0]+'</div>'
           +(pair[1]?'<div style="font-size:8.5pt;color:#333;margin-top:1pt">'+pair[1]+'</div>':"")+'</div>';
@@ -10135,7 +10199,7 @@ function buildNarrativeConsentHTML(pat, consentKey, findings, proposedPlan, medH
     + closingHtml
     + '<p style="font-size:9pt;line-height:1.4;margin:4pt 0;font-style:italic">'+N.certify+'</p>'
     + '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14pt;margin-top:8pt;padding-top:6pt;border-top:.5pt solid #ccc">'
-    + [[N.sigPatient,pat&&pat.name||""],[N.sigWitness,""],[N.sigDoctor,"Dr. Viveyk Mittel"],[N.sigStaff,""]].map(function(pair){
+    + [[N.sigPatient,pat&&pat.name||""],[N.sigWitness,""],[N.sigDoctor, signingDoctor()],[N.sigStaff,""]].map(function(pair){
         return '<div><div style="border:.5pt solid #bbb;border-radius:3pt;height:30pt;background:#fafafa;margin-bottom:3pt"></div>'
           +'<div style="font-size:8pt;color:#2e2e2e;line-height:1.4">'+pair[0]+'</div>'
           +(pair[1]?'<div style="font-size:8.5pt;color:#333;margin-top:1pt">'+pair[1]+'</div>':"")+'</div>';
@@ -10217,7 +10281,7 @@ const RCT_FORM_STR = {
     ],
     costText:"The estimated cost associated with the above procedure/treatment as advised to me shall be approximately {FEE}, which may or may not have additional cost applicable for investigations/other treatments or for side-effects management. The cost quoted to me by the Doctor is towards the above-said treatment only, and any additional contingencies shall have to be paid extra.",
     certify:"By providing my signature, I certify that I understand the recommended treatment, the fee involved, the risks of such treatment, any alternatives and the risks of these alternatives, including the consequences of doing nothing. I have had all of my questions answered, and have not been offered any guarantees.",
-    sPatient:"Patient / Guardian", sWitness:"Witness", sDoctorName:"Doctor Name", sStaff:"Staff", sSigName:"Signature & Name", sDoctorLine:"Dr. Viveyk Mittel & Signature", sDate:"Date:"
+    sPatient:"Patient / Guardian", sWitness:"Witness", sDoctorName:"Doctor Name", sStaff:"Staff", sSigName:"Signature & Name", sDoctorLine:"{DOCTOR} & Signature", sDate:"Date:"
   },
   HI: {
     title:"रूट कैनाल इलाज (RCT)", sub:"सूचित सहमति फॉर्म",
@@ -10399,7 +10463,7 @@ function buildRCTFormHTML(pat, findings, proposedPlan, medHistory, medFlags, fee
   var sigHtml = '<div class="keep" style="margin-top:6pt;padding-top:5pt;border-top:.5pt solid #ccc"><div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12pt">'
     + sigCell(R.sPatient, (pat&&pat.name)||"", R.sSigName)
     + sigCell(R.sWitness, "", R.sSigName)
-    + sigCell(R.sDoctorName, "", R.sDoctorLine)
+    + sigCell(R.sDoctorName, "", R.sDoctorLine.replace("{DOCTOR}", signingDoctor() || "Doctor"))
     + sigCell(R.sStaff, "", R.sSigName)
     + '</div><div style="margin-top:6pt;font-size:9.2pt">'+R.sDate+' ___________________</div></div>';
 
@@ -10516,7 +10580,7 @@ function buildStyledConsentHTML(pat, key, findings, medHistory, medFlags, procTy
   };
   var sigHtml = '<div class="keep" style="margin-top:6pt;padding-top:5pt;border-top:.5pt solid #ccc"><div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12pt">'
     + sigCell(R.sPatient, (pat&&pat.name)||"", R.sSigName) + sigCell(R.sWitness, "", R.sSigName)
-    + sigCell(R.sDoctorName, "", R.sDoctorLine) + sigCell(R.sStaff, "", R.sSigName) + '</div>'
+    + sigCell(R.sDoctorName, "", R.sDoctorLine.replace("{DOCTOR}", signingDoctor() || "Doctor")) + sigCell(R.sStaff, "", R.sSigName) + '</div>'
     + '<div style="margin-top:6pt;font-size:9.2pt">'+R.sDate+' ___________________</div></div>';
   var endorseBlk = sec(R.hEndorsement)+'<p style="font-size:10pt;line-height:1.34;margin-bottom:3pt;font-style:italic">'+R.certify+'</p>'+sigHtml;
 
@@ -10793,6 +10857,7 @@ function ConsentForms(props) {
   var uhidInput = _u[0], setUhidInput = _u[1];
   var _p = useState(globalPat||null);
   var pat = _p[0], setPat = _p[1];
+  useSigningDoctor(pat && pat.uhid);
   var _nf = useState(false);
   var notFound = _nf[0], setNotFound = _nf[1];
   var _pr = useState("rct");
@@ -12266,7 +12331,10 @@ function sampleTeethFor(tabId) {
   const sections = CLINICAL_SECTIONS[tabId] || [];
   // Four dated visits, matching the four columns the paper form has.
   const visits = [1, 2, 3, 4].map(n => {
-    const v = { date: "0" + n + "/10/2026", doctor: "Dr. Viveyk" };
+    // A placeholder, not a name. This is a LAYOUT sample -- it must not
+    // depend on who is signed in, and it must not carry the original
+    // clinic's doctor into a copy somebody else is running.
+    const v = { date: "0" + n + "/10/2026", doctor: "Dr. \u2014" };
     sections.forEach(sec => {
       if (sec.dateKey) v[sec.dateKey] = "0" + n + "/10/2026";
       sec.fields.forEach(f => {
@@ -27048,7 +27116,6 @@ const MASTER_STRUCTURE = [
     { id:"doctors",       label:"Doctors" },
     { id:"employees",     label:"Employees" },
     { id:"chairs",        label:"Chairs" },
-    { id:"implantBrands", label:"Implant Brands & Sizes" },
     { id:"otherClinic",   label:"Other Clinic" }
   ]},
   { id:"schedule", label:"Schedule", subtabs:[
@@ -27066,7 +27133,9 @@ const MASTER_STRUCTURE = [
   ]},
   // Held open, with nothing under it yet. A category with no subtabs says
   // so on its own page rather than opening blank -- see `content` below.
-  { id:"clinicalConfig", label:"Clinical Configuration", placeholder:true },
+  { id:"clinicalConfig", label:"Clinical Configuration", subtabs:[
+    { id:"implantBrands", label:"Implant Brands & Sizes" }
+  ]},
   { id:"prescriptions", label:"Prescriptions", subtabs:[
     { id:"drugCategories", label:"Drugs categories", placeholder:true },
     { id:"medicines",      label:"Drugs" },
