@@ -5114,7 +5114,33 @@ function saveCrmCollection(p) {
 }
 
 var CLINIC_TIMINGS_TAB = "Clinic Timings";
-var CLINIC_TIMINGS_DEFAULT = { open: "09:00", close: "19:00", slotMinutes: 30 };
+var CLINIC_TIMINGS_DEFAULT = { open: "09:00", close: "19:00", slotMinutes: 30, breaks: [] };
+
+// The day's breaks -- lunch, and tea for the clinics that take one. A list,
+// not two fixed fields, because how many a clinic takes is the clinic's
+// business. Each is { name, from, to } with the times as "HH:MM".
+//
+// Anything that cannot be read as a break is dropped rather than returned
+// half-formed: a break with no end would otherwise shut the rest of the day.
+function cleanBreaks_(raw) {
+  var list = raw;
+  if (typeof list === "string") {
+    var t = list.trim();
+    if (!t) return [];
+    try { list = JSON.parse(t); } catch (e) { return []; }
+  }
+  if (!list || !list.length) return [];
+  var out = [];
+  for (var i = 0; i < list.length; i++) {
+    var b = list[i];
+    if (!b || typeof b !== "object") continue;
+    var from = hhmm_(b.from), to = hhmm_(b.to);
+    if (!from || !to || to <= from) continue;
+    out.push({ name: String(b.name == null ? "" : b.name).trim() || "Break", from: from, to: to });
+  }
+  out.sort(function (x, y) { return x.from < y.from ? -1 : x.from > y.from ? 1 : 0; });
+  return out;
+}
 
 // A time cell can come back as text, or as a Date when Sheets decides it
 // looks like a time. Both have to end up as "HH:MM", or the book draws
@@ -5127,6 +5153,11 @@ function hhmm_(v) {
   var h = parseInt(m[1], 10), mi = parseInt(m[2], 10);
   if (isNaN(h) || isNaN(mi) || h > 23 || mi > 59) return "";
   return (h < 10 ? "0" : "") + h + ":" + (mi < 10 ? "0" : "") + mi;
+}
+
+function toMin_(v) {
+  var m = /^(\d{1,2}):(\d{2})$/.exec(String(v || ""));
+  return m ? (parseInt(m[1], 10) * 60 + parseInt(m[2], 10)) : NaN;
 }
 
 function getClinicTimings() {
@@ -5145,7 +5176,8 @@ function getClinicTimings() {
     success: true,
     open: open || CLINIC_TIMINGS_DEFAULT.open,
     close: close || CLINIC_TIMINGS_DEFAULT.close,
-    slotMinutes: (step > 0 ? step : CLINIC_TIMINGS_DEFAULT.slotMinutes)
+    slotMinutes: (step > 0 ? step : CLINIC_TIMINGS_DEFAULT.slotMinutes),
+    breaks: cleanBreaks_(got["breaks"])
   };
 }
 
@@ -5158,16 +5190,33 @@ function saveClinicTimings(p) {
   // the clinic would be unable to book anybody until somebody noticed why.
   if (close <= open) return { success: false, error: "the clinic cannot close before it opens" };
 
+  var breaks = cleanBreaks_(p.breaks);
+  // A break that swallows the whole day leaves a clinic that cannot book
+  // anybody, and nobody would guess why. Counted here rather than found out
+  // at the desk tomorrow morning.
+  var openMin = toMin_(open), closeMin = toMin_(close), left = 0;
+  for (var m = openMin; m < closeMin; m += step) {
+    var inBreak = false;
+    for (var i = 0; i < breaks.length; i++) {
+      if (m >= toMin_(breaks[i].from) && m < toMin_(breaks[i].to)) { inBreak = true; break; }
+    }
+    if (!inBreak) left++;
+  }
+  if (!left) return { success: false, error: "those breaks leave no time to book anybody in" };
+
   var sh = getSheet(CLINIC_TIMINGS_TAB);
   sh.clearContents();
   var now = new Date().toISOString();
   // Written with a leading apostrophe so Sheets keeps "09:00" as text instead
   // of turning it into a time and handing back something else.
-  sh.getRange(1, 1, 4, 3).setValues([
+  sh.getRange(1, 1, 5, 3).setValues([
     ["Setting", "Value", "Updated At"],
     ["Open", "'" + open, now],
     ["Close", "'" + close, now],
-    ["Slot Minutes", step, now]
+    ["Slot Minutes", step, now],
+    // One cell of JSON: the number of breaks is the clinic's to choose, and
+    // a row apiece would need the tab reshaped every time one is added.
+    ["Breaks", JSON.stringify(breaks), now]
   ]);
   return { success: true };
 }
