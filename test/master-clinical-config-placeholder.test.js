@@ -33,9 +33,12 @@ ok('the categories were read', tops.length >= 5, tops.join(','));
 ok('Clinical Configuration is there', tops.indexOf('clinicalConfig') >= 0, tops.join(','));
 eq('and it comes straight after Patient',
    tops[tops.indexOf('patient') + 1], 'clinicalConfig');
+// It was held open empty; Implant Brands & Sizes has since moved into it
+// from CLINIC. forms-sign-with-the-treating-doctor.test.js pins that move.
+// What is still worth pinning here is the branch that stops an EMPTY
+// category opening blank, since the next one added will start empty too.
 ok('it is named as asked',
-   /\{ id:"clinicalConfig", label:"Clinical Configuration", placeholder:true \},/.test(html));
-ok('and it holds nothing yet', !/id:"clinicalConfig"[^}]*subtabs/.test(html));
+   /\{ id:"clinicalConfig", label:"Clinical Configuration", subtabs:\[/.test(html));
 
 // ── and it does not open blank ──────────────────────────────────────────
 ok('an empty category draws the not-built notice',
