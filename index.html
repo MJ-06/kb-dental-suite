@@ -160,7 +160,7 @@ const KB_BACKEND_IS_APPS_SCRIPT = /script\.google\.com/.test(SCRIPT_URL);
 // So the app asks, and says so in the sidebar when the answer is too old.
 // Raise this whenever the page starts depending on something new in
 // Code.gs, and bump BACKEND_BUILD there to match.
-const KB_BACKEND_BUILD_REQUIRED = "2026-10-31";
+const KB_BACKEND_BUILD_REQUIRED = "2026-11-02";
 
 // Three answers, not two. A build string is a plain date, so comparing
 // them as text compares them as dates.
@@ -357,6 +357,25 @@ function handleAuthFailure(res) {
   return res;
 }
 
+// "Unknown action: saveReferralSourcesList" is not a fault in the app and
+// not something the clinic can fix by trying again. It means the Apps Script
+// deployment is older than the page: the code was pasted in and saved, but
+// the deployment was not given a NEW VERSION, so the URL still serves what
+// it served before. Saving a new master list is where that shows up first,
+// because nothing else asks the backend for anything it did not have.
+//
+// Left raw it reads as "saving is broken". Said properly it is one step.
+function sayIfBackendIsOld(r) {
+  if (!r || r.success !== false) return r;
+  const m = /^Unknown action: (\w+)/.exec(String(r.error || ""));
+  if (!m) return r;
+  return Object.assign({}, r, { backendTooOld: true, error:
+    "this backend does not have \u201c" + m[1] + "\u201d yet. Code.gs was saved but not " +
+    "redeployed: in Apps Script, Deploy \u2192 Manage deployments \u2192 edit \u2192 " +
+    "Version: New version \u2192 Deploy. Saving it is not enough \u2014 the web app URL " +
+    "keeps serving the old version until a new one is made." });
+}
+
 async function apiDirect(action, data = {}) {
   try {
     const p = new URLSearchParams({
@@ -406,7 +425,7 @@ async function apiDirect(action, data = {}) {
           ? await fetch(SCRIPT_URL, { method: "POST", headers: Object.assign({ "Content-Type": "text/plain;charset=utf-8" }, authHeader || {}), body })
           : await fetch(url, authHeader ? { headers: authHeader } : undefined);
         if (!r.ok) throw Object.assign(new Error("HTTP " + r.status), { status: r.status });
-        return handleAuthFailure(await r.json());
+        return handleAuthFailure(sayIfBackendIsOld(await r.json()));
       } catch (e) {
         lastErr = e;
         // A read is retried whatever went wrong. A WRITE is retried only on a
