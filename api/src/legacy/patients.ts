@@ -48,6 +48,7 @@ const last10 = (v: unknown) => str(v).replace(/\D/g, "").slice(-10);
 // ── one patient, with their newest history ───────────────────────────────
 
 interface Row {
+  organization_patient_id:string|null;
   id: string; uhid: string; full_name: string; gender: string | null; dob: string | null;
   mobile: string | null; mobile_2: string | null; whatsapp: string | null; email: string | null;
   blood_group: string | null; occupation: string | null; marital_status: string | null; address: string | null;
@@ -60,7 +61,7 @@ interface Row {
 
 export async function findPatient(tx: Tx, uhid: string): Promise<Row | undefined> {
   const r = await sql<Row>`
-    SELECT p.id, p.uhid, coalesce(identity.name,p.full_name) AS full_name,
+    SELECT identity.id AS organization_patient_id,p.id, p.uhid, coalesce(identity.name,p.full_name) AS full_name,
            CASE WHEN identity.id IS NOT NULL THEN identity.gender ELSE p.gender END AS gender,
            (CASE WHEN identity.id IS NOT NULL THEN identity.dob ELSE p.date_of_birth END)::text AS dob,
            CASE WHEN identity.id IS NOT NULL THEN nullif(identity.phone,'') ELSE p.mobile END AS mobile, p.mobile_2, p.whatsapp,
@@ -213,7 +214,7 @@ export const patients: ActionTable = {
     const x = await findPatient(tx, uhid);
     if (!x) return { success: false, error: `Patient not found: ${uhid}` };
     return { success: true, patient: {
-      uhid: x.uhid, name: x.full_name, gender: x.gender ?? "", dob: dobOut(x.dob),
+      organizationPatientId:x.organization_patient_id ?? undefined, uhid: x.uhid, name: x.full_name, gender: x.gender ?? "", dob: dobOut(x.dob),
       mobile: x.mobile ?? "", mobile2: x.mobile_2 ?? "", whatsapp: x.whatsapp ?? "", email: x.email ?? "",
       bloodGroup: x.blood_group ?? "", occupation: x.occupation ?? "", maritalStatus: x.marital_status ?? "",
       address: x.address ?? "", emergencyName: x.emergency_name ?? "", emergencyRelation: x.emergency_relation ?? "",

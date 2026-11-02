@@ -475,7 +475,7 @@ async function apiDirect(action, data = {}) {
     const query = p.toString();
     const url = SCRIPT_URL + "?" + query;
     // Sign-in always goes in the body so a password never lands in a URL.
-    const long = query.length > 1800 || ["staffLogin", "verifyMasterPassword", "saveMasterPassword", "switchWorkingClinic", "saveOrganizationProfile", "attachOrganizationPatient"].includes(action);
+    const long = query.length > 1800 || ["staffLogin", "verifyMasterPassword", "saveMasterPassword", "switchWorkingClinic", "saveOrganizationProfile", "attachOrganizationPatient", "openOrganizationPatient"].includes(action);
     const body = long ? JSON.stringify(Object.assign({ action }, data,
                                        (tok && KB_BACKEND_IS_APPS_SCRIPT) ? { token: tok } : {})) : null;
     const attempts = 3;
@@ -8230,6 +8230,7 @@ function Daysheet({ globalPat, setGlobalPat, openPatientAt }) {
 }
 
 const FOLDER_MENU_ITEMS = [
+  ...(window.KB_CLINIC_CONTEXT ? [{id:"patient_history",label:"📖 Patient History"}] : []),
   { id:"careplan",         label:"🦷 Care Plan"           },
   { id:"treatmentplan",    label:"📄 Treatment Plan"      },
   { id:"records",          label:"🗃 Records"             },
@@ -8311,6 +8312,41 @@ function PatientBalancePill({ uhid, size }) {
 // Lets a doctor jump straight to a different section for the CURRENTLY
 // active patient without re-entering their UHID via Patient Search — reached
 // by clicking the "Active Patient" box in the sidebar.
+function PatientHistory({globalPat,onNavigate}) {
+  const [events,setEvents]=useState([]),[clinics,setClinics]=useState([]),[filter,setFilter]=useState("");
+  const [cursor,setCursor]=useState(null),[busy,setBusy]=useState(false),[error,setError]=useState(""),[scope,setScope]=useState("");
+  const generation=useRef(0);
+  const load=async(next,version)=>{
+    setBusy(true); setError("");
+    const res=await api("getPatientHistory",{organizationPatientId:globalPat?.organizationPatientId || "",uhid:globalPat?.uhid || "",clinicId:filter,cursor:next || ""});
+    if(version!==generation.current)return;
+    setBusy(false);
+    if(!res.success){setError(res.error || "History could not load");return;}
+    setEvents(old=>next?[...old,...res.events]:res.events);setClinics(res.clinics);setCursor(res.nextCursor);setScope(res.scope);
+  };
+  useEffect(()=>{const version=++generation.current;setEvents([]);setCursor(null);if(globalPat?.uhid)load(null,version);return()=>{generation.current++;};},[globalPat?.uhid,globalPat?.organizationPatientId,filter]);
+  const show=v=>Array.isArray(v)?v.join(", "):String(v);
+  return React.createElement("div",null,
+    React.createElement(ClinicHeader,null),
+    React.createElement("button",{onClick:()=>onNavigate("folder_picker"),style:{...inp,marginBottom:12,cursor:"pointer"}},"← Patient folder"),
+    React.createElement("h2",{style:{fontSize:18,marginBottom:8}},"Patient History"),
+    React.createElement("p",{style:{fontSize:14,marginBottom:8}},globalPat?.name || "Select a patient first"),
+    scope && React.createElement("p",{style:{fontSize:12,color:"#555",marginBottom:12}},scope),
+    React.createElement("p",{style:{fontSize:12,color:"#555",marginBottom:12}},"History shows care entries, medical history, forms and chart updates from permitted clinics. Several records may describe the same care. Payments are shown separately in Finance."),
+    React.createElement("label",{style:{fontSize:13}},"Clinic ",React.createElement("select",{value:filter,onChange:e=>setFilter(e.target.value),disabled:busy,style:{...inp,marginBottom:16}},
+      React.createElement("option",{value:""},"All permitted clinics"),...clinics.map(c=>React.createElement("option",{key:c.id,value:c.id},c.name)))),
+    error && React.createElement("div",{role:"alert",style:{color:"#b42318",marginBottom:12}},error,
+      React.createElement("button",{onClick:()=>load(cursor,generation.current),style:{...inp,marginLeft:8,cursor:"pointer"}},"Retry")),
+    !busy && !error && !events.length && globalPat?.uhid && React.createElement("p",null,"No permitted history entries found for this patient."),
+    ...events.map(e=>React.createElement("article",{key:e.key,style:{background:"#fff",border:`1px solid ${BORDER}`,borderRadius:8,padding:16,marginBottom:12}},
+      React.createElement("strong",null,e.title),
+      React.createElement("div",{style:{fontSize:12,color:"#555",margin:"6px 0"}},e.clinicName+" · "+(e.kind==="register"?new Date(e.time).toLocaleDateString("en-GB",{timeZone:e.timezone}):new Date(e.time).toLocaleString("en-GB",{timeZone:e.timezone}))+" · "+e.timezone),
+      React.createElement("div",{style:{fontSize:13,marginBottom:8}},"Treating doctor: "+(e.doctor || "Not recorded in this source")),
+      ...Object.entries(e.details).filter(([,v])=>v!==null&&v!==""&&(!Array.isArray(v)||v.length)).map(([k,v])=>React.createElement("div",{key:k,style:{fontSize:13,whiteSpace:"pre-wrap",overflowWrap:"anywhere",marginTop:5}},React.createElement("b",null,k+": "),show(v))))),
+    busy && React.createElement("p",{role:"status"},"Loading history…"),
+    cursor && !busy && React.createElement("button",{onClick:()=>load(cursor,generation.current),style:{...inp,cursor:"pointer"}},"Load older entries"));
+}
+
 function FolderPicker({ globalPat, onNavigate }) {
   if (!globalPat || !globalPat.uhid) {
     return React.createElement("div", null,
@@ -8376,7 +8412,7 @@ function PatientSearch({ setGlobalPat, onNavigate }) {
   const [searched, setSearched] = useState(false);
   const [selected, setSelected] = useState(null);
   const debRef = useRef(null), searchVersion = useRef(0);
-  const [pendingIdentity,setPendingIdentity] = useState(null), [error,setError] = useState("");
+  const [error,setError] = useState("");
   const organizationDirectory = !!window.KB_CLINIC_CONTEXT;
 
   const doSearch = async (q) => {
@@ -8396,25 +8432,25 @@ function PatientSearch({ setGlobalPat, onNavigate }) {
   const onType = (e) => {
     const v = e.target.value;
     setQuery(v);
-    setSelected(null); setPendingIdentity(null); searchVersion.current++;
+    setSelected(null); searchVersion.current++;
     if (debRef.current) clearTimeout(debRef.current);
     debRef.current = setTimeout(() => doSearch(v), 400);
   };
 
-  const attach = async () => {
-    setLoading(true); setError("");
-    const res=await api("attachOrganizationPatient", { organizationPatientId:pendingIdentity.organization_patient_id });
-    setLoading(false);
-    if (!res.success) { setError(res.error || "Could not add patient to this clinic"); return; }
-    selectPat({ ...pendingIdentity, uhid:res.uhid, atCurrentClinic:true });
-  };
-  const selectPat = (p) => {
-    if (organizationDirectory && p.organization_patient_id && !p.atCurrentClinic) { setPendingIdentity(p); return; }
+  const selectPat = async (p) => {
+    if (organizationDirectory && p.organization_patient_id) {
+      setLoading(true); setError("");
+      const opened=await api("openOrganizationPatient", {organizationPatientId:p.organization_patient_id});
+      setLoading(false);
+      if (!opened.success) { setError(opened.error || "Could not open this patient"); return; }
+      p={...p,uhid:opened.uhid};
+    }
     const pat = {
       uhid:   p.uhid   || p.UHID   || p["Registration ID"] || "",
       name:   p.name   || p["Full Name"] || "",
       dob:    p.dob    || p.DOB    || "",
       gender: p.gender || p.Gender || "",
+      organizationPatientId:p.organization_patient_id || null, organizationUhid:p.organization_uhid || null,
       mobile: p.mobile || p.Mobile || ""
     };
     setSelected(pat);
@@ -8432,7 +8468,7 @@ function PatientSearch({ setGlobalPat, onNavigate }) {
     React.createElement(ClinicHeader, null),
 
     React.createElement("div", { style:{ fontSize:18, fontWeight:700, marginBottom:4 } }, "Patient Search"),
-    React.createElement("div", { style:{ fontSize:13, color:"#444444", marginBottom:20 } }, organizationDirectory ? "Search organization patients by name, UHID or phone. Confirm identity using date of birth before adding to this clinic." : "Search by name — if two patients share a name, date of birth shown for disambiguation"),
+    React.createElement("div", { style:{ fontSize:13, color:"#444444", marginBottom:20 } }, organizationDirectory ? "One patient record across your organization. Search by name, UHID or phone; confirm identity using date of birth." : "Search by name — if two patients share a name, date of birth shown for disambiguation"),
 
     // Search input
     React.createElement("div", { style:{ position:"relative", maxWidth:540, marginBottom:20 } },
@@ -8448,11 +8484,6 @@ function PatientSearch({ setGlobalPat, onNavigate }) {
     ),
 
     error && React.createElement("div", { role:"alert", style:{ color:"#b42318", marginBottom:12 } }, error),
-    pendingIdentity && React.createElement("div", { style:{ background:TL, padding:16, borderRadius:8, marginBottom:16 } },
-      React.createElement("strong", null, "Use existing organization patient at this clinic?"),
-      React.createElement("p", { style:{ margin:"8px 0", fontSize:13 } }, pendingIdentity.name + " · " + pendingIdentity.uhid + ". Confirm the patient identity. This adds their identity to this clinic; other clinics' clinical notes and payments are not copied."),
-      React.createElement("button", { onClick:attach, disabled:loading, style:{ padding:"8px 14px", cursor:"pointer" } }, "Add to this clinic and open"),
-      React.createElement("button", { onClick:()=>setPendingIdentity(null), disabled:loading, style:{ padding:"8px 14px", marginLeft:8, cursor:"pointer" } }, "Cancel")),
     // Results
     searched && !error && results.length === 0 && React.createElement("div", {
       style:{ background:BGS, borderRadius:8, padding:"24px", textAlign:"center", fontSize:14, color:"#5a5a5a", border:`1px dashed ${BORDER}` }
@@ -8502,7 +8533,7 @@ function PatientSearch({ setGlobalPat, onNavigate }) {
               ? React.createElement("div", { style:{ fontSize:13, fontWeight:600, color:"#059669", display:"flex", alignItems:"center", gap:4 } },
                   "✓ Active Patient"
                 )
-              : React.createElement("div", { style:{ fontSize:12, color:"#5a5a5a" } }, p.organization_patient_id && !p.atCurrentClinic ? "Organization patient · add to clinic" : "Click to select")
+              : React.createElement("div", { style:{ fontSize:12, color:"#5a5a5a" } }, p.organization_patient_id ? "Open patient" : "Click to select")
           );
         })
       )
@@ -32331,7 +32362,7 @@ function App() {
     setGlobalPat: setGlobalPat
   }), page === "documents" && /*#__PURE__*/React.createElement(PatientDocuments, {
     globalPat: globalPat
-  }), page === "folder_picker" && /*#__PURE__*/React.createElement(FolderPicker, {
+  }), page === "patient_history" && React.createElement(PatientHistory,{globalPat,onNavigate:navigateFromSearch}), page === "folder_picker" && /*#__PURE__*/React.createElement(FolderPicker, {
     globalPat: globalPat,
     onNavigate: navigateFromSearch
   }), page === "records" && /*#__PURE__*/React.createElement(RecordsPicker, {

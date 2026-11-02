@@ -3,6 +3,13 @@ import { read, write, type ActionTable } from "./types.js";
 import { str } from "./util.js";
 
 export const sharedPatientActions: ActionTable = {
+  openOrganizationPatient:read(async(p,{tx,actor})=>{
+    const id=str(p.organizationPatientId);
+    if(!actor.organizationId || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)) return {success:false,error:"Invalid organization patient"};
+    const local=(await sql<{patient:{id:string;uhid:string}|null}>`SELECT clinical_open_patient(${id}::uuid) AS patient`.execute(tx)).rows[0]!.patient;
+    if(!local) return {success:false,error:"Patient is not available",forbidden:true};
+    return {success:true,...local,organizationPatientId:id};
+  },"patients:read"),
   searchOrganizationPatients: read(async (p,{tx,actor}) => {
     if (!actor.organizationId) return { success:false,error:"Organization directory is not configured" };
     const q=str(p.query);

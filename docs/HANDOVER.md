@@ -1,5 +1,21 @@
 # Handover for the next tool (31 Oct 2026)
 
+## Latest correction and delivery — one central patient, clinic care (3 November 2026)
+
+Read `docs/CENTRAL-PATIENT-HISTORY.md`. User explicitly clarified that the patient is
+created once centrally; treatment, actual doctors and item use belong to clinics.
+The old Add to clinic prompt is removed. Search opens the central identity directly,
+with compatibility references handled internally. Patient History is now in the
+existing folder: permission-scoped, paginated source summaries across clinics, with
+clinic filters, recorded-doctor labels and selected historical material/lot fields.
+Payments/fee fields are excluded; this does not yet create a structured visit/item
+ledger. Organization patient UUID is exposed for future CRM linking; existing embedded
+CRM contracts have not been migrated. Old local foreign-key reference rows still
+exist; do not claim full physical schema consolidation. Migration0026 applied locally;
+synthetic browser acceptance and283-test API suite pass. Next work: actual visits,
+treatments/material usage and their correction/finalization flow. UI redesign deferred.
+
+
 ## Latest implementation — shared patient identity (3 November2026)
 
 Read `docs/SHARED-PATIENT-IDENTITY.md`. Migration0025 adds links between existing

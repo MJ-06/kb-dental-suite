@@ -10,6 +10,7 @@ import { patients } from "./patients.js";
 import { session } from "./session.js";
 import { organizationActions } from "./organization.js";
 import { sharedPatientActions } from "./shared-patients.js";
+import { patientHistoryActions } from "./patient-history.js";
 import type { ActionTable } from "./types.js";
 
-export const actions: ActionTable = Object.assign(Object.create(null) as ActionTable, masters, patients, diary, finance, clinical, cases, documents, crm, session, organizationActions, sharedPatientActions);
+export const actions: ActionTable = Object.assign(Object.create(null) as ActionTable, masters, patients, diary, finance, clinical, cases, documents, crm, session, organizationActions, sharedPatientActions, patientHistoryActions);

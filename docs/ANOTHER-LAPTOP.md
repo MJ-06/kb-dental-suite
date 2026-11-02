@@ -81,11 +81,12 @@ After the clinic linker, run from api/:
 ```powershell
 node --import tsx scripts/publish-clinical-patient-identities.ts
 node --import tsx scripts/publish-clinical-patient-identities.ts --apply
-node --import tsx scripts/seed-shared-patient-demo.ts --apply
+node --import tsx scripts/seed-shared-patient-demo.ts --apply --history
 ```
 
 The last command is optional and limited to the named local development fixture.
-Use Patient Search from the East clinic to find the fictional Orion Shared Demo.
+Use Patient Search from either clinic to open the fictional Orion Shared Demo, then
+choose Patient History. No second registration or Add to clinic step is required.
 Existing patient records are not merged/moved; historical records remain scoped.
 See [shared identity scope and next work](SHARED-PATIENT-IDENTITY.md).
 

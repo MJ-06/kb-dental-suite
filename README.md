@@ -5,6 +5,7 @@ Practice management and patient/clinic CRM, in development on `saas/multi-clinic
 - **Start on another laptop:** [setup and commands for both versions](docs/ANOTHER-LAPTOP.md).
 - **Current handover:** [docs/HANDOVER.md](docs/HANDOVER.md).
 - **Latest product direction:** [patient-first clinical CRM](docs/PATIENT-CRM-DIRECTION.md).
+- **Central patient and permitted history:** [current workflow and scope](docs/CENTRAL-PATIENT-HISTORY.md).
 - **Shared patient identity:** [directory, explicit clinic attachment and limits](docs/SHARED-PATIENT-IDENTITY.md).
 - **UI/native backend review:** [recommendations for review](docs/UI-NATIVE-OPPORTUNITIES.md).
 - **Clinic switching and Organization tab:** [usage, setup and limits](docs/CLINIC-SWITCHING.md).

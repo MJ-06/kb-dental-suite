@@ -1,5 +1,11 @@
 # Shared patient identity: first clinical-suite slice
 
+Latest update: the user clarified one central patient with clinic-specific care.
+The explicit Add to clinic prompt described below is superseded by direct opening
+and Patient History; see [current behavior](CENTRAL-PATIENT-HISTORY.md). Internal
+clinic references preserve older foreign keys without a second registration flow.
+
+
 3 November2026. Existing UI retained; next milestone after clinic switching.
 
 ## Delivered journey

@@ -47,7 +47,7 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
     }
     if (action === "staffLogout") return staffLogout(req);
     if (action === "verifyMasterPassword" && masterAttempts(req.ip)) return { success: false, error: "Too many attempts. Wait a minute and try again." };
-    if (["switchWorkingClinic", "saveOrganizationProfile", "attachOrganizationPatient"].includes(action) && req.method !== "POST") {
+    if (["switchWorkingClinic", "saveOrganizationProfile", "attachOrganizationPatient", "openOrganizationPatient"].includes(action) && req.method !== "POST") {
       return { success: false, error: "Send this change as a POST" };
     }
 

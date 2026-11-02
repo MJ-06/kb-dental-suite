@@ -1,5 +1,15 @@
 # Patient and clinic CRM: latest product direction
 
+## Central patient clarification — 3 November 2026
+
+The patient is created once at organization level. Clinics record the care:
+visits, actual treating doctors, treatments and items/materials used. CRM should
+use that one organization patient identity. Do not require staff to add/register
+the same person again for each clinic. Steps1–2 (central access and permitted
+history) are implemented as described in `CENTRAL-PATIENT-HISTORY.md`; structured
+visit recording is the next slice. Preserve the familiar clinical UI.
+
+
 31 October 2026. Explicit user correction in the main coordination chat.
 This direction takes precedence over the contact-centre analogy and demo layout.
 

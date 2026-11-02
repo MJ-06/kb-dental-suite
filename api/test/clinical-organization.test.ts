@@ -177,6 +177,59 @@ describe("preserved clinical UI organization bridge", () => {
       await c.query("UPDATE app_users SET active=true WHERE username='b-admin'");
     });
   });
+  it("opens a central patient directly and pages only permitted clinic history", async () => {
+    const home=await call("switchWorkingClinic",{clinicId:w.clinicA}); clinic=w.clinicA; revision=home.revision;
+    const issued=await call("getNextUHID");
+    await call("saveRegistration",{uhid:issued.uhid,name:"History Synthetic",mobile:"9000000081",complaint:"Synthetic medical history"});
+    const identity=(await call("searchOrganizationPatients",{query:"History Synthetic"})).patients[0].organization_patient_id;
+    await owner(async c=>{
+      await c.query("SELECT set_config('app.clinic_id',$1,true)",[w.clinicA]);
+      const id=(await c.query("SELECT id FROM patients WHERE uhid=$1",[issued.uhid])).rows[0].id;
+      await c.query("INSERT INTO daily_register(patient_id,uhid,visit_date,procedure_done,operating_doctor) SELECT $1,$2,'2026-01-01'::date+n,'Synthetic procedure A','Synthetic Dr West' FROM generate_series(1,31) n",[id,issued.uhid]);
+      await c.query("INSERT INTO clinical_records(patient_id,uhid,tab_name,fields,recorded_at) VALUES($1,$2,'Demo form',$3::jsonb,'2026-06-01')",[id,issued.uhid,JSON.stringify({"Treating Doctor":"",Doctor:"Synthetic Dr West",Material:"Demo composite",LOT:"FAKE-LOT-1",Fee:999})]);
+      await c.query("INSERT INTO clinical_sheets(patient_id,uhid,sheet_type) VALUES($1,$2,'Demo chart')",[id,issued.uhid]);
+    });
+    const next=await call("switchWorkingClinic",{clinicId:w.clinicB}); clinic=w.clinicB; revision=next.revision;
+    expect((await call("getPatientHistory",{organizationPatientId:identity})).success).toBe(true);
+    const opened=await call("openOrganizationPatient",{organizationPatientId:identity}); expect(opened.success).toBe(true);
+    expect((await call("openOrganizationPatient",{organizationPatientId:identity})).id).toBe(opened.id);
+    expect((await call("openOrganizationPatient",{organizationPatientId:identity},{method:"GET"})).success).toBe(false);
+    expect((await call("searchOrganizationPatients",{query:"History Synthetic"})).patients).toHaveLength(1);
+    await owner(async c=>{
+      await c.query("SELECT set_config('app.clinic_id',$1,true)",[w.clinicB]);
+      await c.query("INSERT INTO daily_register(patient_id,uhid,visit_date,procedure_done,operating_doctor) VALUES($1,$2,'2026-07-01','Synthetic procedure B','Synthetic Dr East')",[opened.id,opened.uhid]);
+    });
+    const first=await call("getPatientHistory",{organizationPatientId:identity});
+    expect(first.success).toBe(true); expect(first.events).toHaveLength(30); expect(first.nextCursor).toBeTruthy();
+    const second=await call("getPatientHistory",{organizationPatientId:identity,cursor:first.nextCursor});
+    const events=[...first.events,...second.events]; expect(events).toHaveLength(35);
+    expect(new Set(events.map(e=>e.key)).size).toBe(35);
+    expect(events.some(e=>e.doctor==="Synthetic Dr East"&&e.clinicId===w.clinicB)).toBe(true);
+    const form=events.find(e=>e.kind==="form"); expect(form.doctor).toBe("Synthetic Dr West"); expect(form.details.Material).toBe("Demo composite"); expect(form.details.Fee).toBeUndefined();
+    expect((await call("getPatientHistory",{organizationPatientId:identity,cursor:"bad"})).success).toBe(false);
+    expect((await call("getPatientHistory",{organizationPatientId:identity},{cookie:desk,clinic:w.clinicA,revision:1})).forbidden).toBe(true);
+    // Reading a central identity may create an internal reference, but grants
+    // no permission to change identity or enter clinical/registration data.
+    await owner(async c=>{
+      await c.query("SELECT set_config('app.clinic_id',$1,true)",[w.clinicB]);
+      await c.query("INSERT INTO patients(uhid,full_name) VALUES(next_uhid(),'Readonly Central Example')");
+    });
+    const remote=(await call("searchOrganizationPatients",{query:"Readonly Central Example"},{cookie:desk,clinic:w.clinicA,revision:1})).patients[0];
+    expect(remote.atCurrentClinic).toBe(false);
+    const reference=await call("openOrganizationPatient",{organizationPatientId:remote.organization_patient_id},{cookie:desk,clinic:w.clinicA,revision:1});
+    expect(reference.success).toBe(true);
+    expect((await call("saveRegistration",{uhid:reference.uhid,name:"Unauthorized edit"},{cookie:desk,clinic:w.clinicA,revision:1})).forbidden).toBe(true);
+    await owner(async c=>{
+      await c.query("SELECT set_config('app.clinic_id',$1,true)",[w.clinicA]);
+      await c.query("UPDATE roles SET permissions=array_remove(permissions,'clinical:read') WHERE id=(SELECT role_id FROM app_users WHERE username='a-admin')");
+    });
+    const restricted=await call("getPatientHistory",{organizationPatientId:identity});
+    expect(restricted.clinics).toHaveLength(1); expect(restricted.events).toHaveLength(1);
+    expect(restricted.events[0].clinicId).toBe(w.clinicB);
+    expect((await call("getPatientHistory",{organizationPatientId:identity,clinicId:w.clinicA})).forbidden).toBe(true);
+    expect((await call("whoAmI")).clinicId).toBe(w.clinicB);
+    expect((await call("getPatientHistory",{organizationPatientId:"00000000-0000-4000-8000-000000000099"})).success).toBe(false);
+  });
   it("logout revokes the original session even after a clinic switch", async () => {
     const next=await call("switchWorkingClinic",{clinicId:w.clinicB}); clinic=w.clinicB; revision=next.revision;
     expect((await call("staffLogout")).success).toBe(true);
