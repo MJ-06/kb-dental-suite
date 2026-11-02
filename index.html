@@ -26049,6 +26049,71 @@ function PersonListEditor({ items, onAdd, onRemove, onEdit }) {
   );
 }
 
+// Safety flags: what the staff need to know about a patient BEFORE they sit
+// down. Laid out the way the clinic asked for it -- one box, an Add button,
+// and the entries numbered underneath with a Delete apiece.
+function SafetyFlagsEditor({ items, onAdd, onRemove }) {
+  const [draft, setDraft] = React.useState("");
+  const [err, setErr] = React.useState("");
+  const list = (items || []).map(x => String(x == null ? "" : x));
+
+  const add = () => {
+    const v = draft.trim();
+    if (!v) return;
+    // The same flag twice is somebody typing it again, not a second flag --
+    // and two identical entries in a list picked from is only confusing.
+    if (list.some(x => x.trim().toLowerCase() === v.toLowerCase())) {
+      setErr("\u201c" + v + "\u201d is already on the list.");
+      return;
+    }
+    setErr(""); setDraft(""); onAdd(v);
+  };
+
+  const cell = { padding:"7px 12px", fontSize:13, borderBottom:`1px solid ${BORDER}` };
+  return React.createElement("div", null,
+    React.createElement("div", { style:{ fontSize:15, fontWeight:700, marginBottom:2 } }, "Safety Flags"),
+    React.createElement("div", { style:{ fontSize:13, color:"#383838", marginBottom:14, maxWidth:620, lineHeight:1.5 } },
+      "What the staff need to know before the patient sits down \u2014 that they are apprehensive, ",
+      "or on psychiatric treatment. The clinic's own list, not a fixed one."),
+
+    React.createElement("div", { style:{ display:"flex", gap:10, alignItems:"center", marginBottom:14, flexWrap:"wrap" } },
+      React.createElement("input", { style:{ ...inp, width:300, maxWidth:"100%" }, value:draft,
+        placeholder:"Type new entry here",
+        onChange:e=>{ setDraft(e.target.value); if (err) setErr(""); },
+        onKeyDown:e=>{ if (e.key === "Enter") add(); } }),
+      React.createElement("button", { onClick:add, disabled:!draft.trim(),
+        style:{ padding:"9px 22px", fontSize:13, border:"none", borderRadius:7, fontWeight:700,
+                cursor: draft.trim() ? "pointer" : "default",
+                background: draft.trim() ? T : "#9ca3af", color:"#fff" } }, "Add")),
+
+    err && React.createElement("div", { style:{ fontSize:13, fontWeight:600, color:"#b91c1c", background:"#fdf2f2",
+      border:"1px solid #e5b4b4", borderRadius:7, padding:"8px 11px", marginBottom:12, maxWidth:420 } }, err),
+
+    React.createElement("div", { style:{ fontSize:13, fontWeight:700, color:"#383838", marginBottom:7 } }, "Available entries:"),
+    list.length === 0
+      ? React.createElement("div", { style:{ fontSize:13, color:"#444444" } }, "None yet. Type one above and press Add.")
+      : React.createElement("div", { style:{ border:`1px solid ${BORDER}`, borderRadius:8, overflow:"hidden", maxWidth:520 } },
+          React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"56px 1fr auto",
+            background:T, color:"#fff", fontSize:12.5, fontWeight:700 } },
+            React.createElement("div", { style:{ padding:"7px 12px" } }, "Sr"),
+            React.createElement("div", { style:{ padding:"7px 12px" } }, "Name"),
+            React.createElement("div", { style:{ padding:"7px 12px" } }, "")),
+          list.map((it, i) => React.createElement("div", { key:it + "#" + i,
+            style:{ display:"grid", gridTemplateColumns:"56px 1fr auto", alignItems:"center",
+                    background: i % 2 ? "#fff" : BGS } },
+            React.createElement("div", { style:{ ...cell, color:"#3d3d3d" } }, i + 1),
+            React.createElement("div", { style:{ ...cell, fontWeight:600, color:"#2e2e2e" } }, it),
+            React.createElement("div", { style:{ ...cell, textAlign:"right" } },
+              React.createElement("button", {
+                // A flag removed here stops being offered; it asks first and
+                // names which, because the list is short and a misclick is
+                // otherwise silent.
+                onClick:()=>{ if (window.confirm("Delete \u201c" + it + "\u201d?")) onRemove(i); },
+                style:{ padding:"4px 12px", fontSize:12.5, border:"1px solid #e5b4b4", borderRadius:6,
+                        background:"#fff", color:"#b91c1c", fontWeight:700, cursor:"pointer" } }, "Delete")))))
+  );
+}
+
 // When the day runs, and how long a slot is. The appointment book draws its
 // columns from these, so a clinic that opens at eight, or runs twenty-minute
 // slots, is a master edit rather than a code change.
@@ -26766,7 +26831,7 @@ const MASTER_STRUCTURE = [
   ]},
   { id:"patient", label:"Patient", subtabs:[
     { id:"referralSource", label:"Referral Source", placeholder:true },
-    { id:"flags",          label:"Flags", placeholder:true },
+    { id:"flags",          label:"Safety Flags" },
     { id:"occupation",     label:"Occupation", placeholder:true },
     { id:"docCategories",  label:"Document Categories" }
   ]},
@@ -27775,6 +27840,7 @@ function Master() {
   const [medNotes, setMedNotes] = React.useState([]);
   const [apptReasons, setApptReasons] = React.useState([]);
   const [docCategories, setDocCategories] = React.useState([]);
+  const [safetyFlags, setSafetyFlags] = React.useState([]);
   const [implantBrands, setImplantBrands] = React.useState([]);
   const [panels, setPanels] = React.useState([]);
   const [timings, setTimings] = React.useState(DEFAULT_TIMINGS);
@@ -27798,8 +27864,9 @@ function Master() {
       "getMedicineDosagesList", "getMedicineFrequenciesList", "getMedicineDurationsList",
       "getMedicineInstructionsList", "getMedicineNotesList", "getReasonsList",
       "getClinicProfile", "getDocumentCategoriesList", "getProcedureLibrary",
-      "getImplantBrandsList", "getPanelsList", "getWorkingDays", "getClinicTimings"
-    ]).then(([t,d,e,c,m,tpl,ch,med,dos,freq,dur,instr,mn,ar,cp,dc,pl,ib,pnl,wd,ct]) => {
+      "getImplantBrandsList", "getPanelsList", "getWorkingDays", "getClinicTimings",
+      "getSafetyFlagsList"
+    ]).then(([t,d,e,c,m,tpl,ch,med,dos,freq,dur,instr,mn,ar,cp,dc,pl,ib,pnl,wd,ct,sf]) => {
       setLoading(false);
       if (t.success) setTreatments(t.treatments || []);
       // An older backend without this list simply leaves it empty, and the
@@ -27823,6 +27890,9 @@ function Master() {
       if (ar.success) setApptReasons(ar.reasons || []);
       if (cp.success && cp.profile) setClinicProfile(cp.profile);
       if (dc.success) setDocCategories(dc.categories || []);
+      // A backend that predates this list answers nothing, and the screen
+      // shows none rather than breaking.
+      if (sf && sf.success) setSafetyFlags(sf.flags || []);
       if (pl.success) { setProcedureLibrary(pl.library || []); setProcedureFamilies(pl.families || []); }
       // A backend without this list leaves the clinic open every day, which is
       // the honest answer until the days are filled in — not an invented week.
@@ -27877,6 +27947,7 @@ function Master() {
   const saveMedNotes = (arr) => persist("saveMedicineNotesList", { medNotes: JSON.stringify(arr) }, arr, setMedNotes, medNotes);
   const saveApptReasons = (arr) => persist("saveReasonsList", { reasons: JSON.stringify(arr) }, arr, setApptReasons, apptReasons);
   const saveDocCategories = (arr) => persist("saveDocumentCategoriesList", { categories: JSON.stringify(arr) }, arr, setDocCategories, docCategories);
+  const saveSafetyFlags = (arr) => persist("saveSafetyFlagsList", { flags: JSON.stringify(arr) }, arr, setSafetyFlags, safetyFlags);
   const saveProcedureLibrary = (arr) => persist("saveProcedureLibrary", { library: JSON.stringify(arr) }, arr, setProcedureLibrary, procedureLibrary);
   // Both halves travel together: they are one answer to "is the clinic open
   // that day", and saving them apart would leave a moment where it is wrong.
@@ -28027,6 +28098,11 @@ function Master() {
     }),
     procedureLibrary: () => React.createElement(ProcedureLibraryEditor, {
       items:procedureLibrary, families:procedureFamilies, onSave:saveProcedureLibrary
+    }),
+    flags: () => React.createElement(SafetyFlagsEditor, {
+      items:safetyFlags,
+      onAdd:(v)=>saveSafetyFlags([...safetyFlags, v]),
+      onRemove:(i)=>saveSafetyFlags(safetyFlags.filter((_,idx)=>idx!==i))
     }),
     docCategories: () => React.createElement(SimpleListEditor, {
       items:docCategories, placeholder:"New document category...",
