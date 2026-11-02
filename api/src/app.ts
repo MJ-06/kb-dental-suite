@@ -21,6 +21,7 @@ import { configureSystemLog } from "./syslog.js";
 export interface AppOptions {
   db: Kysely<DB>;
   cookieSecure: boolean;
+  publicDemo?: boolean;
 }
 
 export async function buildApp(opts: AppOptions & { logger?: boolean }) {
@@ -38,6 +39,13 @@ export async function buildApp(opts: AppOptions & { logger?: boolean }) {
   await app.register(cookie);
   // Global ceiling per address; login sets its own, much lower one.
   await app.register(rateLimit, { max: 600, timeWindow: "1 minute" });
+  if(opts.publicDemo) app.addHook("preHandler",async(req,reply)=>{
+    if(req.url.startsWith("/api/v1/storage") && !["GET","HEAD"].includes(req.method)) return reply.code(403).send({error:{code:"demo_disabled",message:"External storage configuration is disabled in the synthetic public demo"}});
+    const input={...(req.query as Record<string,unknown>),...(req.body && typeof req.body==="object" ? req.body as Record<string,unknown> : {})};
+    const action=String(input.action ?? "");
+    if(["generateSOAPNotes","chatbotReply","createDocumentPDF"].includes(action)) return reply.send({success:false,error:"External AI and server PDF generation are disabled in the synthetic review demo"});
+    if(req.method==="GET" && (/^(save|delete|update|queue|mark|start|resolve|append|switch|open|attach)/.test(action)||action==="getNextUHID"||/^verify.*Password$/.test(action))) return reply.code(405).send({success:false,error:"Send this operation in a POST body"});
+  });
 
   // A body must be JSON. A cross-site form can send text/plain or form
   // encodings but not JSON, so together with the SameSite=Strict cookie

@@ -54,7 +54,11 @@ const VALUE_LISTS: [string, string, string, string[]][] = [
   ["MedicineFrequenciesList", "medicine_frequency", "frequencies", []],
   ["MedicineDurationsList", "medicine_duration", "durations", []],
   ["MedicineNotesList", "medicine_note", "medNotes", []],
-  ["PaymentModesList", "payment_mode", "modes", []]
+  ["PaymentModesList", "payment_mode", "modes", []],
+  ["PatientTypesList", "patient_type", "types", ["Normal","Panel"]],
+  ["OccupationsList", "occupation", "occupations", ["Business","Government Service","Private Service","Self Employed","Professional","Homemaker","Student","Retired","Unemployed","Other"]],
+  ["SafetyFlagsList", "safety_flag", "flags", ["Apprehensive","Mentally Challenged","Neurological Issue","Physically Challenged","Psychiatric Treatment"]],
+  ["ReferralSourcesList", "referral_source", "sources", ["Instagram","Facebook","Website","Referred by old patient","Family/Friends","Walk in","Referred by Internal Dr.","Referred by External Dr.","Practo","Referred by Family Friend","Referred by Internal Staff","Known","Just Dial"]]
 ];
 
 // Lists of {situation, text, category}.
@@ -117,11 +121,12 @@ export const masters: ActionTable = {};
 for (const [suffix, list, key, defaults] of VALUE_LISTS) {
   masters[`get${suffix}`] = read(async (_p, { tx }) => {
     const values = await readValues(tx, list);
-    return { success: true, [key]: values.length || !defaults.length ? values : defaults };
+    return { success: true, [key]: values.length || !defaults.length || await getSetting(tx, `list_initialized:${list}`) ? values : defaults };
   });
   masters[`save${suffix}`] = write("masters:write", async (p, { tx }) => {
     const arr = parseList(p[key], suffix.replace(/List$/, "").replace(/([a-z])([A-Z])/g, "$1 $2").toLowerCase());
     await writeValues(tx, list, arr.map((v) => ({ value: str(v) })));
+    await putSetting(tx, `list_initialized:${list}`, true);
     return { success: true };
   });
 }
@@ -275,9 +280,10 @@ Object.assign(masters, {
     return { success: true };
   }),
 
+  saveAppPassword: write("roles:manage", async () => ({success:false,error:"This backend uses individual staff accounts. Change credentials in Roles & access; a shared app password is not used."})),
   getClinicTimings: read(async (_p, { tx }) => {
-    const t = (await getSetting<{ open?: string; close?: string; slotMinutes?: number }>(tx, "clinic_timings")) ?? {};
-    return { success: true, open: t.open || "09:00", close: t.close || "19:00", slotMinutes: t.slotMinutes && t.slotMinutes > 0 ? t.slotMinutes : 30 };
+    const t = (await getSetting<{ open?: string; close?: string; slotMinutes?: number; breaks?: {name:string;from:string;to:string}[] }>(tx, "clinic_timings")) ?? {};
+    return { success: true, open: t.open || "09:00", close: t.close || "19:00", slotMinutes: t.slotMinutes && t.slotMinutes > 0 ? t.slotMinutes : 30, breaks: t.breaks ?? [] };
   }),
   saveClinicTimings: write("masters:write", async (p, { tx }) => {
     const open = hhmm(p.open), close = hhmm(p.close);
@@ -285,7 +291,17 @@ Object.assign(masters, {
     if (!open || !close) return { success: false, error: "the opening and closing times must read as HH:MM" };
     if (!(step > 0)) return { success: false, error: "a slot must be at least one minute long" };
     if (close <= open) return { success: false, error: "the clinic cannot close before it opens" };
-    await putSetting(tx, "clinic_timings", { open, close, slotMinutes: step });
+    const raw = p.breaks === undefined || p.breaks === "" ? [] : parseList(p.breaks,"clinic breaks");
+    const breaks=raw.flatMap(item=>{
+      if(!item || typeof item!=="object") return [];
+      const b=item as Params,from=hhmm(b.from),to=hhmm(b.to);
+      return from && to && to>from ? [{name:str(b.name)||"Break",from,to}] : [];
+    }).sort((a,b)=>a.from.localeCompare(b.from));
+    const minutes=(time:string)=>Number(time.slice(0,2))*60+Number(time.slice(3));
+    let bookable=false;
+    for(let time=minutes(open);time<minutes(close);time+=step) if(!breaks.some(b=>time>=minutes(b.from)&&time<minutes(b.to))){bookable=true;break;}
+    if(!bookable) return {success:false,error:"those breaks leave no time to book anybody in"};
+    await putSetting(tx, "clinic_timings", { open, close, slotMinutes: step, breaks });
     return { success: true };
   }),
 
@@ -336,7 +352,7 @@ Object.assign(masters, {
     const r = await sql<{ key: string }>`SELECT key FROM clinic_settings WHERE key LIKE '%password%'`.execute(tx);
     const set = new Set(r.rows.map((x) => x.key));
     return {
-      success: true, financeSheetId: "",
+      success: true, financeSheetId: "", appPasswordSet:true, authenticationMode:"staff_accounts",
       financePasswordSet: set.has("finance_password"), masterPasswordSet: actor.organizationId ? !!await organizationMaster(tx) : set.has("master_password"),
       reportsPassword1Set: set.has("reports_password_1"), reportsPassword2Set: set.has("reports_password_2")
     };

@@ -48,6 +48,7 @@ const last10 = (v: unknown) => str(v).replace(/\D/g, "").slice(-10);
 // ── one patient, with their newest history ───────────────────────────────
 
 interface Row {
+  safety_flags:string[];
   organization_patient_id:string|null;
   id: string; uhid: string; full_name: string; gender: string | null; dob: string | null;
   mobile: string | null; mobile_2: string | null; whatsapp: string | null; email: string | null;
@@ -67,7 +68,7 @@ export async function findPatient(tx: Tx, uhid: string): Promise<Row | undefined
            CASE WHEN identity.id IS NOT NULL THEN nullif(identity.phone,'') ELSE p.mobile END AS mobile, p.mobile_2, p.whatsapp,
            p.email::text AS email, p.blood_group, p.occupation, p.marital_status, p.address,
            p.emergency_name, p.emergency_relation, p.emergency_contact, p.referred_by, p.referred_by_type,
-           p.patient_type, pn.name AS panel, p.panel_category, p.card_id, p.registered_on, p.registration_status,
+           p.patient_type, pn.name AS panel, p.panel_category, p.card_id, p.registered_on, p.registration_status,p.safety_flags,
            r.conditions, r.allergies, r.medicines, r.habits, r.chief_complaint, r.pain_level, r.how_known, r.id AS reg_id
       FROM patients p
       LEFT JOIN org_clinical_patient_links identity_link ON identity_link.patient_id=p.id AND identity_link.clinic_id=p.clinic_id
@@ -105,6 +106,7 @@ function demographics(p: Params): Record<string, unknown> {
   }
   const dob = dobToISO(p.dob);
   if (dob) out.date_of_birth = dob;
+  if (p.safetyFlags !== undefined) out.safety_flags = listOf(p.safetyFlags);
   return out;
 }
 
@@ -214,7 +216,7 @@ export const patients: ActionTable = {
     const x = await findPatient(tx, uhid);
     if (!x) return { success: false, error: `Patient not found: ${uhid}` };
     return { success: true, patient: {
-      organizationPatientId:x.organization_patient_id ?? undefined, uhid: x.uhid, name: x.full_name, gender: x.gender ?? "", dob: dobOut(x.dob),
+      organizationPatientId:x.organization_patient_id ?? undefined, safetyFlags:x.safety_flags ?? [], uhid: x.uhid, name: x.full_name, gender: x.gender ?? "", dob: dobOut(x.dob),
       mobile: x.mobile ?? "", mobile2: x.mobile_2 ?? "", whatsapp: x.whatsapp ?? "", email: x.email ?? "",
       bloodGroup: x.blood_group ?? "", occupation: x.occupation ?? "", maritalStatus: x.marital_status ?? "",
       address: x.address ?? "", emergencyName: x.emergency_name ?? "", emergencyRelation: x.emergency_relation ?? "",

@@ -19,6 +19,22 @@ async function quickRegister(name: string, extra: Record<string, unknown> = {}) 
 }
 
 describe("registration", () => {
+  it("does not truncate the monthly UHID when the sequence grows past 99", async () => {
+    const {default:pg}=await import("pg"); const {OWNER_URL}=await import("./setup.js");
+    const c=new pg.Client({connectionString:OWNER_URL});await c.connect();
+    try {
+      await c.query("BEGIN"); await c.query("SELECT set_config('app.clinic_id',$1,true)",[w.clinicA]);
+      await c.query("INSERT INTO uhid_counters(period,last_value) SELECT period,99 FROM uhid_period() ON CONFLICT(clinic_id,period) DO UPDATE SET last_value=99");
+      await c.query("COMMIT");
+    } finally {await c.end();}
+    const issued=await exec(w,desk,"getNextUHID"); expect(issued.uhid).toBe(kbPrefix()+"100");
+  });
+  it("retains the current UI's safety flags and supports explicitly clearing them", async () => {
+    const uhid=await quickRegister("Synthetic Flags Example",{safetyFlags:["Apprehensive"]});
+    expect((await exec(w,desk,"getPatient",{uhid})).patient.safetyFlags).toEqual(["Apprehensive"]);
+    await exec(w,desk,"saveRegistration",{uhid,safetyFlags:[]});
+    expect((await exec(w,desk,"getPatient",{uhid})).patient.safetyFlags).toEqual([]);
+  });
   it("saves a new patient under the UHID the screen was shown", async () => {
     const uhid = await quickRegister("Test Patient One");
     expect(uhid.startsWith(kbPrefix())).toBe(true);

@@ -10,7 +10,8 @@ import { fileURLToPath } from "node:url";
 
 export const ownerEnvFile = process.env.KB_OWNER_ENV ?? join(homedir(), ".kb-pms", "owner.env");
 
-for (const file of [fileURLToPath(new URL("../.env", import.meta.url)), ownerEnvFile]) {
+const appEnvFile = process.env.KB_APP_ENV_FILE ?? fileURLToPath(new URL("../.env", import.meta.url));
+for (const file of [appEnvFile, ...(process.env.KB_LOAD_OWNER_ENV === "false" ? [] : [ownerEnvFile])]) {
   if (existsSync(file)) process.loadEnvFile(file);
 }
 

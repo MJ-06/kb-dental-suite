@@ -1,5 +1,30 @@
 # Handover for the next tool (31 Oct 2026)
 
+## Public synthetic clinical review — 3 November2026
+
+User requested Cloudflare sharing. See `PUBLIC-CLINICAL-DEMO.md` for access,
+review journeys, runtime commands and limitations. A dedicated synthetic database
+`kb_public_clinical_demo`, private runtime roles/config/storage and loopback8200
+serve the familiar UI with Riverside/Orchard clinics. Only8200 is tunneled; never
+publish8080 or reuse existing patient data. Credentials/tunnel logs remain in ignored
+`api/.organization-demo-runtime/public-clinical/`. Public URL is temporary, in chat.
+
+Migration0027 persists patient safety flags. Migration0028 preserves visible UHID
+format, fixes sequence100 truncation and shares allocation across linked clinics.
+Ported missing patient-type/occupation/referral/safety master lists from live source,
+including intentional empty lists, and clinic timing breaks. Individual staff login
+is retained; the obsolete shared app password editor points to Roles & access.
+These migrations are applied in the synthetic public DB; do not assume development
+or other organization databases are already migrated. Existing data reconciliation
+and the broader backend roadmap are not complete.
+
+Verification: TypeScript typecheck/build passed; serialized backend suite288/288
+(22 files) passed;23 public HTTP checks passed. Public sign-in page opened in browser.
+Authenticated browser journeys remain the explicit reviewer checklist; do not claim
+all UI flows passed. No new approval questions block synthetic review: use latest
+user decisions over superseded per-clinic proposals; research proposals are not
+automatically approved production migration rules.
+
 ## Latest planning direction — passive linking, unchanged entry flow
 
 User clarified on3 November2026: keep current recording screens and passive linking;

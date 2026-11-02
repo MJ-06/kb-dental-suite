@@ -9,6 +9,14 @@ afterAll(() => w.close());
 const page = (url: string) => w.app.inject({ method: "GET", url });
 
 describe("page security", () => {
+  it("keeps the public synthetic profile from calling external providers or accepting URL writes", async () => {
+    const demo=await buildApp({db:w.db,cookieSecure:true,publicDemo:true});
+    try {
+      const write=await demo.inject({url:"/exec",query:{action:"saveRegistration"}});expect(write.statusCode).toBe(405);
+      const ai=await demo.inject({method:"POST",url:"/exec",payload:{action:"chatbotReply"}});expect(ai.json().error).toMatch(/disabled/);
+      const storage=await demo.inject({method:"POST",url:"/api/v1/storage",payload:{kind:"drive"}});expect(storage.statusCode).toBe(403);
+    } finally {await demo.close();}
+  });
   it("configures both backend-address conventions for merged clinical screens", async () => {
     for (const url of ["/", "/register.html", "/expense.html", "/chatbot.html"]) {
       const body = (await page(url)).body;

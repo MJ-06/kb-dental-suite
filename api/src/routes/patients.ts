@@ -12,6 +12,7 @@ const Mobile = Type.String({ pattern: "^\\+?[0-9]{10,15}$" });
 // Everything a desk may set on a patient. UHID, clinic, version and the
 // timestamps are the server's, and are not accepted from the browser.
 const PatientFields = Type.Object({
+  safety_flags: Type.Array(Type.String({maxLength:100}),{maxItems:50}),
   full_name: Type.String({ minLength: 1, maxLength: 200 }),
   gender: Nullable(Type.Union([Type.Literal("Male"), Type.Literal("Female"), Type.Literal("Other")])),
   date_of_birth: Nullable(Type.String({ format: "date" })),

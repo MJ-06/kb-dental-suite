@@ -475,7 +475,7 @@ async function apiDirect(action, data = {}) {
     const query = p.toString();
     const url = SCRIPT_URL + "?" + query;
     // Sign-in always goes in the body so a password never lands in a URL.
-    const long = query.length > 1800 || ["staffLogin", "verifyMasterPassword", "saveMasterPassword", "switchWorkingClinic", "saveOrganizationProfile", "attachOrganizationPatient", "openOrganizationPatient"].includes(action);
+    const long = query.length > 1800 || /^(save|delete|update|queue|mark|start|resolve|append|switch|open|attach)/.test(action) || /^verify.*Password$/.test(action) || action === "getNextUHID" || ["staffLogin", "verifyMasterPassword", "saveMasterPassword", "switchWorkingClinic", "saveOrganizationProfile", "attachOrganizationPatient", "openOrganizationPatient"].includes(action);
     const body = long ? JSON.stringify(Object.assign({ action }, data,
                                        (tok && KB_BACKEND_IS_APPS_SCRIPT) ? { token: tok } : {})) : null;
     const attempts = 3;
@@ -27510,6 +27510,11 @@ function PanelFeeEditor({ panels }) {
 // gates them whether or not the rest of the app is locked, and with no
 // password there is no session anybody can obtain.
 function DocumentsPasswordChanger() {
+  if (window.KB_SCRIPT_URL_OVERRIDE) return React.createElement("div", {style:{background:"#fff",border:`1px solid ${BORDER}`,borderRadius:10,padding:20,maxWidth:560}},
+    React.createElement("strong",null,"Staff account access"),
+    React.createElement("p",{style:{fontSize:13,marginTop:8}},"Patient records and documents use individual staff logins and role permissions. Manage accounts in Roles & access."),
+    React.createElement("a",{href:"/roles.html",target:"_blank",rel:"noopener"},"Open Roles & access"));
+
   const [pwSet, setPwSet] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
   const [newPw, setNewPw] = React.useState("");

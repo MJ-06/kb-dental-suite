@@ -45,6 +45,23 @@ describe("signing in through /exec", () => {
 });
 
 describe("plain lists", () => {
+  it("supports the latest patient Master lists and preserves an explicitly emptied list", async () => {
+    for (const [suffix,key] of [["OccupationsList","occupations"],["ReferralSourcesList","sources"],["SafetyFlagsList","flags"],["PatientTypesList","types"]]) {
+      expect((await exec(w,admin,`get${suffix}`))[key!].length).toBeGreaterThan(0);
+      expect((await exec(w,admin,`save${suffix}`,{[key!]:["Synthetic option"]})).success).toBe(true);
+      expect((await exec(w,admin,`get${suffix}`))[key!]).toEqual(["Synthetic option"]);
+      expect((await exec(w,admin,`save${suffix}`,{[key!]:[]})).success).toBe(true);
+      expect((await exec(w,admin,`get${suffix}`))[key!]).toEqual([]);
+      expect((await exec(w,desk,`save${suffix}`,{[key!]:["forged"]})).forbidden).toBe(true);
+    }
+  });
+  it("round-trips clinic breaks and explains the named-account password model", async () => {
+    expect((await exec(w,admin,"saveClinicTimings",{open:"09:00",close:"18:00",slotMinutes:30,breaks:[{name:"Lunch",from:"13:00",to:"14:00"}]})).success).toBe(true);
+    expect((await exec(w,admin,"getClinicTimings")).breaks).toEqual([{name:"Lunch",from:"13:00",to:"14:00"}]);
+    const password=await exec(w,admin,"saveAppPassword",{password:"synthetic unused"});
+    expect(password.success).toBe(false); expect(password.error).toMatch(/individual staff/i);
+    expect((await exec(w,admin,"getSettings")).appPasswordSet).toBe(true);
+  });
   it("saves and returns a list in order", async () => {
     expect(await exec(w, admin, "savePaymentModesList", { modes: ["Cash", "UPI", "Card"] })).toEqual({ success: true });
     expect(await exec(w, admin, "getPaymentModesList")).toEqual({ success: true, modes: ["Cash", "UPI", "Card"] });
@@ -115,8 +132,8 @@ describe("settings", () => {
   it("validates and returns clinic timings", async () => {
     expect((await exec(w, admin, "saveClinicTimings", { open: "19:00", close: "09:00", slotMinutes: 15 })).error)
       .toBe("the clinic cannot close before it opens");
-    await exec(w, admin, "saveClinicTimings", { open: "9:30", close: "20:00", slotMinutes: 15 });
-    expect(await exec(w, admin, "getClinicTimings")).toEqual({ success: true, open: "09:30", close: "20:00", slotMinutes: 15 });
+    await exec(w, admin, "saveClinicTimings", { open: "9:30", close: "20:00", slotMinutes: 15, breaks:[] });
+    expect(await exec(w, admin, "getClinicTimings")).toEqual({ success: true, open: "09:30", close: "20:00", slotMinutes: 15, breaks:[] });
   });
 
   it("keeps week offs and holidays", async () => {

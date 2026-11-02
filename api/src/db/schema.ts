@@ -80,6 +80,7 @@ export interface PatientsTable extends Tenant, Housekeeping {
   referred_by: string | null;
   referred_by_type: string | null;
   registered_on: Generated<Date>;
+  safety_flags: Generated<string[]>;
   deleted_at: Date | null;
 }
 
