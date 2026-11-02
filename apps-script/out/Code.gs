@@ -475,6 +475,67 @@ function migrateDocumentSharing_(dryRun) {
   return summary;
 }
 
+// Safety flags: what the staff need to know about a patient BEFORE they sit
+// down -- that they are apprehensive, or on psychiatric treatment. Kept as a
+// master list so the clinic adds its own rather than living with mine.
+var SAFETY_FLAGS_SHEET = "Safety Flags";
+var DEFAULT_SAFETY_FLAGS = [
+  "Apprehensive",
+  "Mentally Challenged",
+  "Neurological Issue",
+  "Physically Challenged",
+  "Psychiatric Treatment"
+];
+
+// Occupations, picked from rather than typed: "Govt. Service", "Government
+// service" and "Govt service" are one occupation typed three ways, and no
+// report can add them up. A master list so the clinic keeps its own.
+// How the patient came to hear of the clinic -- the clinic's own list.
+var REFERRAL_SOURCES_SHEET = "Referral Sources";
+var DEFAULT_REFERRAL_SOURCES = [
+  "Instagram",
+  "Facebook",
+  "Website",
+  "Referred by old patient",
+  "Family/Friends",
+  "Walk in",
+  "Referred by Internal Dr.",
+  "Referred by External Dr.",
+  "Practo",
+  "Referred by Family Friend",
+  "Referred by Internal Staff",
+  "Known",
+  "Just Dial"
+];
+// What the tab shipped with before the clinic gave me theirs. A tab still
+// holding exactly these has never been curated, so it is replaced wholesale
+// the next time it is read. One that differs by so much as an entry has been
+// edited by somebody, and is left alone -- which also makes this run once
+// without needing a marker: afterwards it no longer matches.
+var LEGACY_REFERRAL_SOURCES = [
+  "An Existing Patient", "Website", "Word of Mouth",
+  "Sign Board", "Social Media", "Google"
+];
+function sameListIgnoringCase_(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  var norm = function (x) { return String(x == null ? "" : x).trim().toLowerCase(); };
+  var x = a.map(norm).sort(), y = b.map(norm).sort();
+  for (var i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+  return true;
+}
+
+// Patient types. "Panel" is not just a label -- it is what sends a patient
+// to the panel register instead of the main one -- so it and "Normal" are
+// the two the app acts on. Anything else the clinic adds here is a label.
+var PATIENT_TYPES_SHEET = "Patient Types";
+var DEFAULT_PATIENT_TYPES = ["Normal", "Panel"];
+
+var OCCUPATIONS_SHEET = "Occupations";
+var DEFAULT_OCCUPATIONS = [
+  "Business", "Government Service", "Private Service", "Self Employed",
+  "Professional", "Homemaker", "Student", "Retired", "Unemployed", "Other"
+];
+
 var DOC_CATEGORIES_SHEET = "Document Categories";
 var DEFAULT_DOC_CATEGORIES = [
   "X-Ray / RVG", "OPG", "CBCT", "Blood Reports", "Clinical Photograph",
@@ -506,6 +567,114 @@ function parseList_(raw, label) {
   }
   if (!Array.isArray(arr)) return { __bad: "the " + label + " was not a list" };
   return arr;
+}
+
+function getReferralSourcesList() {
+  var sh = getSheet(REFERRAL_SOURCES_SHEET);
+  var now = new Date().toISOString();
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(["Referral Source", "Updated At"]);
+    DEFAULT_REFERRAL_SOURCES.forEach(function(x) { sh.appendRow([x, now]); });
+  }
+  var data = sh.getDataRange().getValues();
+  var items = [];
+  for (var i = 1; i < data.length; i++) { if (data[i][0]) items.push(String(data[i][0])); }
+  // Still exactly the six it shipped with: nobody has touched it, so the
+  // clinic's own list takes its place. Anything else is left alone.
+  if (sameListIgnoringCase_(items, LEGACY_REFERRAL_SOURCES)) {
+    sh.clearContents();
+    sh.appendRow(["Referral Source", "Updated At"]);
+    DEFAULT_REFERRAL_SOURCES.forEach(function(x) { sh.appendRow([x, now]); });
+    items = DEFAULT_REFERRAL_SOURCES.slice();
+  }
+  return { success: true, sources: items };
+}
+
+function saveReferralSourcesList(p) {
+  var arr = parseList_(p.sources, "referral sources");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
+  var sh = getSheet(REFERRAL_SOURCES_SHEET);
+  sh.clearContents();
+  sh.appendRow(["Referral Source", "Updated At"]);
+  var now = new Date().toISOString();
+  arr.forEach(function(v) { sh.appendRow([v, now]); });
+  return { success: true };
+}
+
+function getPatientTypesList() {
+  var sh = getSheet(PATIENT_TYPES_SHEET);
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(["Patient Type", "Updated At"]);
+    var now = new Date().toISOString();
+    DEFAULT_PATIENT_TYPES.forEach(function(x) { sh.appendRow([x, now]); });
+  }
+  var data = sh.getDataRange().getValues();
+  var items = [];
+  for (var i = 1; i < data.length; i++) { if (data[i][0]) items.push(String(data[i][0])); }
+  return { success: true, types: items };
+}
+
+function savePatientTypesList(p) {
+  var arr = parseList_(p.types, "patient types");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
+  var sh = getSheet(PATIENT_TYPES_SHEET);
+  sh.clearContents();
+  sh.appendRow(["Patient Type", "Updated At"]);
+  var now = new Date().toISOString();
+  arr.forEach(function(v) { sh.appendRow([v, now]); });
+  return { success: true };
+}
+
+function getOccupationsList() {
+  var sh = getSheet(OCCUPATIONS_SHEET);
+  // A tab nobody has filled in starts with the usual ones rather than an
+  // empty dropdown the desk cannot get past.
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(["Occupation", "Updated At"]);
+    var now = new Date().toISOString();
+    DEFAULT_OCCUPATIONS.forEach(function(o) { sh.appendRow([o, now]); });
+  }
+  var data = sh.getDataRange().getValues();
+  var items = [];
+  for (var i = 1; i < data.length; i++) { if (data[i][0]) items.push(String(data[i][0])); }
+  return { success: true, occupations: items };
+}
+
+function saveOccupationsList(p) {
+  var arr = parseList_(p.occupations, "occupations");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
+  var sh = getSheet(OCCUPATIONS_SHEET);
+  sh.clearContents();
+  sh.appendRow(["Occupation", "Updated At"]);
+  var now = new Date().toISOString();
+  arr.forEach(function(v) { sh.appendRow([v, now]); });
+  return { success: true };
+}
+
+function getSafetyFlagsList() {
+  var sh = getSheet(SAFETY_FLAGS_SHEET);
+  // A tab nobody has filled in starts with the usual five rather than
+  // nothing at all, the same way the document categories do.
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(["Flag", "Updated At"]);
+    var now = new Date().toISOString();
+    DEFAULT_SAFETY_FLAGS.forEach(function(f) { sh.appendRow([f, now]); });
+  }
+  var data = sh.getDataRange().getValues();
+  var items = [];
+  for (var i = 1; i < data.length; i++) { if (data[i][0]) items.push(String(data[i][0])); }
+  return { success: true, flags: items };
+}
+
+function saveSafetyFlagsList(p) {
+  var arr = parseList_(p.flags, "safety flags");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
+  var sh = getSheet(SAFETY_FLAGS_SHEET);
+  sh.clearContents();
+  sh.appendRow(["Flag", "Updated At"]);
+  var now = new Date().toISOString();
+  arr.forEach(function(v) { sh.appendRow([v, now]); });
+  return { success: true };
 }
 
 function getDocumentCategoriesList() {
@@ -575,6 +744,19 @@ function doPost(e) {
 // in the page source — it's issued per sign-in and expires — so knowing the
 // /exec URL alone is no longer enough to read patient data.
 
+// Which build of THIS FILE is actually running.
+//
+// Pasting Code.gs into the editor changes nothing on its own: the /exec URL
+// serves whichever VERSION the deployment points at, so a paste without
+// Deploy > Manage deployments > New version leaves the old code answering.
+// That failure is silent -- the app looks fine until it calls an action the
+// running build has never heard of, which is how "Unknown action:
+// saveAppPassword" happened with the new file sitting in the editor.
+//
+// The app reads this from ping and says so when it is behind. Bump it
+// whenever this file changes in a way the app depends on.
+var BACKEND_BUILD = "2026-11-02b";
+
 var SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 // Always session-protected, even while the global rollout flag is off.
 var DOCUMENT_ACTIONS = [
@@ -587,6 +769,16 @@ var PUBLIC_ACTIONS = [
   // Patient-facing (chatbot.html) — these users have no login by design.
   "chatbotReply", "saveChatbotAppointment", "findAppointmentsByPhone",  "patientLookup", "patientCompleteRegistration"
 ];
+
+// Is there a password to sign in with at all?
+//
+// Purely so the app can tell the front desk which situation it is in. The
+// same fact is already public: staffLogin answers "No APP_PASSWORD set in
+// Script Properties" to anybody who asks. Every gate below is unchanged.
+function appPasswordSet_() {
+  var props = PropertiesService.getScriptProperties();
+  return !!(props.getProperty("APP_PASSWORD") || props.getProperty("MASTER_PASSWORD"));
+}
 
 function authRequired_() {
   return String(PropertiesService.getScriptProperties().getProperty("REQUIRE_AUTH") || "").toLowerCase() === "true";
@@ -719,11 +911,14 @@ function route(p) {
       // ── Auth ───────────────────────────────────────────────
       case "staffLogin":  return staffLogin(p);
       case "staffLogout": return staffLogout(p);
-      case "authStatus":  return { success: true, authRequired: authRequired_(), valid: isValidSession_(p.token) };
+      // passwordSet lets the app tell "you must sign in" apart from "there
+      // is nothing to sign in with", which are very different things to put
+      // in front of somebody with a patient waiting. It gates nothing.
+      case "authStatus":  return { success: true, authRequired: authRequired_(), valid: isValidSession_(p.token), passwordSet: appPasswordSet_() };
 
       // ── Health ─────────────────────────────────────────────
       case "ping":
-        return { success: true, message: "pong", timestamp: new Date().toISOString() };
+        return { success: true, message: "pong", timestamp: new Date().toISOString(), build: BACKEND_BUILD };
       case "debugSheetHeaders": return debugSheetHeaders(p);
 
       // ── Registration ───────────────────────────────────────
@@ -745,6 +940,14 @@ function route(p) {
       case "deletePatientDocument": return deletePatientDocument(p);
       case "getDocumentCategoriesList":  return getDocumentCategoriesList();
       case "saveDocumentCategoriesList": return saveDocumentCategoriesList(p);
+      case "getSafetyFlagsList":         return getSafetyFlagsList();
+      case "saveSafetyFlagsList":        return saveSafetyFlagsList(p);
+      case "getOccupationsList":         return getOccupationsList();
+      case "saveOccupationsList":        return saveOccupationsList(p);
+      case "getReferralSourcesList":     return getReferralSourcesList();
+      case "saveReferralSourcesList":    return saveReferralSourcesList(p);
+      case "getPatientTypesList":        return getPatientTypesList();
+      case "savePatientTypesList":       return savePatientTypesList(p);
       case "createDocumentPDF":         return createDocumentPDF(p);
       case "getPatientDocumentContent": return getPatientDocumentContent(p);
 
@@ -874,6 +1077,7 @@ function route(p) {
       case "saveSettings":         return saveSettings(p);
       case "saveFinancePassword":  return saveFinancePassword(p);
       case "verifyFinancePassword":return verifyFinancePassword(p);
+      case "saveAppPassword":      return saveAppPassword(p);
       case "saveMasterPassword":   return saveMasterPassword(p);
       case "verifyMasterPassword": return verifyMasterPassword(p);
       case "saveReportsPassword":  return saveReportsPassword(p);
@@ -1033,7 +1237,7 @@ function saveRegistration(p) {
   // a blank cannot say which it is. Without this the main book had no Panel
   // Type column at all and the value was written into nothing.
   ensureRegColumns_(sh, ["Patient Type", "Panel", "Panel Category", "Card ID",
-                         "Referred By Type", "Mobile 2"]);
+                         "Referred By Type", "Mobile 2", "Safety Flags"]);
 
   if (sh.getLastRow() === 0) {
     sh.appendRow([
@@ -1070,6 +1274,9 @@ function saveRegistration(p) {
     "Medicines you are taking currently:|Medicines": p.medicines,
     "Are you allergic to any of the following?|Allergies": safeJSON(p.allergies),
     "How did you know about this clinic?|Referred By": p.referredBy,
+    // What the staff need to know before this patient sits down. Written the
+    // same way as conditions and allergies, so it reads back the same way.
+    "Safety Flags": safeJSON(p.safetyFlags),
     "What is your chief complaint?|Complaint": p.complaint,
     "Are you in Pain?": p.painLevel ? "Yes" : "",
     "What is your level of pain on a scale of 0-10?|Pain Level": p.painLevel,
@@ -1446,6 +1653,7 @@ function getPatient(p) {
         conditions:        regList_(get("Conditions", "Have you ever suffered/suffering from any of the following?")),
         medicines:         get("Medicines", "Medicines you are taking currently:"),
         allergies:         regList_(get("Allergies", "Are you allergic to any of the following?")),
+        safetyFlags:       regList_(get("Safety Flags")),
         habits:            get("Habits"),
         complaint:         get("Complaint", "What is your chief complaint?"),
         painLevel:         get("Pain Level", "What is your level of pain on a scale of 0-10?"),
@@ -3840,6 +4048,7 @@ function getSettings() {
     success: true, financeSheetId: getFinanceSheetId(),
     financePasswordSet: !!props.getProperty("FINANCE_PASSWORD"),
     masterPasswordSet: !!props.getProperty("MASTER_PASSWORD"),
+    appPasswordSet: !!props.getProperty("APP_PASSWORD"),
     reportsPassword1Set: !!props.getProperty("REPORTS_PASSWORD_1"),
     reportsPassword2Set: !!props.getProperty("REPORTS_PASSWORD_2")
   };
@@ -3862,6 +4071,26 @@ function verifyFinancePassword(p) {
 }
 
 // Gates the Master page — same casual-deterrent model as Finance.
+// The password that opens patient documents.
+//
+// Kept apart from MASTER_PASSWORD on purpose: the Master page and the
+// patients' X-rays are different things to hand somebody the key to. It is
+// set from Master, which is itself behind the Master password, so only
+// whoever holds that can change it.
+//
+// There is no way to clear it from here. Clearing it would lock every
+// X-ray and saved prescription behind a password nobody can type -- the
+// exact dead end this was all about -- so removing it is a deliberate trip
+// to Script Properties, not one stray click in a settings screen.
+function saveAppPassword(p) {
+  var pw = String(p.password || "").trim();
+  if (!pw) return { success: false, error: "Password required" };
+  PropertiesService.getScriptProperties().setProperty("APP_PASSWORD", pw);
+  // Everyone signs in again with the new one.
+  PropertiesService.getScriptProperties().deleteProperty("SESSIONS");
+  return { success: true };
+}
+
 function saveMasterPassword(p) {
   var pw = String(p.password || "").trim();
   if (!pw) return { success: false, error: "Password required" };
@@ -4440,12 +4669,43 @@ function saveExpenseCategoriesList(p) {
 // the whole list is replaced on every save from the Master UI.
 // ════════════════════════════════════════════════════════════
 
+// Read by HEADER, not by position.
+//
+// Cost is new. A sheet written by the previous version holds
+// [Name, Fee, Department, Updated At], and reading cost from a fixed column
+// there would hand back a timestamp as a rupee figure -- and every margin
+// in Reports would be nonsense computed from a date. By name, a sheet with
+// no Cost column simply has no costs, which is the truth about it.
+function treatColumn_(headers, candidates) {
+  var norm = function (v) { return String(v).toLowerCase().replace(/[^a-z0-9]/g, ""); };
+  for (var c = 0; c < candidates.length; c++) {
+    var want = norm(candidates[c]);
+    for (var j = 0; j < headers.length; j++) if (norm(headers[j]) === want) return j;
+  }
+  return -1;
+}
+
 function getTreatmentsMaster() {
   var sh = getSheet("Treatments Master");
   var data = sh.getDataRange().getValues();
+  if (!data.length) return { success: true, treatments: [] };
+  var h = data[0];
+  var iName = treatColumn_(h, ["Treatment Name", "Name"]);
+  var iFee  = treatColumn_(h, ["Fee"]);
+  var iCost = treatColumn_(h, ["Cost"]);
+  var iDept = treatColumn_(h, ["Department"]);
+  // A sheet written before this change has no headers worth matching only
+  // if it is empty; fall back to the old fixed order so nothing is lost.
+  if (iName < 0) { iName = 0; iFee = 1; iDept = 2; }
   var items = [];
   for (var i = 1; i < data.length; i++) {
-    if (data[i][0]) items.push({ name: data[i][0], fee: data[i][1], department: data[i][2] || "" });
+    if (!data[i][iName]) continue;
+    items.push({
+      name: data[i][iName],
+      fee: iFee >= 0 ? data[i][iFee] : "",
+      cost: iCost >= 0 ? data[i][iCost] : "",
+      department: (iDept >= 0 ? data[i][iDept] : "") || ""
+    });
   }
   return { success: true, treatments: items };
 }
@@ -4454,9 +4714,11 @@ function saveTreatmentsMaster(p) {
   if (arr && arr.__bad) return { success: false, error: arr.__bad };
   var sh = getSheet("Treatments Master");
   sh.clearContents();
-  sh.appendRow(["Treatment Name", "Fee", "Department", "Updated At"]);
+  sh.appendRow(["Treatment Name", "Fee", "Cost", "Department", "Updated At"]);
   var now = new Date().toISOString();
-  arr.forEach(function(t) { sh.appendRow([t.name, t.fee, t.department || "", now]); });
+  arr.forEach(function(t) {
+    sh.appendRow([t.name, t.fee, t.cost === undefined || t.cost === null ? "" : t.cost, t.department || "", now]);
+  });
   return { success: true };
 }
 
@@ -5033,7 +5295,33 @@ function saveCrmCollection(p) {
 }
 
 var CLINIC_TIMINGS_TAB = "Clinic Timings";
-var CLINIC_TIMINGS_DEFAULT = { open: "09:00", close: "19:00", slotMinutes: 30 };
+var CLINIC_TIMINGS_DEFAULT = { open: "09:00", close: "19:00", slotMinutes: 30, breaks: [] };
+
+// The day's breaks -- lunch, and tea for the clinics that take one. A list,
+// not two fixed fields, because how many a clinic takes is the clinic's
+// business. Each is { name, from, to } with the times as "HH:MM".
+//
+// Anything that cannot be read as a break is dropped rather than returned
+// half-formed: a break with no end would otherwise shut the rest of the day.
+function cleanBreaks_(raw) {
+  var list = raw;
+  if (typeof list === "string") {
+    var t = list.trim();
+    if (!t) return [];
+    try { list = JSON.parse(t); } catch (e) { return []; }
+  }
+  if (!list || !list.length) return [];
+  var out = [];
+  for (var i = 0; i < list.length; i++) {
+    var b = list[i];
+    if (!b || typeof b !== "object") continue;
+    var from = hhmm_(b.from), to = hhmm_(b.to);
+    if (!from || !to || to <= from) continue;
+    out.push({ name: String(b.name == null ? "" : b.name).trim() || "Break", from: from, to: to });
+  }
+  out.sort(function (x, y) { return x.from < y.from ? -1 : x.from > y.from ? 1 : 0; });
+  return out;
+}
 
 // A time cell can come back as text, or as a Date when Sheets decides it
 // looks like a time. Both have to end up as "HH:MM", or the book draws
@@ -5046,6 +5334,11 @@ function hhmm_(v) {
   var h = parseInt(m[1], 10), mi = parseInt(m[2], 10);
   if (isNaN(h) || isNaN(mi) || h > 23 || mi > 59) return "";
   return (h < 10 ? "0" : "") + h + ":" + (mi < 10 ? "0" : "") + mi;
+}
+
+function toMin_(v) {
+  var m = /^(\d{1,2}):(\d{2})$/.exec(String(v || ""));
+  return m ? (parseInt(m[1], 10) * 60 + parseInt(m[2], 10)) : NaN;
 }
 
 function getClinicTimings() {
@@ -5064,7 +5357,8 @@ function getClinicTimings() {
     success: true,
     open: open || CLINIC_TIMINGS_DEFAULT.open,
     close: close || CLINIC_TIMINGS_DEFAULT.close,
-    slotMinutes: (step > 0 ? step : CLINIC_TIMINGS_DEFAULT.slotMinutes)
+    slotMinutes: (step > 0 ? step : CLINIC_TIMINGS_DEFAULT.slotMinutes),
+    breaks: cleanBreaks_(got["breaks"])
   };
 }
 
@@ -5077,16 +5371,33 @@ function saveClinicTimings(p) {
   // the clinic would be unable to book anybody until somebody noticed why.
   if (close <= open) return { success: false, error: "the clinic cannot close before it opens" };
 
+  var breaks = cleanBreaks_(p.breaks);
+  // A break that swallows the whole day leaves a clinic that cannot book
+  // anybody, and nobody would guess why. Counted here rather than found out
+  // at the desk tomorrow morning.
+  var openMin = toMin_(open), closeMin = toMin_(close), left = 0;
+  for (var m = openMin; m < closeMin; m += step) {
+    var inBreak = false;
+    for (var i = 0; i < breaks.length; i++) {
+      if (m >= toMin_(breaks[i].from) && m < toMin_(breaks[i].to)) { inBreak = true; break; }
+    }
+    if (!inBreak) left++;
+  }
+  if (!left) return { success: false, error: "those breaks leave no time to book anybody in" };
+
   var sh = getSheet(CLINIC_TIMINGS_TAB);
   sh.clearContents();
   var now = new Date().toISOString();
   // Written with a leading apostrophe so Sheets keeps "09:00" as text instead
   // of turning it into a time and handing back something else.
-  sh.getRange(1, 1, 4, 3).setValues([
+  sh.getRange(1, 1, 5, 3).setValues([
     ["Setting", "Value", "Updated At"],
     ["Open", "'" + open, now],
     ["Close", "'" + close, now],
-    ["Slot Minutes", step, now]
+    ["Slot Minutes", step, now],
+    // One cell of JSON: the number of breaks is the clinic's to choose, and
+    // a row apiece would need the tab reshaped every time one is added.
+    ["Breaks", JSON.stringify(breaks), now]
   ]);
   return { success: true };
 }

@@ -65,7 +65,7 @@ td{padding:7px 8px;border-bottom:1px solid #f0f0eb}
 // uses) rather than being left open.
 // When the clinic's own server serves this page, it sets KB_SCRIPT_URL_OVERRIDE to its own /exec,
 // and sign-in then also asks for the clinic code and username.
-var SCRIPT_URL = window.KB_SCRIPT_URL_OVERRIDE || "https://script.google.com/macros/s/AKfycby-OX-qvGE2U9Zt3b-_rpFqc5WQxRT5WMn1A030IcQIKXEaso36cMTbJ6c5xiP5O_6Zvg/exec";
+var SCRIPT_URL = window.KB_SCRIPT_URL_OVERRIDE || window.KB_SERVER_URL || "https://script.google.com/macros/s/AKfycby-OX-qvGE2U9Zt3b-_rpFqc5WQxRT5WMn1A030IcQIKXEaso36cMTbJ6c5xiP5O_6Zvg/exec";
 var NAMED = !!window.KB_SCRIPT_URL_OVERRIDE;
 function remembered(k) { try { return localStorage.getItem(k) || ""; } catch (e) { return ""; } }
 var TOKEN_KEY = "kb_expense_token";

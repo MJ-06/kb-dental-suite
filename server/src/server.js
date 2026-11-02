@@ -24,25 +24,50 @@ const ALLOWED_ORIGINS = (process.env.KB_ALLOWED_ORIGINS ||
 
 const BATCH_MAX = 25;
 const MAX_BODY = 32 * 1024 * 1024;   // an X-ray arrives as base64
+// Only behind a reverse proxy that sets it. On a clinic LAN there is none,
+// and believing the header would let anyone defeat the login rate limit by
+// sending a different one each try.
+const TRUST_FORWARDED_FOR = process.env.KB_TRUST_FORWARDED_FOR === "true";
 
 function corsHeaders(origin) {
   const allow = ALLOWED_ORIGINS.includes(origin) ? origin : ALLOWED_ORIGINS[0];
   return {
     "Access-Control-Allow-Origin": allow,
     "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
-    "Access-Control-Allow-Headers": "Content-Type",
+    // X-KB-Token has to be named here or a cross-origin request carrying it
+    // is refused at the preflight, before it ever reaches an action. Not
+    // Allow-Credentials: the session cookie is SameSite=Strict and so is not
+    // sent cross-site by design — the header is the cross-origin path, the
+    // cookie is the same-origin one.
+    "Access-Control-Allow-Headers": "Content-Type, X-KB-Token",
     "Access-Control-Max-Age": "86400",
     "Vary": "Origin"
   };
 }
 
 function send(res, status, body, origin) {
-  const text = JSON.stringify(body);
-  res.writeHead(status, {
+  // setCookie and clearCookie are instructions to this layer, not part of the
+  // answer. They are acted on and removed, so the token never appears in a
+  // reply body the page could read back out.
+  const headers = {
     "Content-Type": "application/json; charset=utf-8",
-    "Content-Length": Buffer.byteLength(text),
     ...corsHeaders(origin)
-  });
+  };
+  if (body && typeof body === "object") {
+    const base = "kb_session=%s; Path=/; HttpOnly; SameSite=Strict; Max-Age=%d";
+    if (body.setCookie) {
+      headers["Set-Cookie"] =
+        base.replace("%s", encodeURIComponent(body.setCookie))
+            .replace("%d", String(Math.floor(auth.SESSION_TTL_MS / 1000)));
+      body = { ...body }; delete body.setCookie;
+    } else if (body.clearCookie) {
+      headers["Set-Cookie"] = base.replace("%s", "").replace("%d", "0");
+      body = { ...body }; delete body.clearCookie;
+    }
+  }
+  const text = JSON.stringify(body);
+  headers["Content-Length"] = Buffer.byteLength(text);
+  res.writeHead(status, headers);
   res.end(text);
 }
 
@@ -173,6 +198,18 @@ const server = http.createServer(async (req, res) => {
       send(res, 405, { success: false, error: "Use GET or POST" }, origin);
       return;
     }
+
+    // Where the token came from is this layer's business; everything past
+    // here reads params.token and does not care. The app sends a header, so
+    // the token stops appearing in URLs and therefore in access logs and
+    // browser history; a query-string token still works, because the rollback
+    // to Apps Script has to.
+    params.token = auth.tokenFrom(params, req.headers);
+    // Who is trying, for the login rate limit. A proxy's forwarded address is
+    // trusted only when one is configured, since a header anybody can set is
+    // no identity at all.
+    params._from = (TRUST_FORWARDED_FOR && String(req.headers["x-forwarded-for"] || "").split(",")[0].trim())
+      || (req.socket && req.socket.remoteAddress) || "unknown";
 
     send(res, 200, await route(params), origin);
   } catch (e) {

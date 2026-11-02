@@ -527,6 +527,59 @@ async function run() {
     }
   });
 
+  await test("the token is taken from a header, a cookie, or last of all the URL", async () => {
+    const { tokenFrom } = require("../src/auth");
+    // A header first: that is where the app puts it now.
+    eq("header", tokenFrom({ token: "from-url" }, { "x-kb-token": "from-header" }), "from-header");
+    eq("cookie next", tokenFrom({ token: "from-url" }, { cookie: "a=1; kb_session=from-cookie; b=2" }), "from-cookie");
+    eq("a url token still works, for the rollback", tokenFrom({ token: "from-url" }, {}), "from-url");
+    eq("nothing at all", tokenFrom({}, {}), "");
+    // A cookie value is url-encoded on the way out, so it has to be decoded.
+    eq("an encoded cookie", tokenFrom({}, { cookie: "kb_session=a%2Bb" }), "a+b");
+    // A cookie whose name merely ends in kb_session is a different cookie.
+    eq("not a lookalike name", tokenFrom({}, { cookie: "not_kb_session=x" }), "");
+  });
+
+  await test("logging in sets an HttpOnly cookie, and signing out clears it", async () => {
+    const { hashPassword, putSetting } = require("../src/auth");
+    await putSetting("app_password", hashPassword("cookie-test"));
+    const login = await actions.staffLogin({ password: "cookie-test", _from: "test-cookie" });
+    eq("signed in", login.success, true);
+    eq("and the server was told to set the cookie", login.setCookie, login.token);
+    const out = await actions.staffLogout({ token: login.token });
+    eq("signing out clears it", out.clearCookie, true);
+    eq("and the session is gone", await require("../src/auth").isValidSession(login.token), false);
+  });
+
+  await test("a wrong password cannot be guessed at full speed", async () => {
+    const { hashPassword, putSetting, LOGIN_MAX_TRIES, loginAttempts } = require("../src/auth");
+    await putSetting("app_password", hashPassword("right-one"));
+    const from = "192.0.2.77";
+    loginAttempts.delete(from);
+
+    for (let i = 0; i < LOGIN_MAX_TRIES; i++) {
+      const r = await actions.staffLogin({ password: `wrong-${i}`, _from: from });
+      eq(`attempt ${i + 1} refused`, r.success, false);
+    }
+    const blocked = await actions.staffLogin({ password: "wrong-again", _from: from });
+    eq("the next one is held off", blocked.success, false);
+    ok("and says for how long", /minute/.test(blocked.error), blocked.error);
+    // Even the RIGHT password waits: otherwise the block tells an attacker
+    // the moment they have found it.
+    const evenRight = await actions.staffLogin({ password: "right-one", _from: from });
+    eq("the right password waits too", evenRight.success, false);
+
+    // Somebody else at a different machine is unaffected.
+    const other = await actions.staffLogin({ password: "right-one", _from: "192.0.2.78" });
+    eq("another desk still works", other.success, true);
+
+    // And a successful sign-in clears that desk's count.
+    loginAttempts.delete(from);
+    const after = await actions.staffLogin({ password: "right-one", _from: from });
+    eq("once the wait is over, the right password works", after.success, true);
+    eq("and the slate is clean", loginAttempts.has(from), false);
+  });
+
   await test("a screen password is stored hashed, never in the clear", async () => {
     await actions.saveFinancePassword({ password: "money123" });
     const row = await db.query("SELECT value FROM clinic_settings WHERE key = 'finance_password'");

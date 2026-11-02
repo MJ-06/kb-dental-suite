@@ -85,8 +85,13 @@ ok("a long payload goes in a POST body, not the URL", /const long = query\.lengt
 ok("sent as text/plain, so there is no CORS preflight to fail",
    /"Content-Type": "text\/plain;charset=utf-8"/.test(api));
 ok("the body carries the action and the data", /JSON\.stringify\(Object\.assign\(\{ action \}, data/.test(api));
-ok("and the session token", /token: getSessionToken\(\)/.test(api));
-ok("a short request still goes exactly as it did", /: await fetch\(url\);/.test(api));
+// The token still travels with a long write, but no longer always in the
+// body: against the clinic's own server it goes in a header, so it stays out
+// of access logs and browser history. Which one is used for which backend is
+// proven by running it, in backend-address-is-configuration.test.js; what
+// matters here is only that a long write still carries it.
+ok("and the session token", /token: tok|token: getSessionToken\(\)/.test(api));
+ok("a short request still goes exactly as it did", /: await fetch\(url[,)]/.test(api));
 ok("the retry rule is untouched — a write still only retries on 404",
    /if \(!isRead && e\.status !== 404\) break;/.test(api));
 

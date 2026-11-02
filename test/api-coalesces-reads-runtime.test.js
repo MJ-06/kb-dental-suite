@@ -38,7 +38,10 @@ function build() {
             }, {}) }
         : { success: true, from: action });
   }
-  return new Function("apiDirect", code)(apiDirect);
+  // handleAuthFailure is passed through unchanged: this file is about
+  // coalescing, not about sessions. What it does with a refusal is
+  // covered in a-locked-folder-is-not-an-empty-one.test.js.
+  return new Function("apiDirect", "handleAuthFailure", code)(apiDirect, r => r);
 }
 
 function run(name, fn) {
@@ -153,7 +156,7 @@ chain = chain.then(function () {
           }, {}) }
       : { success: true, from: action });
   }
-  var m = new Function("apiDirect", code)(apiDirect2);
+  var m = new Function("apiDirect", "handleAuthFailure", code)(apiDirect2, r => r);
   return Promise.all([m.api("getPatient", { uhid: "AL1001" }), m.api("getCarePlan", { uhid: "AL1001" })])
     .then(function (res) {
       ok("an out-of-date backend does not leave the clinic with errors",

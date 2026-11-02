@@ -28,9 +28,15 @@ function build(responder) {
     return r instanceof Error ? Promise.reject(r)
       : Promise.resolve({ ok: r === 200, status: r, json: () => Promise.resolve({ success: true, n: calls.length }) });
   };
-  const fn = new Function("fetch", "SCRIPT_URL", "getSessionToken", "handleAuthFailure",
+  // Everything apiDirect reads from its surroundings, handed in by name.
+  // KB_BACKEND_IS_APPS_SCRIPT is true here because that is what this file is
+  // about: these retries exist for Apps Script's habit of refusing a request
+  // outright. Where the token rides on each backend is covered separately, in
+  // backend-address-is-configuration.test.js.
+  const fn = new Function("fetch", "SCRIPT_URL", "KB_BACKEND_IS_APPS_SCRIPT",
+                          "getSessionToken", "handleAuthFailure", "sayIfBackendIsOld",
                           "URLSearchParams", "console", code)(
-    fetch, "https://script.example/exec", () => "tok", r => r, URLSearchParams,
+    fetch, "https://script.example/exec", true, () => "tok", r => r, r => r, URLSearchParams,
     { error: () => {} });
   return { fn, calls };
 }

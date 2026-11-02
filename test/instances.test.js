@@ -67,8 +67,12 @@ const state = (page) => page.evaluate(() => ({
   // guard stays tested now that every shipped instance is configured.
   const tmp = path.join(require('os').tmpdir(), 'kb-instances-unconfigured.html');
   const unconfEmp = await (async () => {
+    // The scriptUrl is now an expression, not a bare literal — it follows
+    // window.KB_SERVER_URL when the clinic's own machine sets one and falls
+    // back to the /exec URL otherwise. Blank the whole expression, which is
+    // what "this instance has no backend" means either way.
     fs.writeFileSync(tmp, html.replace(
-      /(empanelled: \{[\s\S]*?scriptUrl: )"[^"]*"/, '$1""'));
+      /(empanelled: \{[\s\S]*?scriptUrl: )(?:KB_SERVER_URL \|\| )?"[^"]*"/, '$1""'));
     const p2 = await ctx.newPage();
     await p2.goto('file://' + tmp + '?clinic=empanelled');
     await p2.waitForTimeout(350);
