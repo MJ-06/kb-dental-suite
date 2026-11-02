@@ -26612,7 +26612,7 @@ const MASTER_STRUCTURE = [
     { id:"employees",     label:"Employees" },
     { id:"chairs",        label:"Chairs" },
     { id:"implantBrands", label:"Implant Brands & Sizes" },
-    { id:"otherClinic",   label:"Other Clinic", placeholder:true }
+    { id:"otherClinic",   label:"Other Clinic" }
   ]},
   { id:"schedule", label:"Schedule", subtabs:[
     { id:"clinicTimings", label:"Clinic Timings" },
@@ -27290,6 +27290,226 @@ function PatientDocuments({ globalPat }) {
   );
 }
 
+// Create Clinic — the screen pattern the clinic asked for, in Master under
+// CLINIC → Other Clinic. The shape is deliberately the one they showed me:
+// name, group, speciality, plan, what data the new clinic starts with, and
+// an authorization code, then Create / Cancel.
+//
+// What it does NOT do is quietly pretend. Pressing Create RECORDS the
+// clinic here, in this clinic's own book. A second clinic needs its own
+// Google Sheet and its own deployment, and nothing on a screen can conjure
+// those — so the screen says so rather than leaving somebody to find out
+// when the new clinic never appears.
+const CLINIC_SPECIALITIES = [
+  "Dentistry", "Orthodontics", "Oral & Maxillofacial Surgery",
+  "Periodontics", "Endodontics", "Prosthodontics", "Pedodontics", "Implantology"
+];
+const CLINIC_DATA_CHOICES = [
+  { id:"defaults", label:"Use Defaults",
+    hint:"The new clinic starts with the built-in master lists and fills them in itself." },
+  { id:"copy",     label:"Copy from a same speciality clinic owned by you",
+    hint:"It opens with a copy of that clinic's master lists. Changing one afterwards does not change the other." },
+  { id:"share",    label:"Share with other clinics in the same group and speciality",
+    hint:"One set of master lists for every clinic in the group — a treatment added anywhere appears everywhere." }
+];
+
+// The clinics recorded so far, out of the clinic profile. It is a sheet of
+// text cells, so the list travels as JSON in one of them, and a cell that
+// has been emptied or mangled reads as "none" rather than throwing the
+// whole Master page away.
+function readOtherClinics(profile) {
+  try {
+    const raw = (profile && profile.otherClinics) || "";
+    if (!raw) return [];
+    const list = (typeof raw === "string") ? JSON.parse(raw) : raw;
+    return Array.isArray(list) ? list.filter(x => x && typeof x === "object") : [];
+  } catch (e) { return []; }
+}
+
+function OtherClinicEditor({ profile, onSave }) {
+  const existing = readOtherClinics(profile);
+  const thisClinic = (profile && profile.name) || (window.CLINIC && window.CLINIC.name) || "This clinic";
+
+  // Groups and plans are the clinic's own vocabulary, not something this app
+  // gets to decide — so the dropdowns offer what has been used before and a
+  // way to type a new one.
+  const groups = Array.from(new Set([thisClinic].concat(existing.map(c => c.group)).filter(Boolean)));
+  const plans = Array.from(new Set(existing.map(c => c.plan).filter(Boolean)));
+
+  const [name, setName] = React.useState("");
+  const [group, setGroup] = React.useState(groups[0] || "");
+  const [newGroup, setNewGroup] = React.useState("");
+  const [speciality, setSpeciality] = React.useState(CLINIC_SPECIALITIES[0]);
+  const [plan, setPlan] = React.useState(plans[0] || "__new");
+  const [newPlan, setNewPlan] = React.useState("");
+  const [data, setData] = React.useState("defaults");
+  const [copyFrom, setCopyFrom] = React.useState("");
+  const [auth, setAuth] = React.useState("");
+  const [err, setErr] = React.useState("");
+  const [state, setState] = React.useState("");
+
+  // Master loads the clinic profile AFTER this mounts, so the first render
+  // sees no groups and no plans and seeds the dropdowns from nothing. When
+  // the profile arrives, a value that is not one of the choices is re-seeded
+  // -- and one that IS is left alone, so a half-filled form is not wiped by
+  // somebody else's save.
+  React.useEffect(() => {
+    setGroup(g => (g === "__new" || groups.indexOf(g) >= 0) ? g : (groups[0] || "__new"));
+    setPlan(p => (p === "__new" || plans.indexOf(p) >= 0) ? p : (plans[0] || "__new"));
+  }, [profile]);
+
+  const groupValue = group === "__new" ? newGroup.trim() : group;
+  const planValue = plan === "__new" ? newPlan.trim() : plan;
+  // Only clinics of the same speciality can be copied from — copying an
+  // orthodontist's lists into a surgery is not a shortcut, it is a mess.
+  const copyable = [thisClinic].concat(
+    existing.filter(c => String(c.speciality || "") === speciality).map(c => c.name)).filter(Boolean);
+
+  const row = (label, control, hint) => React.createElement("div",
+    { style:{ display:"flex", gap:14, alignItems:"flex-start", marginBottom:12, flexWrap:"wrap" } },
+    React.createElement("div", { style:{ width:130, flexShrink:0, fontSize:13, color:"#2e2e2e", paddingTop:7 } }, label),
+    React.createElement("div", { style:{ flex:"1 1 300px", minWidth:240, maxWidth:420 } },
+      control,
+      hint && React.createElement("div", { style:{ fontSize:12.5, color:"#444444", marginTop:4, lineHeight:1.5 } }, hint))
+  );
+  const select = (value, setter, options) => React.createElement("select",
+    { value, onChange:e=>setter(e.target.value), style:{ ...inp, width:"100%" } },
+    options.map(o => React.createElement("option", { key:o.v, value:o.v }, o.l)));
+
+  const reset = () => {
+    setName(""); setGroup(groups[0] || ""); setNewGroup("");
+    setSpeciality(CLINIC_SPECIALITIES[0]); setPlan(plans[0] || "__new"); setNewPlan("");
+    setData("defaults"); setCopyFrom(""); setAuth(""); setErr(""); setState("");
+  };
+
+  const create = () => {
+    setErr("");
+    if (!name.trim()) return setErr("The clinic needs a name.");
+    if (!groupValue) return setErr("Choose a group, or type a new one.");
+    if (!planValue) return setErr("Choose a plan, or type a new one.");
+    if (data === "copy" && !copyFrom) return setErr("Choose which clinic to copy the lists from.");
+    if (!auth.trim()) return setErr("An authorization code is needed to create a clinic.");
+    // A name already recorded is almost always the same clinic entered twice.
+    if (existing.some(c => String(c.name || "").trim().toLowerCase() === name.trim().toLowerCase()))
+      return setErr("“" + name.trim() + "” is already on this list.");
+
+    const entry = {
+      id: "cl" + Date.now().toString(36) + Math.random().toString(36).slice(2, 5),
+      name: name.trim(), group: groupValue, speciality,
+      plan: planValue, data,
+      copyFrom: data === "copy" ? copyFrom : "",
+      // The code is recorded as given. Nothing here can verify it, and
+      // showing a tick for a code this app never checked would be a lie.
+      authCode: auth.trim(),
+      createdAt: new Date().toISOString()
+    };
+    setState("saving");
+    // Spread the profile so every other field it holds survives: the sheet
+    // is cleared and rewritten from whatever is handed over.
+    Promise.resolve(onSave({ ...profile, otherClinics: JSON.stringify(existing.concat([entry])) }))
+      .then(okd => { if (okd === false) { setState("failed"); return; } setState("done"); reset(); setState("done"); })
+      .catch(() => setState("failed"));
+  };
+
+  const remove = (id) => {
+    if (!window.confirm("Remove this clinic from the list?")) return;
+    setState("saving");
+    Promise.resolve(onSave({ ...profile, otherClinics: JSON.stringify(existing.filter(c => c.id !== id)) }))
+      .then(okd => setState(okd === false ? "failed" : "done"))
+      .catch(() => setState("failed"));
+  };
+
+  return React.createElement("div", null,
+    React.createElement("div", { style:{ fontSize:15, fontWeight:700, marginBottom:2 } }, "Create Clinic"),
+    React.createElement("div", { style:{ fontSize:13, color:"#444444", marginBottom:16, maxWidth:620, lineHeight:1.55 } },
+      "Another clinic in the same group — a second branch, or a clinic of a different speciality under the same ownership."),
+
+    row("Clinic Name", React.createElement("input", { style:{ ...inp, width:"100%" }, value:name,
+      onChange:e=>setName(e.target.value), placeholder:"e.g. K.B. Dental Clinic — Vasundhara" })),
+
+    row("Group", select(group, setGroup,
+      groups.map(g => ({ v:g, l:g })).concat([{ v:"__new", l:"+ Add a new group…" }]))),
+    group === "__new" && row("New group", React.createElement("input", { style:{ ...inp, width:"100%" },
+      value:newGroup, onChange:e=>setNewGroup(e.target.value), placeholder:"e.g. KB DENTAL CLINIC" })),
+
+    row("Speciality", select(speciality, setSpeciality, CLINIC_SPECIALITIES.map(s => ({ v:s, l:s })))),
+
+    row("Plan", select(plan, setPlan,
+      plans.map(p => ({ v:p, l:p })).concat([{ v:"__new", l:"+ Add a new plan…" }])),
+      plans.length ? null : "Plans are the clinic's own — type the name the group uses."),
+    plan === "__new" && row("New plan", React.createElement("input", { style:{ ...inp, width:"100%" },
+      value:newPlan, onChange:e=>setNewPlan(e.target.value), placeholder:"e.g. Dental Inventory Plus" })),
+
+    row("Data", React.createElement("div", null,
+      CLINIC_DATA_CHOICES.map(c => React.createElement("label",
+        { key:c.id, style:{ display:"flex", alignItems:"flex-start", gap:8, marginBottom:8, cursor:"pointer" } },
+        React.createElement("input", { type:"radio", name:"kb-clinic-data", checked:data===c.id,
+          onChange:()=>setData(c.id), style:{ marginTop:3 } }),
+        React.createElement("span", null,
+          React.createElement("span", { style:{ fontSize:13, color:"#2e2e2e" } }, c.label),
+          React.createElement("span", { style:{ display:"block", fontSize:12.5, color:"#444444", marginTop:1, lineHeight:1.5 } }, c.hint)))),
+      data === "copy" && React.createElement("div", { style:{ marginTop:4, marginLeft:24 } },
+        select(copyFrom, setCopyFrom,
+          [{ v:"", l:"Choose a clinic…" }].concat(copyable.map(n => ({ v:n, l:n })))),
+        React.createElement("div", { style:{ fontSize:12.5, color:"#444444", marginTop:4 } },
+          "Only clinics of the same speciality are listed.")))),
+
+    row("Authorization Code", React.createElement("input", { style:{ ...inp, width:"100%" }, value:auth,
+      onChange:e=>setAuth(e.target.value), placeholder:"Enter the code" }),
+      "Ask whoever administers this Clinical Suite for the code. It is recorded as given — nothing here checks it."),
+
+    React.createElement("div", { style:{ display:"flex", gap:10, alignItems:"center", marginTop:16, flexWrap:"wrap" } },
+      React.createElement("button", { onClick:create, disabled:state==="saving",
+        style:{ padding:"9px 22px", fontSize:13, border:"none", borderRadius:7, cursor:state==="saving"?"default":"pointer",
+          background:state==="saving"?"#9bb8cd":T, color:"#fff", fontWeight:700 } },
+        state === "saving" ? "Saving…" : "Create Clinic"),
+      React.createElement("button", { onClick:reset,
+        style:{ padding:"9px 22px", fontSize:13, border:`1px solid ${BORDER}`, borderRadius:7, cursor:"pointer",
+          background:"#fff", color:"#2e2e2e", fontWeight:700 } }, "Cancel")),
+
+    err && React.createElement("div", { style:{ fontSize:13, fontWeight:700, color:"#b91c1c",
+      background:"#fdf2f2", border:"1px solid #e5b4b4", borderRadius:7, padding:"9px 12px", marginTop:12, maxWidth:620 } }, err),
+    state === "failed" && React.createElement("div", { style:{ fontSize:13, fontWeight:700, color:"#b91c1c",
+      background:"#fdf2f2", border:"1px solid #e5b4b4", borderRadius:7, padding:"9px 12px", marginTop:12, maxWidth:620 } },
+      "Not saved — the message at the top of this page says why. Nothing was changed."),
+
+    // Said plainly, where it cannot be missed. A button called "Create
+    // Clinic" that records a row and nothing else has to admit it, or
+    // somebody waits for a clinic that is never coming.
+    React.createElement("div", { style:{ fontSize:12.5, color:"#444444", marginTop:14, maxWidth:620, lineHeight:1.6,
+      background:"#FFF8E1", border:"1px solid #F0D58A", borderRadius:7, padding:"10px 12px" } },
+      React.createElement("b", null, "What this does today: "),
+      "it records the clinic here, in this clinic's book, so the group is written down in one place. ",
+      "A working second clinic also needs its own Google Sheet and its own deployment, which is a separate job — ",
+      "this screen does not do it, and will say so until it can."),
+
+    React.createElement("div", { style:{ fontSize:12, fontWeight:700, color:"#383838", textTransform:"uppercase",
+      letterSpacing:".04em", marginBottom:8, marginTop:26, paddingTop:18, borderTop:`1px solid ${BORDER}` } },
+      "Clinics recorded (" + existing.length + ")"),
+    existing.length === 0
+      ? React.createElement("div", { style:{ fontSize:13, color:"#444444" } }, "None yet.")
+      : React.createElement("div", { style:{ overflowX:"auto" } },
+          React.createElement("table", { style:{ borderCollapse:"collapse", fontSize:12.5, minWidth:560 } },
+            React.createElement("thead", null, React.createElement("tr", null,
+              ["Clinic", "Group", "Speciality", "Plan", "Data", ""].map(h =>
+                React.createElement("th", { key:h, style:{ textAlign:"left", padding:"7px 12px", fontSize:12,
+                  textTransform:"uppercase", letterSpacing:".05em", color:"#3d3d3d", borderBottom:`1.5px solid ${BORDER}` } }, h)))),
+            React.createElement("tbody", null, existing.map((c, i) =>
+              React.createElement("tr", { key:(c.id || "row") + "#" + i, style:{ borderBottom:`1px solid ${BORDER}` } },
+                React.createElement("td", { style:{ padding:"7px 12px", fontWeight:700 } }, c.name || "—"),
+                React.createElement("td", { style:{ padding:"7px 12px" } }, c.group || "—"),
+                React.createElement("td", { style:{ padding:"7px 12px" } }, c.speciality || "—"),
+                React.createElement("td", { style:{ padding:"7px 12px" } }, c.plan || "—"),
+                React.createElement("td", { style:{ padding:"7px 12px" } },
+                  (CLINIC_DATA_CHOICES.find(d => d.id === c.data) || {}).label ||
+                  (c.data || "—")),
+                React.createElement("td", { style:{ padding:"7px 12px" } },
+                  React.createElement("button", { onClick:()=>remove(c.id),
+                    style:{ padding:"4px 10px", fontSize:12, border:`1px solid ${BORDER}`, borderRadius:6,
+                      cursor:"pointer", background:"#fff", color:"#b91c1c" } }, "Remove")))))))
+  );
+}
+
 function ClinicProfileEditor({ profile, onSave }) {
   const [name, setName] = React.useState(profile.name || "");
   const [address, setAddress] = React.useState(profile.address || "");
@@ -27320,7 +27540,10 @@ function ClinicProfileEditor({ profile, onSave }) {
   const [saved, setSaved] = React.useState("");
   const save = () => {
     setSaved("saving");
-    Promise.resolve(onSave({ name, address, phone, mobiles, email, logo, padTop, padRight, padBottom, padLeft,
+    // Spread first. This rebuilt the profile from its own fields alone, so
+    // saving the Clinic tab silently deleted every other field the profile
+    // holds -- the list of other clinics among them.
+    Promise.resolve(onSave({ ...profile, name, address, phone, mobiles, email, logo, padTop, padRight, padBottom, padLeft,
       padFlip: padFlip ? "yes" : "no" }))
       .then(okd => setSaved(okd === false ? "failed" : "done"))
       .catch(() => setSaved("failed"));
@@ -27673,6 +27896,10 @@ function Master() {
         "↗ Open Sales Tracker")
     ),
     clinicProfile: () => React.createElement(ClinicProfileEditor, {
+      profile: clinicProfile,
+      onSave: saveClinicProfile
+    }),
+    otherClinic: () => React.createElement(OtherClinicEditor, {
       profile: clinicProfile,
       onSave: saveClinicProfile
     })
