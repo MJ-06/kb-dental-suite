@@ -1373,6 +1373,65 @@ function ClinicHeader() {
     }
   }, "Ph.: 011-22131942 \xA0 Mob: 7866939786, 9319990912 \xA0 kbdentaldelhi@gmail.com")));
 }
+// The clinic's safety flags, read once per page and shared, the way the
+// clinic timings are. Registration offers them; the banner shows the ones a
+// patient has.
+let _safetyFlagsCache = null;
+function useSafetyFlags() {
+  const [flags, setFlags] = React.useState(() => _safetyFlagsCache || []);
+  React.useEffect(() => {
+    if (_safetyFlagsCache) return;
+    let alive = true;
+    api("getSafetyFlagsList").then(r => {
+      if (!alive || !r || !r.success) return;
+      _safetyFlagsCache = r.flags || [];
+      setFlags(_safetyFlagsCache);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  return flags;
+}
+
+// What a patient's record says, whichever way it was stored: the desk saves
+// a JSON array, an older row may hold "A, B, C". Both read as a list, and
+// anything else reads as none rather than throwing.
+function patientFlags(pat) {
+  const raw = pat && pat.safetyFlags;
+  if (!raw) return [];
+  if (Array.isArray(raw)) return raw.map(x => String(x || "").trim()).filter(Boolean);
+  const t = String(raw).trim();
+  if (!t) return [];
+  if (t.charAt(0) === "[") {
+    // Written by this app as JSON. If it no longer parses the cell is
+    // mangled and what it held is not recoverable — better no warning than
+    // a patient whose banner reads "[not jso". Splitting it on commas would
+    // put exactly that on the screen.
+    try {
+      const a = JSON.parse(t);
+      if (Array.isArray(a)) return a.map(x => String(x || "").trim()).filter(Boolean);
+    } catch (e) {}
+    return [];
+  }
+  return t.split(",").map(x => x.trim()).filter(Boolean);
+}
+
+// The flags a patient carries, drawn loudly. This is the whole point of
+// recording them: the staff see them before the patient sits down, on every
+// page that has a patient open, without opening anything.
+function SafetyFlagStrip({ pat, style }) {
+  const list = patientFlags(pat);
+  if (!list.length) return null;
+  return React.createElement("div", {
+    style: { display:"flex", alignItems:"center", gap:7, flexWrap:"wrap",
+             background:"#FFF4E5", border:"1px solid #F0C68A", borderRadius:8,
+             padding:"7px 12px", ...(style || {}) } },
+    React.createElement("span", { style:{ fontSize:13, fontWeight:700, color:"#8A4B00" } }, "\u26A0 Safety"),
+    list.map((f, i) => React.createElement("span", { key:f + "#" + i,
+      style:{ fontSize:13, fontWeight:700, color:"#8A4B00", background:"#fff",
+              border:"1px solid #F0C68A", borderRadius:20, padding:"3px 12px" } }, f))
+  );
+}
+
 function PatientBanner({
   pat,
   uhid,
@@ -1439,7 +1498,10 @@ function PatientBanner({
       background: "#fff",
       color: "#383838"
     }
-  }, "Change Patient"));
+  }, "Change Patient"), /*#__PURE__*/React.createElement(SafetyFlagStrip, {
+    pat: pat,
+    style: { flexBasis: "100%", marginTop: 2 }
+  }));
   return /*#__PURE__*/React.createElement("div", {
     style: {
       background: TL,
@@ -1670,7 +1732,8 @@ const emptyM = {
   alcohol: "No",
   alcoholFreq: "",
   allergies: [],
-  otherAllergy: ""
+  otherAllergy: "",
+  safetyFlags: []
 };
 function StepBar({
   cur
@@ -1760,6 +1823,9 @@ function Registration({
   const [isEditing, setIsEditing] = useState(false);
   const [P, setP] = useState(emptyP);
   const [M, setM] = useState(emptyM);
+  // The clinic's own list, from Master. Empty until it loads, and empty for
+  // a backend that does not serve it — the step simply shows no chips then.
+  const safetyFlagOptions = useSafetyFlags();
   const [D, setD] = useState({
     howKnown: [],
     howKnownOther: "",
@@ -2087,6 +2153,13 @@ function Registration({
       medicines: pat.medicines || "",
       allergies: pat.allergies || []
     }));
+    // On its own, not behind the conditions: a patient can carry a safety
+    // flag and no medical conditions at all, and that flag still has to come
+    // back when their record is opened.
+    {
+      const _sf = patientFlags(pat);
+      if (_sf.length) setM(prev => ({ ...prev, safetyFlags: _sf }));
+    }
     if (pat.complaint) setD(prev => ({
       ...prev,
       complaint: pat.complaint
@@ -2169,6 +2242,7 @@ function Registration({
       conditions: M.conditions,
       medicines: M.medicines || "",
       allergies: [...M.allergies, ...(M.otherAllergy ? [M.otherAllergy] : [])],
+      safetyFlags: M.safetyFlags,
       habits: [M.smoke === "Yes" ? "Smoking" : "", M.panMasala === "Yes" ? "Pan Masala" : "", M.tobacco === "Yes" ? "Tobacco" : "", M.alcohol === "Yes" ? "Alcohol" : ""].filter(Boolean).join(", "),
       complaint: D.complaint,
       painLevel: pain.level !== null ? String(pain.level) + "/10 — " + PAIN_L[pain.level || 0] : "",
@@ -3157,7 +3231,43 @@ function Registration({
     value: M.otherAllergy,
     onChange: up(setM, "otherAllergy"),
     placeholder: "Any other allergy..."
-  })), /*#__PURE__*/React.createElement(NavRow, {
+  })),
+  // Safety flags. Ticked here, and from here they ride on the patient's
+  // banner on every page the clinic opens them on.
+  (safetyFlagOptions.length || M.safetyFlags.length) ? /*#__PURE__*/React.createElement("div", {
+    style: { marginTop: 16, paddingTop: 14, borderTop: `1px solid ${BORDER}` }
+  }, /*#__PURE__*/React.createElement(Lbl, {
+    c: "Safety flags"
+  }), /*#__PURE__*/React.createElement("div", {
+    style: { fontSize: 13, color: "#444444", marginBottom: 8, lineHeight: 1.5 }
+  }, "What the staff should know before this patient sits down. These show on the patient's banner wherever they are opened."),
+    /*#__PURE__*/React.createElement("div", {
+      style: { display: "flex", flexWrap: "wrap", gap: 7 }
+    },
+    // Anything already on the record that is no longer on the master list is
+    // still shown and still ticked: a flag retired in Master must not drop
+    // silently off a patient who has it.
+    Array.from(new Set([...safetyFlagOptions, ...M.safetyFlags])).map(f => /*#__PURE__*/React.createElement("label", {
+      key: f,
+      style: {
+        display: "flex", alignItems: "center", gap: 5, fontSize: 13, cursor: "pointer",
+        padding: "5px 14px", borderRadius: 20,
+        border: `1px solid ${M.safetyFlags.includes(f) ? "#F0C68A" : BORDER}`,
+        background: M.safetyFlags.includes(f) ? "#FFF4E5" : "#fff",
+        color: M.safetyFlags.includes(f) ? "#8A4B00" : "#444",
+        fontWeight: M.safetyFlags.includes(f) ? 700 : 400
+      }
+    }, /*#__PURE__*/React.createElement("input", {
+      type: "checkbox",
+      checked: M.safetyFlags.includes(f),
+      onChange: () => setM(m => ({ ...m, safetyFlags: togArr(m.safetyFlags, f) })),
+      style: { display: "none" }
+    }), f))),
+    /*#__PURE__*/React.createElement(SafetyFlagStrip, {
+      pat: { safetyFlags: M.safetyFlags },
+      style: { marginTop: 10 }
+    })) : null,
+  /*#__PURE__*/React.createElement(NavRow, {
     back: () => setStep(1),
     fwd: () => setStep(3),
     fwdLabel: "Next: Dental Info \u2192"
