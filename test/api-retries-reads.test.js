@@ -34,9 +34,9 @@ function build(responder) {
   // outright. Where the token rides on each backend is covered separately, in
   // backend-address-is-configuration.test.js.
   const fn = new Function("fetch", "SCRIPT_URL", "KB_BACKEND_IS_APPS_SCRIPT",
-                          "getSessionToken", "handleAuthFailure",
+                          "getSessionToken", "handleAuthFailure", "sayIfBackendIsOld",
                           "URLSearchParams", "console", code)(
-    fetch, "https://script.example/exec", true, () => "tok", r => r, URLSearchParams,
+    fetch, "https://script.example/exec", true, () => "tok", r => r, r => r, URLSearchParams,
     { error: () => {} });
   return { fn, calls };
 }
