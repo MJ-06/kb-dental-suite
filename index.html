@@ -27555,7 +27555,55 @@ function PatientDocuments({ globalPat }) {
   // left it empty and the screen said "No documents uploaded yet." -- telling
   // the clinic a patient has no X-rays when the truth is that nobody could
   // look. On a patient's imaging that is the worst answer available.
-  const loadDocs = (uhid) => {
+  // THE PASSWORD IS ASKED FOR EVERY PATIENT FOLDER.
+  //
+  // It used to be asked once and then not again for the rest of the day on
+  // that computer, which is not what "locked" means to a clinic: one person
+  // types it in the morning and every patient's X-rays are open to whoever
+  // walks up to the desk after that.
+  //
+  // Held in memory only, and only for ONE patient at a time -- so opening
+  // another folder asks again, coming back to the first asks again, and a
+  // refresh asks again. There is nothing to remember to press and nothing
+  // left unlocked behind anybody.
+  const [unlockedFor, setUnlockedFor] = React.useState("");
+  const [pw, setPw] = React.useState("");
+  const [checking, setChecking] = React.useState(false);
+  const [pwErr, setPwErr] = React.useState("");
+
+  // Moving to another patient drops the unlock at once, so coming back to
+  // the first one asks again too. "Every time a folder is opened" means
+  // every time, not every new name.
+  React.useEffect(() => {
+    const id = (pat && pat.uhid) || "";
+    setUnlockedFor(cur => {
+      // The last patient's list goes with their unlock. Leaving it in
+      // memory behind a lock is one render away from being on screen.
+      if (cur && cur !== id) { setDocs([]); setDocsError(""); return ""; }
+      return cur;
+    });
+    setPw(""); setPwErr("");
+  }, [pat && pat.uhid]);
+
+  const unlock = async () => {
+    const want = (pat && pat.uhid) || "";
+    if (!pw.trim() || !want) return;
+    setChecking(true); setPwErr("");
+    // The same password as before, the one set in Master > Security. It
+    // also renews the session the files themselves are fetched with.
+    const res = await api("staffLogin", { password: pw });
+    setChecking(false);
+    if (res && res.success && res.token) {
+      setSessionToken(res.token);
+      setPw(""); setUnlockedFor(want);
+      loadDocs(want, true);
+    } else setPwErr(res && res.error ? res.error : "Incorrect password");
+  };
+
+  const loadDocs = (uhid, force) => {
+    // Nothing is fetched for a folder that has not been unlocked. The list
+    // is not merely hidden -- it is never asked for.
+    if (!force && unlockedFor !== uhid) { setDocs([]); setDocsError(""); setLoading(false); return; }
     setLoading(true); setDocsError("");
     api("getPatientDocuments", { uhid }).then(res => {
       setLoading(false);
@@ -27702,7 +27750,32 @@ function PatientDocuments({ globalPat }) {
     ),
     notFound && React.createElement("div", { style:{ fontSize:13.5, color:"#c0392b", marginBottom:14 } }, "⚠ No patient found with that UHID."),
 
-    pat && React.createElement("div", null,
+    // Locked: the patient is named, and nothing else about them is shown.
+    pat && unlockedFor !== pat.uhid && React.createElement("div", null,
+      React.createElement("div", { style:{ background:TL, border:`1px solid ${TM}`, borderRadius:10, padding:"12px 16px", marginBottom:16 } },
+        React.createElement("div", { style:{ fontSize:14, fontWeight:700, color:T } }, pat.name + " (" + pat.uhid + ")")
+      ),
+      React.createElement("div", { style:{ maxWidth:380, margin:"10px auto 0", background:"#fff", border:`1px solid ${BORDER}`,
+        borderRadius:12, padding:"26px 24px", textAlign:"center" } },
+        React.createElement("div", { style:{ fontSize:30, marginBottom:8 } }, "\uD83D\uDD12"),
+        React.createElement("div", { style:{ fontSize:14, fontWeight:700, marginBottom:4 } }, "This patient's documents are locked"),
+        React.createElement("div", { style:{ fontSize:13, color:"#444444", marginBottom:16, lineHeight:1.5 } },
+          "Enter the password to open ", React.createElement("b", null, pat.name), "'s folder."),
+        React.createElement("input", { type:"password", value:pw, autoFocus:true, placeholder:"Password",
+          onChange:e=>{ setPw(e.target.value); if (pwErr) setPwErr(""); },
+          onKeyDown:e=>e.key === "Enter" && unlock(),
+          style:{ ...inp, textAlign:"center", marginBottom:10, width:"100%" } }),
+        pwErr && React.createElement("div", { style:{ fontSize:12.5, color:"#e24b4a", marginBottom:10, fontWeight:600 } }, "\u274C " + pwErr),
+        React.createElement("button", { onClick:unlock, disabled:checking || !pw.trim(),
+          style:{ width:"100%", padding:"9px", fontSize:13.5, fontWeight:700, border:"none", borderRadius:7,
+                  cursor:(checking || !pw.trim()) ? "default" : "pointer",
+                  background:(checking || !pw.trim()) ? "#9ca3af" : T, color:"#fff" } },
+          checking ? "Checking\u2026" : "Unlock"),
+        React.createElement("div", { style:{ fontSize:12, color:"#4b4b4b", marginTop:12, lineHeight:1.5 } },
+          "The password set in Master \u203A Security. It is asked for every patient's folder."))
+    ),
+
+    pat && unlockedFor === pat.uhid && React.createElement("div", null,
       React.createElement("div", { style:{ background:TL, border:`1px solid ${TM}`, borderRadius:10, padding:"12px 16px", marginBottom:16 } },
         React.createElement("div", { style:{ fontSize:14, fontWeight:700, color:T } }, pat.name + " (" + pat.uhid + ")")
       ),
