@@ -1395,6 +1395,22 @@ function useSafetyFlags() {
 // What a patient's record says, whichever way it was stored: the desk saves
 // a JSON array, an older row may hold "A, B, C". Both read as a list, and
 // anything else reads as none rather than throwing.
+let _occupationsCache = null;
+function useOccupations() {
+  const [list, setList] = React.useState(() => _occupationsCache || []);
+  React.useEffect(() => {
+    if (_occupationsCache) return;
+    let alive = true;
+    api("getOccupationsList").then(r => {
+      if (!alive || !r || !r.success) return;
+      _occupationsCache = r.occupations || [];
+      setList(_occupationsCache);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  return list;
+}
+
 function patientFlags(pat) {
   const raw = pat && pat.safetyFlags;
   if (!raw) return [];
@@ -1826,6 +1842,7 @@ function Registration({
   // The clinic's own list, from Master. Empty until it loads, and empty for
   // a backend that does not serve it — the step simply shows no chips then.
   const safetyFlagOptions = useSafetyFlags();
+  const occupationOptions = useOccupations();
   const [D, setD] = useState({
     howKnown: [],
     howKnownOther: "",
@@ -2858,7 +2875,26 @@ function Registration({
     msg: errors.maritalStatus
   })), /*#__PURE__*/React.createElement("div", null, /*#__PURE__*/React.createElement(Lbl, {
     c: "Occupation *"
-  }), /*#__PURE__*/React.createElement("input", {
+  }),
+  // Picked from the clinic's list rather than typed, so one occupation is
+  // not three spellings. Two things it must not do:
+  //
+  //   - block the desk. Until the list loads, and for a backend that does
+  //     not serve it, this stays the box it always was. Occupation is a
+  //     required field; a dropdown with nothing in it would stop a patient
+  //     being registered at all.
+  //   - change anybody. A patient whose occupation is not on the list keeps
+  //     it, listed with the rest. A <select> whose value is not among its
+  //     options shows the first one instead, and saving would quietly file
+  //     them as something else.
+  occupationOptions.length ? /*#__PURE__*/React.createElement("select", {
+    style: { ...inp, borderColor: errors.occupation ? "#e24b4a" : "" },
+    value: P.occupation,
+    onChange: up(setP, "occupation")
+  }, /*#__PURE__*/React.createElement("option", { value: "" }, "Select"),
+    Array.from(new Set([...occupationOptions, ...(P.occupation ? [P.occupation] : [])]))
+      .map(o => /*#__PURE__*/React.createElement("option", { key: o, value: o }, o)))
+  : /*#__PURE__*/React.createElement("input", {
     style: {
       ...inp,
       borderColor: errors.occupation ? "#e24b4a" : ""
@@ -26162,7 +26198,9 @@ function PersonListEditor({ items, onAdd, onRemove, onEdit }) {
 // Safety flags: what the staff need to know about a patient BEFORE they sit
 // down. Laid out the way the clinic asked for it -- one box, an Add button,
 // and the entries numbered underneath with a Delete apiece.
-function SafetyFlagsEditor({ items, onAdd, onRemove }) {
+// One screen, used by every list Master keeps this way: a box, an Add, and
+// the entries numbered underneath with a Delete apiece.
+function EntryListEditor({ title, blurb, noun, items, onAdd, onRemove }) {
   const [draft, setDraft] = React.useState("");
   const [err, setErr] = React.useState("");
   const list = (items || []).map(x => String(x == null ? "" : x));
@@ -26170,8 +26208,8 @@ function SafetyFlagsEditor({ items, onAdd, onRemove }) {
   const add = () => {
     const v = draft.trim();
     if (!v) return;
-    // The same flag twice is somebody typing it again, not a second flag --
-    // and two identical entries in a list picked from is only confusing.
+    // The same entry twice is somebody typing it again, not a second one --
+    // and two identical rows in a list picked from is only confusing.
     if (list.some(x => x.trim().toLowerCase() === v.toLowerCase())) {
       setErr("\u201c" + v + "\u201d is already on the list.");
       return;
@@ -26181,10 +26219,8 @@ function SafetyFlagsEditor({ items, onAdd, onRemove }) {
 
   const cell = { padding:"7px 12px", fontSize:13, borderBottom:`1px solid ${BORDER}` };
   return React.createElement("div", null,
-    React.createElement("div", { style:{ fontSize:15, fontWeight:700, marginBottom:2 } }, "Safety Flags"),
-    React.createElement("div", { style:{ fontSize:13, color:"#383838", marginBottom:14, maxWidth:620, lineHeight:1.5 } },
-      "What the staff need to know before the patient sits down \u2014 that they are apprehensive, ",
-      "or on psychiatric treatment. The clinic's own list, not a fixed one."),
+    React.createElement("div", { style:{ fontSize:15, fontWeight:700, marginBottom:2 } }, title),
+    React.createElement("div", { style:{ fontSize:13, color:"#383838", marginBottom:14, maxWidth:620, lineHeight:1.5 } }, blurb),
 
     React.createElement("div", { style:{ display:"flex", gap:10, alignItems:"center", marginBottom:14, flexWrap:"wrap" } },
       React.createElement("input", { style:{ ...inp, width:300, maxWidth:"100%" }, value:draft,
@@ -26201,7 +26237,8 @@ function SafetyFlagsEditor({ items, onAdd, onRemove }) {
 
     React.createElement("div", { style:{ fontSize:13, fontWeight:700, color:"#383838", marginBottom:7 } }, "Available entries:"),
     list.length === 0
-      ? React.createElement("div", { style:{ fontSize:13, color:"#444444" } }, "None yet. Type one above and press Add.")
+      ? React.createElement("div", { style:{ fontSize:13, color:"#444444" } },
+          "No " + (noun || "entries") + " yet. Type one above and press Add.")
       : React.createElement("div", { style:{ border:`1px solid ${BORDER}`, borderRadius:8, overflow:"hidden", maxWidth:520 } },
           React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"56px 1fr auto",
             background:T, color:"#fff", fontSize:12.5, fontWeight:700 } },
@@ -26942,7 +26979,7 @@ const MASTER_STRUCTURE = [
   { id:"patient", label:"Patient", subtabs:[
     { id:"referralSource", label:"Referral Source", placeholder:true },
     { id:"flags",          label:"Safety Flags" },
-    { id:"occupation",     label:"Occupation", placeholder:true },
+    { id:"occupation",     label:"Occupation" },
     { id:"docCategories",  label:"Document Categories" }
   ]},
   { id:"prescriptions", label:"Prescriptions", subtabs:[
@@ -27951,6 +27988,7 @@ function Master() {
   const [apptReasons, setApptReasons] = React.useState([]);
   const [docCategories, setDocCategories] = React.useState([]);
   const [safetyFlags, setSafetyFlags] = React.useState([]);
+  const [occupations, setOccupations] = React.useState([]);
   const [implantBrands, setImplantBrands] = React.useState([]);
   const [panels, setPanels] = React.useState([]);
   const [timings, setTimings] = React.useState(DEFAULT_TIMINGS);
@@ -27975,8 +28013,8 @@ function Master() {
       "getMedicineInstructionsList", "getMedicineNotesList", "getReasonsList",
       "getClinicProfile", "getDocumentCategoriesList", "getProcedureLibrary",
       "getImplantBrandsList", "getPanelsList", "getWorkingDays", "getClinicTimings",
-      "getSafetyFlagsList"
-    ]).then(([t,d,e,c,m,tpl,ch,med,dos,freq,dur,instr,mn,ar,cp,dc,pl,ib,pnl,wd,ct,sf]) => {
+      "getSafetyFlagsList", "getOccupationsList"
+    ]).then(([t,d,e,c,m,tpl,ch,med,dos,freq,dur,instr,mn,ar,cp,dc,pl,ib,pnl,wd,ct,sf,oc]) => {
       setLoading(false);
       if (t.success) setTreatments(t.treatments || []);
       // An older backend without this list simply leaves it empty, and the
@@ -28003,6 +28041,7 @@ function Master() {
       // A backend that predates this list answers nothing, and the screen
       // shows none rather than breaking.
       if (sf && sf.success) setSafetyFlags(sf.flags || []);
+      if (oc && oc.success) setOccupations(oc.occupations || []);
       if (pl.success) { setProcedureLibrary(pl.library || []); setProcedureFamilies(pl.families || []); }
       // A backend without this list leaves the clinic open every day, which is
       // the honest answer until the days are filled in — not an invented week.
@@ -28058,6 +28097,7 @@ function Master() {
   const saveApptReasons = (arr) => persist("saveReasonsList", { reasons: JSON.stringify(arr) }, arr, setApptReasons, apptReasons);
   const saveDocCategories = (arr) => persist("saveDocumentCategoriesList", { categories: JSON.stringify(arr) }, arr, setDocCategories, docCategories);
   const saveSafetyFlags = (arr) => persist("saveSafetyFlagsList", { flags: JSON.stringify(arr) }, arr, setSafetyFlags, safetyFlags);
+  const saveOccupations = (arr) => persist("saveOccupationsList", { occupations: JSON.stringify(arr) }, arr, setOccupations, occupations);
   const saveProcedureLibrary = (arr) => persist("saveProcedureLibrary", { library: JSON.stringify(arr) }, arr, setProcedureLibrary, procedureLibrary);
   // Both halves travel together: they are one answer to "is the clinic open
   // that day", and saving them apart would leave a moment where it is wrong.
@@ -28209,10 +28249,24 @@ function Master() {
     procedureLibrary: () => React.createElement(ProcedureLibraryEditor, {
       items:procedureLibrary, families:procedureFamilies, onSave:saveProcedureLibrary
     }),
-    flags: () => React.createElement(SafetyFlagsEditor, {
+    flags: () => React.createElement(EntryListEditor, {
+      title:"Safety Flags", noun:"flags",
+      blurb:"What the staff need to know before the patient sits down \u2014 that they are " +
+            "apprehensive, or on psychiatric treatment. The clinic's own list, not a fixed one. " +
+            "These are offered on the patient's record and show on their banner.",
       items:safetyFlags,
       onAdd:(v)=>saveSafetyFlags([...safetyFlags, v]),
       onRemove:(i)=>saveSafetyFlags(safetyFlags.filter((_,idx)=>idx!==i))
+    }),
+    occupation: () => React.createElement(EntryListEditor, {
+      title:"Occupation", noun:"occupations",
+      blurb:"What Registration offers in the Occupation box. Picked from rather than typed, " +
+            "because \u201cGovt. Service\u201d, \u201cGovernment service\u201d and " +
+            "\u201cGovt service\u201d are one occupation typed three ways and no report can " +
+            "add them up.",
+      items:occupations,
+      onAdd:(v)=>saveOccupations([...occupations, v]),
+      onRemove:(i)=>saveOccupations(occupations.filter((_,idx)=>idx!==i))
     }),
     docCategories: () => React.createElement(SimpleListEditor, {
       items:docCategories, placeholder:"New document category...",

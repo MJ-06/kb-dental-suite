@@ -487,6 +487,15 @@ var DEFAULT_SAFETY_FLAGS = [
   "Psychiatric Treatment"
 ];
 
+// Occupations, picked from rather than typed: "Govt. Service", "Government
+// service" and "Govt service" are one occupation typed three ways, and no
+// report can add them up. A master list so the clinic keeps its own.
+var OCCUPATIONS_SHEET = "Occupations";
+var DEFAULT_OCCUPATIONS = [
+  "Business", "Government Service", "Private Service", "Self Employed",
+  "Professional", "Homemaker", "Student", "Retired", "Unemployed", "Other"
+];
+
 var DOC_CATEGORIES_SHEET = "Document Categories";
 var DEFAULT_DOC_CATEGORIES = [
   "X-Ray / RVG", "OPG", "CBCT", "Blood Reports", "Clinical Photograph",
@@ -518,6 +527,32 @@ function parseList_(raw, label) {
   }
   if (!Array.isArray(arr)) return { __bad: "the " + label + " was not a list" };
   return arr;
+}
+
+function getOccupationsList() {
+  var sh = getSheet(OCCUPATIONS_SHEET);
+  // A tab nobody has filled in starts with the usual ones rather than an
+  // empty dropdown the desk cannot get past.
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(["Occupation", "Updated At"]);
+    var now = new Date().toISOString();
+    DEFAULT_OCCUPATIONS.forEach(function(o) { sh.appendRow([o, now]); });
+  }
+  var data = sh.getDataRange().getValues();
+  var items = [];
+  for (var i = 1; i < data.length; i++) { if (data[i][0]) items.push(String(data[i][0])); }
+  return { success: true, occupations: items };
+}
+
+function saveOccupationsList(p) {
+  var arr = parseList_(p.occupations, "occupations");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
+  var sh = getSheet(OCCUPATIONS_SHEET);
+  sh.clearContents();
+  sh.appendRow(["Occupation", "Updated At"]);
+  var now = new Date().toISOString();
+  arr.forEach(function(v) { sh.appendRow([v, now]); });
+  return { success: true };
 }
 
 function getSafetyFlagsList() {
@@ -811,6 +846,8 @@ function route(p) {
       case "saveDocumentCategoriesList": return saveDocumentCategoriesList(p);
       case "getSafetyFlagsList":         return getSafetyFlagsList();
       case "saveSafetyFlagsList":        return saveSafetyFlagsList(p);
+      case "getOccupationsList":         return getOccupationsList();
+      case "saveOccupationsList":        return saveOccupationsList(p);
       case "createDocumentPDF":         return createDocumentPDF(p);
       case "getPatientDocumentContent": return getPatientDocumentContent(p);
 

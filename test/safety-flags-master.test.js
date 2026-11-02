@@ -26,8 +26,10 @@ ok('the tab is called Safety Flags', /\{ id:"flags",          label:"Safety Flag
 ok('and is not a placeholder any more', !/id:"flags",\s+label:"Flags", placeholder:true/.test(html));
 ok('it is under Patient, where it was',
    /\{ id:"patient", label:"Patient", subtabs:\[[\s\S]{0,200}id:"flags"/.test(html));
-ok('and it is wired to the screen',
-   /flags: \(\) => React\.createElement\(SafetyFlagsEditor, \{/.test(html));
+// One screen serves every list Master keeps this way; the heading, the
+// blurb and the word for an empty list are passed in.
+ok('and it is wired to the shared screen',
+   /flags: \(\) => React\.createElement\(EntryListEditor, \{\n      title:"Safety Flags", noun:"flags",/.test(html));
 
 // ── the clinic book keeps the list ──────────────────────────────────────
 ok('the sheet has a tab of its own', /var SAFETY_FLAGS_SHEET = "Safety Flags";/.test(gs));
@@ -40,15 +42,17 @@ ok('reading is routed', /case "getSafetyFlagsList":         return getSafetyFlag
 ok('and writing', /case "saveSafetyFlagsList":        return saveSafetyFlagsList\(p\);/.test(gs));
 ok('a payload cut short in transit is refused, like the other lists',
    /parseList_\(p\.flags, "safety flags"\)/.test(gs));
-ok('Master fetches it with everything else', /"getSafetyFlagsList"\s*\n\s*\]\)/.test(html));
-ok('and takes it off the end of the same destructure',
-   /,wd,ct,sf\]\) =>/.test(html));
+ok('Master fetches it with everything else', /"getSafetyFlagsList", "getOccupationsList"/.test(html));
+// The batch and the destructure have to stay in step, or every list after
+// the one that moved is read from the wrong answer.
+ok('and takes it off the same destructure, in the same order',
+   /,wd,ct,sf,oc\]\) =>/.test(html));
 ok('an older backend without it is survivable', /if \(sf && sf\.success\) setSafetyFlags\(sf\.flags \|\| \[\]\);/.test(html));
 ok('saving goes through the usual path',
    /persist\("saveSafetyFlagsList", \{ flags: JSON\.stringify\(arr\) \}/.test(html));
 
 // ── the screen, rendered and driven ─────────────────────────────────────
-const A = html.indexOf('function SafetyFlagsEditor({ items, onAdd, onRemove }) {');
+const A = html.indexOf('function EntryListEditor({ title, blurb, noun, items, onAdd, onRemove }) {');
 const B = html.indexOf('// When the day runs, and how long a slot is.', A);
 ok('the screen was found', A > 0 && B > A, `${A}..${B}`);
 const SRC = html.slice(A, B);
@@ -81,7 +85,9 @@ const FIVE = ['Apprehensive', 'Mentally Challenged', 'Neurological Issue',
     }, items);
     await page.waitForTimeout(40);
     await page.evaluate(() => {
-      window.__root.render(React.createElement(SafetyFlagsEditor, {
+      window.__root.render(React.createElement(EntryListEditor, {
+        title: 'Safety Flags', noun: 'flags',
+        blurb: 'What the staff need to know before the patient sits down.',
         items: window.__items,
         onAdd: v => window.__added.push(v),
         onRemove: i => window.__removed.push(i) }));
@@ -169,7 +175,7 @@ const FIVE = ['Apprehensive', 'Mentally Challenged', 'Neurological Issue',
   // ── an empty list ─────────────────────────────────────────────────────
   await mount([]);
   const empty = await page.evaluate(() => document.body.innerText);
-  ok('an empty list says so rather than showing a bare heading', /None yet/.test(empty), empty);
+  ok('an empty list says so, and names what is missing', /No flags yet/.test(empty), empty);
   ok('and still offers the box', !!(await page.locator('input[placeholder="Type new entry here"]').count()));
 
   ok('nothing threw', errors.length === 0, errors.join(' // '));
