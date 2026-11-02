@@ -161,6 +161,20 @@ const KB_BACKEND_IS_APPS_SCRIPT = /script\.google\.com/.test(SCRIPT_URL);
 // Raise this whenever the page starts depending on something new in
 // Code.gs, and bump BACKEND_BUILD there to match.
 const KB_BACKEND_BUILD_REQUIRED = "2026-11-02b";
+// WHICH APP THIS IS.
+//
+// There was no way to tell. The sidebar said which BACKEND was answering
+// and nothing at all about the page itself, so "nothing changed" and "your
+// browser still has yesterday's file" looked identical from both ends --
+// and four rounds went into one change that was in fact already live.
+//
+// GitHub Pages sits behind a CDN that can keep serving an old index.html
+// after a merge, and Ctrl+Shift+R does not always beat it. This is how to
+// see which one you have, at a glance, without opening anything.
+//
+// It moves with every change to this file. Same shape as the backend's: a
+// date, and a letter when there is more than one in a day.
+const KB_APP_BUILD = "2026-11-03";
 
 // Three answers, not two. A build string is a plain date, so comparing
 // them as text compares them as dates.
@@ -31399,20 +31413,24 @@ function BackendBuildLine() {
     return () => { alive = false; };
   }, []);
 
-  if (build === undefined) return React.createElement("span", null, "KB Dental Clinical Suite");
+  // The app's own build is shown whatever the backend says, and even
+  // before it has answered: it is a fact about the file in this browser,
+  // and it is the one that was impossible to check.
+  const me = "KB Dental Clinical Suite \u00b7 app " + KB_APP_BUILD;
+  if (build === undefined) return React.createElement("span", null, me);
   const state = backendBuildState(build);
   if (state === "current") {
-    return React.createElement("span", null, "KB Dental Clinical Suite \u00b7 backend " + build);
+    return React.createElement("span", null, me + " \u00b7 backend " + build);
   }
   // A backend that cannot say which build it is tells us nothing, so this
-  // says nothing back.
-  if (state === "unknown") return React.createElement("span", null, "KB Dental Clinical Suite");
+  // says nothing back about IT -- the app still says what it is.
+  if (state === "unknown") return React.createElement("span", null, me);
   return React.createElement("span", {
     style: { color: "#B91C1C", fontWeight: 700 },
     title: "The Apps Script deployment is serving an older version of Code.gs than this page needs. "
          + "In the script editor: Deploy \u203A Manage deployments \u203A the pencil \u203A Version: New version \u203A Deploy. "
          + "Pasting the file in and saving it is not enough on its own."
-  }, "\u26A0 Backend out of date \u2014 redeploy Code.gs");
+  }, "\u26A0 Backend out of date \u2014 redeploy Code.gs \u00b7 app " + KB_APP_BUILD);
 }
 
 function StaffLoginGate({ children }) {

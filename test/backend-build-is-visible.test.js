@@ -76,6 +76,9 @@ async function show(browser, ping, errors) {
   await page.addScriptTag({ content: `
     const { useState, useRef, useEffect } = React;
     const KB_BACKEND_BUILD_REQUIRED = ${JSON.stringify(required)};
+    // The line names the app's own build too now, so the page can be told
+    // apart from the backend answering it.
+    const KB_APP_BUILD = ${JSON.stringify((html.match(/KB_APP_BUILD = "([^"]+)"/) || [])[1])};
     ${STATE_FN}
     function api(action){ return Promise.resolve(${JSON.stringify(ping)}); }` });
   await page.addScriptTag({ content: html.slice(a, b) });
@@ -119,7 +122,10 @@ async function show(browser, ping, errors) {
   {
     const o = await show(browser, { success: true, message: 'pong' }, errors);
     ok('a backend that cannot say is not called out', !/out of date/i.test(o.text), o.text);
-    ok('and is not shown a made-up build either', !/\d{4}-\d{2}-\d{2}/.test(o.text), o.text);
+    // No BACKEND build is claimed. The line does carry a date now -- the
+    // app's own build, which is a fact about this page and not a guess
+    // about the backend.
+    ok('and no backend build is invented for it', !/backend \d{4}-\d{2}-\d{2}/.test(o.text), o.text);
     ok('it just names the app', /KB Dental Clinical Suite/.test(o.text), o.text);
   }
 
