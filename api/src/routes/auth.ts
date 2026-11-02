@@ -3,8 +3,8 @@ import type { FastifyPluginAsyncTypebox } from "@fastify/type-provider-typebox";
 import { attemptLogin } from "../auth/login.js";
 import { hashToken, SESSION_COOKIE } from "../auth/tokens.js";
 import { resumeSession } from "../db/index.js";
-import { asActor } from "../http/context.js";
 import { HttpError } from "../http/errors.js";
+import { sql } from "kysely";
 import type { AppOptions } from "../app.js";
 
 export const authRoutes: FastifyPluginAsyncTypebox<AppOptions> = async (app, opts) => {
@@ -44,7 +44,7 @@ export const authRoutes: FastifyPluginAsyncTypebox<AppOptions> = async (app, opt
     if (token) {
       const h = hashToken(token);
       await db.transaction().execute(async (tx) => {
-        if (await resumeSession(tx, h)) await tx.deleteFrom("sessions").where("token_hash", "=", h).execute();
+        await sql`SELECT clinical_end_session(${h})`.execute(tx);
       });
     }
     reply.clearCookie(SESSION_COOKIE, { path: "/" });
@@ -52,8 +52,10 @@ export const authRoutes: FastifyPluginAsyncTypebox<AppOptions> = async (app, opt
   });
 
   app.get("/me", async (req) => {
-    const me = await asActor(db, req, null, async (_tx, a) => a);
-    return { user: publicActor(me) };
+    const token = req.cookies[SESSION_COOKIE];
+    const me = token ? await db.transaction().execute(tx => resumeSession(tx, hashToken(token))) : null;
+    if (!me) throw new HttpError(401, "signed_out", "Please sign in");
+    return { user: publicActor(me), clinic: { id: me.clinicId, revision: me.clinicRevision }, organizationId: me.organizationId };
   });
 };
 

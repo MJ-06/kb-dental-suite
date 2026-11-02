@@ -25,9 +25,17 @@ export async function asActor<T>(
   return db.transaction().execute(async (tx) => {
     const actor = await resumeSession(tx, hashToken(token));
     if (!actor) throw new HttpError(401, "signed_out", "Your session has ended. Please sign in again.");
+    assertClinicContext(req, actor);
     if (permission && !can(actor, permission)) {
       throw new HttpError(403, "forbidden", "Your role does not allow this");
     }
     return fn(tx, actor);
   });
+}
+
+export function assertClinicContext(req: FastifyRequest, actor: Actor): void {
+  if (actor.organizationId && (req.headers["x-kb-clinic"] !== actor.clinicId ||
+      req.headers["x-kb-clinic-revision"] !== String(actor.clinicRevision))) {
+    throw new HttpError(409, "clinic_changed", "The working clinic changed. Reload this page before continuing.");
+  }
 }

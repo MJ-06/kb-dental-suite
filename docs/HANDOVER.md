@@ -1,5 +1,18 @@
 # Handover for the next tool (31 Oct 2026)
 
+## Latest implementation — clinic switching and Organization (3 November 2026)
+
+Read `docs/CLINIC-SWITCHING.md`. The user explicitly chose the EXISTING Master
+password for Organization; a separate password is superseded. The familiar clinical
+UI now has authorized bottom-left clinic switching and Master > Organization details.
+Migration0024 and the opt-in local linker connect kbdev and a synthetic East clinic
+to the existing organization identity/unit model. Server context revisions reject
+stale-tab writes; switching reloads the UI and clears Master unlock. Organization
+profile saves are audited/versioned and require an explicit management grant plus
+the shared Master unlock. This bridge keeps old patient records clinic-scoped;
+shared longitudinal patient identity/history migration is still next work.
+
+
 ## Latest decision — 3 November 2026
 
 Read `docs/LOCAL-CLINICAL-BASELINE.md` first. Preserve Viveyk's existing clinical UI.
@@ -7,8 +20,7 @@ The standalone redesign proposal is deferred. His active feature branch at eac92
 has been merged into saas/multi-clinic. Local frontend/API/PostgreSQL is the immediate
 baseline. Bottom-left Clinic replaces the Google Sheets status; currently it shows
 only the session's clinic (disabled until organization adapter/grant integration).
-Master > Organization with a separate server-enforced password is planned, not yet
-implemented. Full parity for newly merged Master/document/report actions remains.
+Historical plan for a separate Organization password is superseded by the latest implementation above. Full parity for newly merged Master/document/report actions remains.
 This supersedes the layout-review checkpoint below as the immediate priority.
 
 

@@ -75,7 +75,7 @@ export async function buildApp(opts: AppOptions & { logger?: boolean }) {
   await app.register(storageRoutes, { ...opts, prefix: "/api/v1/storage" });
   await app.register(systemLogRoutes, { ...opts, prefix: "/api/v1/system-log" });
   await app.register(legacyRoutes, opts);
-  await app.register(pageRoutes);
+  await app.register(pageRoutes, opts);
 
   return app;
 }

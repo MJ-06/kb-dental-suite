@@ -32,3 +32,6 @@ GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO kb_app;
 -- The system log is append only; an admin may only mark an open failure resolved.
 REVOKE UPDATE, DELETE ON system_log FROM kb_app;
 GRANT UPDATE (resolved_at, resolved_by, resolution) ON system_log TO kb_app;
+
+-- Clinical organization links and grants are owner-managed, including future migrations.
+REVOKE ALL ON org_clinical_units, org_clinical_access, org_clinical_context FROM kb_app;

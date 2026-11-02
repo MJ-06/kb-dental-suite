@@ -13,6 +13,8 @@ import { resumeSession } from "../db/index.js";
 import type { AppOptions } from "../app.js";
 import { recordFailure } from "../syslog.js";
 import { actions } from "./registry.js";
+import { assertClinicContext } from "../http/context.js";
+import { sql } from "kysely";
 import { DeskError, type Params, type Result } from "./types.js";
 
 const BATCH_MAX = 25;
@@ -44,10 +46,14 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
       return staffLogin((req.body as Params | undefined) ?? {}, req);
     }
     if (action === "staffLogout") return staffLogout(req);
+    if (action === "verifyMasterPassword" && masterAttempts(req.ip)) return { success: false, error: "Too many attempts. Wait a minute and try again." };
+    if (["switchWorkingClinic", "saveOrganizationProfile"].includes(action) && req.method !== "POST") {
+      return { success: false, error: "Send this change as a POST" };
+    }
 
     if (!token) return AUTH_REQUIRED;
-    if (action === "batch") return batch(params, token);
-    return run(action, params, token);
+    if (action === "batch") return batch(params, token, req);
+    return run(action, params, token, req);
   };
 
   // A clinic's desks share one address behind its router and the screens
@@ -59,15 +65,17 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
 
   // Sign-in attempts per address: 10 a minute, like /api/v1/auth/login.
   const tooManyAttempts = attemptCounter(10);
+  const masterAttempts = attemptCounter(15);
 
   /** One action in its own transaction. */
-  async function run(action: string, params: Params, token: string): Promise<Result> {
+  async function run(action: string, params: Params, token: string, req: FastifyRequest): Promise<Result> {
     const def = actions[action];
     if (!def) return { success: false, error: `Unknown action: ${action}` };
     try {
       return await db.transaction().execute(async (tx) => {
         const actor = await resumeSession(tx, hashToken(token));
         if (!actor) return AUTH_REQUIRED;
+        if (!["whoAmI", "getWorkingClinics"].includes(action)) assertClinicContext(req, actor);
         if (def.permission && !can(actor, def.permission)) {
           return { success: false, error: "Your role does not allow this", forbidden: true };
         }
@@ -77,6 +85,9 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
         return out;
       });
     } catch (e) {
+      if (e instanceof Error && "code" in e && e.code === "clinic_changed") {
+        return { success: false, clinicChanged: true, error: e.message };
+      }
       const known = describe(e);
       if (known) return known;
       const ref = await recordFailure(token, { kind: "legacy_action", action, error: e }, app.log);
@@ -86,7 +97,7 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
 
   // Several reads in one round trip. Reads only: a half-applied batch of
   // writes is worse than a slow page.
-  async function batch(params: Params, token: string): Promise<Result> {
+  async function batch(params: Params, token: string, req: FastifyRequest): Promise<Result> {
     let entries: unknown;
     try { entries = typeof params.actions === "string" ? JSON.parse(params.actions) : params.actions; } catch { entries = null; }
     if (!Array.isArray(entries) || !entries.length) return { success: false, error: "batch: no actions given" };
@@ -98,7 +109,7 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
       const key = String((isObj && (entry as Params).key) || name || "?");
       if (!name.startsWith("get")) { results[key] = { success: false, error: "batch: reads only" }; return; }
       const p: Params = { ...((isObj && ((entry as Params).params as Params)) || {}) };
-      results[key] = await run(name, { ...p, action: name }, token);
+      results[key] = await run(name, { ...p, action: name }, token, req);
     }));
     return { success: true, results };
   }
@@ -126,7 +137,7 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
     if (token) {
       const h = hashToken(token);
       await db.transaction().execute(async (tx) => {
-        if (await resumeSession(tx, h)) await tx.deleteFrom("sessions").where("token_hash", "=", h).execute();
+        await sql`SELECT clinical_end_session(${h})`.execute(tx);
       });
     }
     (req as FastifyRequest & { _clearSession?: boolean })._clearSession = true;

@@ -11,6 +11,9 @@ import { randomBytes } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import type { FastifyPluginAsync } from "fastify";
+import type { AppOptions } from "../app.js";
+import { resumeSession } from "../db/index.js";
+import { hashToken, SESSION_COOKIE } from "../auth/tokens.js";
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url)); // the repo root, beside api/
 const MODULES = fileURLToPath(new URL("../../node_modules/", import.meta.url));
@@ -80,17 +83,61 @@ function csp(nonce: string, needsEval: boolean, framedBySelf = false): string {
   ].join("; ");
 }
 
-export const pageRoutes: FastifyPluginAsync = async (app) => {
+export const pageRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) => {
   for (const [path, file] of Object.entries(PAGES)) {
-    app.get(path, async (_req, reply) => {
+    app.get(path, async (req, reply) => {
       const nonce = randomBytes(16).toString("base64");
       // Read on each request in development so an edit shows on refresh;
       // the files are small and this is not a hot path.
       let html = readFileSync(ROOT + file, "utf8");
       for (const [from, to] of CDN_SRC) html = html.replace(from, to);
       let head = OVERRIDE;
+      const token = req.cookies[SESSION_COOKIE];
+      const actor = token ? await opts.db.transaction().execute(tx => resumeSession(tx, hashToken(token))) : null;
+      if (actor?.organizationId) {
+        const clinic = JSON.stringify({ id: actor.clinicId, revision: actor.clinicRevision });
+        // Each page, including embedded blob forms, pins requests to its rendered
+        // clinic. A second tab switching the cookie's context cannot retarget it.
+        head += `<script>window.KB_CLINIC_CONTEXT = ${clinic};
+window.KB_PIN_FETCH = function(w) {
+  if (w.__kbClinicPinned) return;
+  w.__kbClinicPinned = true;
+  const original = w.fetch.bind(w), clinic = window.KB_CLINIC_CONTEXT;
+  if (w !== window) {
+    // Embedded mini-apps have their own storage helpers. Namespace those too,
+    // without deleting old entries or changing the parent login preferences.
+    for (const name of ['localStorage','sessionStorage']) {
+      const store = w[name], prefix = 'kb_clinic_' + clinic.id + '_';
+      const keys = () => Array.from({length:store.length},(_,i)=>store.key(i)).filter(k=>k && k.startsWith(prefix));
+      const scoped = {
+        getItem:k=>store.getItem(prefix+k), setItem:(k,v)=>store.setItem(prefix+k,String(v)),
+        removeItem:k=>store.removeItem(prefix+k), key:i=>keys()[i]?.slice(prefix.length) ?? null,
+        clear:()=>keys().forEach(k=>store.removeItem(k)), get length(){ return keys().length; }
+      };
+      Object.defineProperty(w,name,{ configurable:true, value:new Proxy(scoped,{
+        get:(o,k)=>k in o ? Reflect.get(o,k) : typeof k === 'string' ? scoped.getItem(k) : undefined,
+        set:(_o,k,v)=>{ scoped.setItem(String(k),v); return true; },
+        deleteProperty:(_o,k)=>{ scoped.removeItem(String(k)); return true; }
+      }) });
+    }
+  }
+  w.fetch = function(input, init) {
+    const url = new URL(typeof input === 'string' ? input : (input.url || input.href), location.origin);
+    if (url.origin === location.origin && (url.pathname === '/exec' || url.pathname.startsWith('/api/'))) {
+      const headers = new Headers((init && init.headers) || (input && input.headers));
+      headers.set('X-KB-Clinic', clinic.id); headers.set('X-KB-Clinic-Revision', String(clinic.revision));
+      init = Object.assign({}, init, {headers});
+    }
+    return original(input, init);
+  };
+}; window.KB_PIN_FETCH(window);</script>`;
+      }
       if (file === "index.html") {
         head += EMBED_FIX(nonce);
+        if (actor?.organizationId) {
+          head += `<script>const embed = window.__kbEmbed; window.__kbEmbed = function(h) {
+return embed(h).replace(/<head>/i, '<head><script nonce="${nonce}">parent.KB_PIN_FETCH(window);<\\/script>'); };</script>`;
+        }
         // Decoded mini-apps get the nonce and local libraries (see EMBED_FIX).
         html = html.replace("return new TextDecoder('utf-8').decode(bytes);", "return window.__kbEmbed(new TextDecoder('utf-8').decode(bytes));");
         // The in-app chatbot opens the real chatbot page instead of a blob copy,

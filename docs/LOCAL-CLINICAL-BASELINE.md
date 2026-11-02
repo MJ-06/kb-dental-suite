@@ -1,5 +1,12 @@
 # Local clinical baseline — 3 November 2026
 
+## Update after this baseline
+
+Clinic switching and Master > Organization are now implemented; see
+[CLINIC-SWITCHING.md](CLINIC-SWITCHING.md). The user chose to reuse the Master
+password. The separate-password proposal and disabled-selector status below are
+historical. Existing patient identity remains clinic-scoped pending consolidation.
+
 ## Accepted scope and sequence
 
 Following the user's discussion with Viveyk, preserve the existing clinical UI,

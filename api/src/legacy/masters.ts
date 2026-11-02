@@ -1,3 +1,4 @@
+import { organizationMaster, verifyOrganizationMaster, saveOrganizationMaster } from "./organization.js";
 // The Master screen's lists and the clinic's settings, answering exactly as
 // the live Apps Script does (apps-script/out/Code.gs). The screens save a
 // whole list at a time; here that becomes, in one transaction:
@@ -331,12 +332,12 @@ Object.assign(masters, {
 
   // What the old backend said about its own setup. The Finance sheet id is
   // meaningless here; the *Set flags still drive the password screens.
-  getSettings: read(async (_p, { tx }) => {
+  getSettings: read(async (_p, { tx, actor }) => {
     const r = await sql<{ key: string }>`SELECT key FROM clinic_settings WHERE key LIKE '%password%'`.execute(tx);
     const set = new Set(r.rows.map((x) => x.key));
     return {
       success: true, financeSheetId: "",
-      financePasswordSet: set.has("finance_password"), masterPasswordSet: set.has("master_password"),
+      financePasswordSet: set.has("finance_password"), masterPasswordSet: actor.organizationId ? !!await organizationMaster(tx) : set.has("master_password"),
       reportsPassword1Set: set.has("reports_password_1"), reportsPassword2Set: set.has("reports_password_2")
     };
   }),
@@ -357,10 +358,15 @@ for (const [name, key] of [["Finance", "finance_password"], ["Master", "master_p
   masters[`save${name}Password`] = write("masters:write", async (p, ctx) => {
     const pw = str(p.password);
     if (!pw) return { success: false, error: "Password required" };
+    if (name === "Master" && ctx.actor.organizationId) return saveOrganizationMaster(ctx.tx, ctx.actor, pw);
     await putSetting(ctx.tx, key, await hashPassword(pw));
     return { success: true };
   });
-  masters[`verify${name}Password`] = verifyScreenPassword(key);
+  masters[`verify${name}Password`] = name === "Master"
+    ? read(async (p, ctx) => ctx.actor.organizationId
+      ? verifyOrganizationMaster(ctx.tx, ctx.actor, str(p.password))
+      : verifyScreenPassword(key).run(p, ctx))
+    : verifyScreenPassword(key);
 }
 
 // Reports has two independent passwords; either one opens it.

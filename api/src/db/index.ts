@@ -26,6 +26,11 @@ export interface Actor {
   displayName: string;
   username: string;
   timezone: string;
+  organizationId?: string;
+  principalId?: string;
+  clinicRevision?: number;
+  manageOrganization?: boolean;
+  sessionHash?: Buffer;
 }
 
 export function createDb(connectionString: string, max = 10): Kysely<DB> {
@@ -45,15 +50,19 @@ export function createDb(connectionString: string, max = 10): Kysely<DB> {
 export async function resumeSession(tx: Tx, tokenHash: Buffer): Promise<Actor | null> {
   // A phone session left idle too long is removed here, before it can resume.
   await sql`SELECT phone_session_expire(${tokenHash})`.execute(tx);
-  const r = await sql<{
+  const result = await sql<{ actor: {
     user_id: string; clinic_id: string; role_id: string; role: string; permissions: string[]; display_name: string; username: string; timezone: string;
-  }>`SELECT * FROM session_resume(${tokenHash})`.execute(tx);
-  const row = r.rows[0];
+    organization_id?: string; principal_id?: string; clinic_revision?: number; manage_organization?: boolean;
+  } | null }>`SELECT clinical_actor(${tokenHash}) AS actor`.execute(tx);
+  const row = result.rows[0]?.actor;
   if (!row) return null;
   return {
     userId: row.user_id, clinicId: row.clinic_id, roleId: row.role_id, role: row.role,
     permissions: new Set(row.permissions.filter(isPermission)),
-    displayName: row.display_name, username: row.username, timezone: row.timezone
+    displayName: row.display_name, username: row.username, timezone: row.timezone,
+    organizationId: row.organization_id, principalId: row.principal_id,
+    clinicRevision: row.clinic_revision, manageOrganization: row.manage_organization,
+    sessionHash: tokenHash
   };
 }
 

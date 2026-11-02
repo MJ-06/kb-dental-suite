@@ -207,6 +207,7 @@ function backendBuildState(build) {
 // "kbdc_empanelled_master_unlocked". Main is left exactly as it was, so
 // nothing already saved on a front-desk machine is lost.
 function scopedKey(fullKey) {
+  if (window.KB_CLINIC_CONTEXT) return "kb_clinic_" + window.KB_CLINIC_CONTEXT.id + "_" + fullKey;
   var id = window.KB_INSTANCE_ID;
   if (!id || id === "main") return fullKey;
   return String(fullKey).replace(/^kbdc_/, "kbdc_" + id + "_");
@@ -474,7 +475,7 @@ async function apiDirect(action, data = {}) {
     const query = p.toString();
     const url = SCRIPT_URL + "?" + query;
     // Sign-in always goes in the body so a password never lands in a URL.
-    const long = query.length > 1800 || action === "staffLogin";
+    const long = query.length > 1800 || ["staffLogin", "verifyMasterPassword", "saveMasterPassword", "switchWorkingClinic", "saveOrganizationProfile"].includes(action);
     const body = long ? JSON.stringify(Object.assign({ action }, data,
                                        (tok && KB_BACKEND_IS_APPS_SCRIPT) ? { token: tok } : {})) : null;
     const attempts = 3;
@@ -27145,6 +27146,7 @@ function ProcedureLibraryEditor({ items, families, onSave }) {
 // pills. Sub-tabs marked `placeholder:true` have no backend/editor yet —
 // they render a "not built yet" notice until a follow-up wires them up.
 const MASTER_STRUCTURE = [
+  { id:"organization", label:"Organization", subtabs:[{ id:"organizationProfile", label:"Organization Details" }] },
   { id:"clinic", label:"CLINIC", subtabs:[
     { id:"clinicProfile", label:"Clinic" },
     { id:"doctors",       label:"Doctors" },
@@ -28238,6 +28240,50 @@ function ClinicProfileEditor({ profile, onSave }) {
   );
 }
 
+function OrganizationProfileEditor() {
+  const btnS = { padding:"8px 16px", border:"none", borderRadius:6, background:T, color:"#fff", cursor:"pointer", fontWeight:600 };
+  const [data, setData] = useState(null), [profile, setProfile] = useState({}), [error, setError] = useState("");
+  const [locked, setLocked] = useState(false), [password, setPassword] = useState(""), [busy, setBusy] = useState(false), [saved, setSaved] = useState(false);
+  const load = async () => {
+    setBusy(true); setError("");
+    const res = await api("getOrganizationProfile");
+    setBusy(false); setLocked(!!res.locked);
+    if (res.success) { setData(res); setProfile(res.profile); }
+    else setError(res.error || "Could not load organization details");
+  };
+  useEffect(() => { load(); }, []);
+  const unlock = async () => {
+    setBusy(true);
+    const res = await api("verifyMasterPassword", { password }); setPassword("");
+    if (res.success && res.correct) await load();
+    else { setBusy(false); setError(res.error || "Incorrect Master password"); }
+  };
+  const save = async () => {
+    setBusy(true); setSaved(false); setError("");
+    const res = await api("saveOrganizationProfile", { profile, version:data.version });
+    setBusy(false);
+    if (res.success) { setData({ ...data, version:res.version }); setProfile(res.profile); setSaved(true); }
+    else { setLocked(!!res.locked); setError(res.error || "Could not save"); }
+  };
+  return React.createElement("section", { style:{ maxWidth:720, background:"#fff", border:`1px solid ${BORDER}`, borderRadius:10, padding:24 } },
+    React.createElement("h3", { style:{ fontSize:16, marginBottom:8 } }, "Organization Details"),
+    React.createElement("p", { style:{ fontSize:13, color:"#555", marginBottom:16 } }, "Shared brand details for this organization. Clinic letterheads remain under Clinic. Uses the existing Master password."),
+    error && React.createElement("p", { role:"alert", style:{ color:"#b42318", marginBottom:12 } }, error),
+    locked ? React.createElement("div", null,
+      React.createElement("label", null, "Master password", React.createElement("input", { type:"password", value:password, autoComplete:"current-password", style:{ ...inp, display:"block", marginTop:6 }, onChange:e=>setPassword(e.target.value) })),
+      React.createElement("button", { onClick:unlock, disabled:busy, style:{ marginTop:10, ...btnS } }, "Unlock Organization"))
+    : data ? React.createElement("div", null,
+      React.createElement("p", { style:{ fontSize:12, marginBottom:16 } }, "Organization code: " + data.identity.code + " · Host: " + data.identity.hostname),
+      [["displayName","Organization name"],["legalName","Legal name"],["address","Address"],["phone","Phone"],["email","Email"],["website","Website"]].map(([key,label]) =>
+        React.createElement("label", { key, style:{ display:"block", fontSize:13, marginBottom:12 } }, label,
+          React.createElement("input", { type:key === "email" ? "email" : "text", value:profile[key] || "", maxLength:key === "address" ? 500 : key === "phone" ? 60 : key === "displayName" ? 120 : 200,
+            style:{ ...inp, width:"100%", marginTop:4 }, onChange:e=>{ setSaved(false); setProfile({ ...profile, [key]:e.target.value }); } }))),
+      React.createElement("button", { onClick:save, disabled:busy, style:btnS }, busy ? "Saving..." : "Save Organization"),
+      React.createElement("button", { onClick:load, disabled:busy, style:{ ...btnS, marginLeft:8 } }, "Reload"),
+      saved && React.createElement("p", { role:"status", style:{ color:"#067647", marginTop:12 } }, "Organization details saved"))
+    : busy && React.createElement("p", null, "Loading..."));
+}
+
 function Master() {
   const [topTab, setTopTab] = React.useState("clinic");
   const [subTab, setSubTab] = React.useState("doctors");
@@ -28584,6 +28630,7 @@ function Master() {
         style:{ display:"inline-block", padding:"9px 22px", fontSize:14, borderRadius:7, background:T, color:"#fff", fontWeight:700, textDecoration:"none" } },
         "↗ Open Sales Tracker")
     ),
+    organizationProfile: () => React.createElement(OrganizationProfileEditor, null),
     clinicProfile: () => React.createElement(ClinicProfileEditor, {
       profile: clinicProfile,
       onSave: saveClinicProfile
@@ -30533,6 +30580,18 @@ function SimplePasswordGate({ verifyAction, sessionKey, message, children }) {
   const [checking, setChecking] = React.useState(false);
   const [err, setErr] = React.useState("");
 
+  React.useEffect(() => {
+    if (verifyAction !== "verifyMasterPassword" || !window.KB_SCRIPT_URL_OVERRIDE) return;
+    let alive = true;
+    // An unset Master password retains the existing backend behavior. A set
+    // password is never skipped, and protected Organization actions also verify
+    // the server-side unlock rather than trusting sessionStorage.
+    api(verifyAction, { password:"" }).then(res => {
+      if (alive && res.success && res.correct) { sessionStorage.setItem(scopedKey(sessionKey), "1"); setUnlocked(true); }
+    });
+    return () => { alive = false; };
+  }, [verifyAction, sessionKey]);
+
   const submit = async () => {
     setChecking(true); setErr("");
     const res = await api(verifyAction, { password: pw });
@@ -31421,26 +31480,42 @@ function computeReports(d, from, to) {
 // into this file by hand. It looked like a version indicator and was not
 // one: it said v20 whatever backend was answering, including one deployed
 // months earlier. This asks.
-// Current clinic is taken from the signed-in server session, never a URL parameter.
-// The reference runtime has one clinic per session. Organization clinic grants
-// will supply the additional options when the legacy clinical adapter is bridged.
+// The server supplies only the current organization's explicit clinic grants.
 function WorkingClinicSelector() {
-  const [clinic, setClinic] = useState("");
+  const [state, setState] = useState(null), [busy, setBusy] = useState(false), [error, setError] = useState(""), [pendingClinic, setPendingClinic] = useState("");
   useEffect(() => {
     let alive = true;
-    const load = () => api("whoAmI").then(res => {
-      if (alive) setClinic(res && res.success ? res.clinic || "" : "");
-    }).catch(() => { if (alive) setClinic(""); });
-    load();
-    window.addEventListener("kb-signed-in", load);
+    const load = () => api("getWorkingClinics").then(res => { if (alive && res.success) setState(res); });
+    load(); window.addEventListener("kb-signed-in", load);
     return () => { alive = false; window.removeEventListener("kb-signed-in", load); };
   }, []);
-  return React.createElement("label", { style:{ display:"block", color:"#444444", fontSize:11, marginBottom:5 } }, "Clinic",
-    React.createElement("select", {
-      "aria-label":"Working clinic", value:clinic, disabled:true,
-      title:"This reference runtime supports one clinic per session. Organization clinic switching is pending the backend integration.",
-      style:{ display:"block", width:"100%", marginTop:4, padding:"6px 4px", border:`1px solid ${BORDER}`, borderRadius:5, background:"#fff", color:"#444444", opacity:1, fontSize:12 }
-    }, React.createElement("option", { value:clinic }, clinic || "Sign in to view clinic")));
+  const change = async () => {
+    const clinicId = pendingClinic;
+    if (!state || clinicId === state.clinic_id) return;
+    setBusy(true); setError("");
+    const res = await api("switchWorkingClinic", { clinicId });
+    if (res.success) {
+      // Full navigation drops patient tabs, embedded forms, in-flight UI callbacks
+      // and in-memory masters. Password unlocks must not follow clinic switches.
+      for (let i = sessionStorage.length - 1; i >= 0; i--) {
+        const key = sessionStorage.key(i);
+        if (key && /(?:master|fin|reports).*unlocked/.test(key)) sessionStorage.removeItem(key);
+      }
+      window.location.reload();
+    } else { setBusy(false); setError(res.error || "Could not switch clinic"); }
+  };
+  return React.createElement("div", null,
+    React.createElement("label", { style:{ display:"block", color:"#444444", fontSize:11, marginBottom:5 } }, "Clinic",
+      React.createElement("select", { "aria-label":"Working clinic", value:state ? state.clinic_id : "",
+        disabled:busy || !state || state.clinics.length < 2, onChange:e=>setPendingClinic(e.target.value),
+        style:{ display:"block", width:"100%", marginTop:4, padding:"6px 4px", border:`1px solid ${BORDER}`, borderRadius:5, background:"#fff", color:"#444444", opacity:1, fontSize:12 }
+      }, state ? state.clinics.map(c => React.createElement("option", { key:c.id, value:c.id }, c.name))
+        : React.createElement("option", { value:"" }, "Sign in to view clinic"))),
+    pendingClinic && state && pendingClinic !== state.clinic_id && React.createElement("div", { style:{ fontSize:11, color:"#555", marginBottom:8 } },
+      React.createElement("p", { style:{ marginBottom:6 } }, "Switch to " + (state.clinics.find(c => c.id === pendingClinic) || {}).name + "? Save your work first. Patient tabs and unsaved entries will close."),
+      React.createElement("button", { onClick:change, disabled:busy, style:{ padding:5, cursor:"pointer" } }, busy ? "Switching..." : "Switch clinic"),
+      React.createElement("button", { onClick:()=>setPendingClinic(""), disabled:busy, style:{ padding:5, marginLeft:4, cursor:"pointer" } }, "Stay")),
+    error && React.createElement("div", { role:"alert", style:{ color:"#b42318", fontSize:11 } }, error));
 }
 
 function BackendBuildLine() {
@@ -31541,6 +31616,10 @@ function StaffLoginGate({ children }) {
     if (res && res.success && res.token) {
       setSessionToken(res.token);
       setPw(""); setNeedsLogin(false);
+      if (named) {
+        const me = await api("whoAmI"), rendered = window.KB_CLINIC_CONTEXT;
+        if (!rendered || me.clinicId !== rendered.id || me.clinicRevision !== rendered.revision) { window.location.reload(); return; }
+      }
       // Whatever was refused a moment ago can be asked for again now. The
       // password was typed to open something, and stopping at "you are
       // signed in" leaves the clinic to work out that they have to click

@@ -60,6 +60,20 @@ Existing registration, diary, clinical/treatment-case and finance screens remain
 The older implementation uses clinic tenancy in one database; it is the reference
 workflow, not proof of the new organization/visit/material history requirements.
 
+## Enable clinic switching in the familiar suite (optional local fixture)
+
+After migration/seed, run from api/:
+
+```powershell
+node --import tsx scripts/link-local-clinics.ts
+node --import tsx scripts/link-local-clinics.ts --apply
+```
+
+Reload port8080. Existing development administrators can choose kbdev or the new
+synthetic East clinic at the bottom left. Master > Organization uses the existing
+Master password. No patient records are moved. This is a transition bridge; shared
+legacy patient identity is still pending. See [clinic switching](CLINIC-SWITCHING.md).
+
 ## Organization demo A: two clinics
 
 ```powershell
