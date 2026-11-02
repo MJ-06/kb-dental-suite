@@ -62,8 +62,13 @@ for (const [sheet, def, get, save, key] of [
   ok(save + ' refuses a payload cut short',
      gs.indexOf('parseList_(p.' + key + ',') > 0);
 }
-ok('the referral sources start as the six Registration always offered',
-   /DEFAULT_REFERRAL_SOURCES = \[[\s\S]{0,200}"An Existing Patient"[\s\S]{0,200}"Google"/.test(gs));
+// They started as the six Registration always offered; the clinic has since
+// given me its own thirteen, and a tab still holding exactly those six is
+// replaced with them. referral-list-and-renaming.test.js covers that.
+ok('the referral sources start as the clinic\u2019s own list',
+   /DEFAULT_REFERRAL_SOURCES = \[[\s\S]{0,400}"Instagram"[\s\S]{0,400}"Just Dial"/.test(gs));
+ok('and the six it shipped with are kept only to recognise an untouched tab',
+   /LEGACY_REFERRAL_SOURCES = \[[\s\S]{0,200}"An Existing Patient"[\s\S]{0,200}"Google"/.test(gs));
 ok('and the patient types as the two the app acts on',
    /DEFAULT_PATIENT_TYPES = \["Normal", "Panel"\];/.test(gs));
 ok('Master fetches both',
@@ -108,7 +113,7 @@ eq('and is not listed twice when it is still on the list',
 eq('"Other" is never duplicated', build(['Other'], ['Other']), ['Other']);
 
 // ── the shared screen, driven once more with these props ────────────────
-const A = html.indexOf('function EntryListEditor({ title, blurb, noun, items, onAdd, onRemove }) {');
+const A = html.indexOf('function EntryListEditor({ title, blurb, noun, items, onAdd, onRemove, onEdit }) {');
 const B = html.indexOf('// When the day runs, and how long a slot is.', A);
 ok('the shared screen was found', A > 0 && B > A, `${A}..${B}`);
 

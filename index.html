@@ -160,7 +160,7 @@ const KB_BACKEND_IS_APPS_SCRIPT = /script\.google\.com/.test(SCRIPT_URL);
 // So the app asks, and says so in the sidebar when the answer is too old.
 // Raise this whenever the page starts depending on something new in
 // Code.gs, and bump BACKEND_BUILD there to match.
-const KB_BACKEND_BUILD_REQUIRED = "2026-11-02";
+const KB_BACKEND_BUILD_REQUIRED = "2026-11-02b";
 
 // Three answers, not two. A build string is a plain date, so comparing
 // them as text compares them as dates.
@@ -26243,21 +26243,40 @@ function PersonListEditor({ items, onAdd, onRemove, onEdit }) {
 // and the entries numbered underneath with a Delete apiece.
 // One screen, used by every list Master keeps this way: a box, an Add, and
 // the entries numbered underneath with a Delete apiece.
-function EntryListEditor({ title, blurb, noun, items, onAdd, onRemove }) {
+function EntryListEditor({ title, blurb, noun, items, onAdd, onRemove, onEdit }) {
   const [draft, setDraft] = React.useState("");
   const [err, setErr] = React.useState("");
+  // Which row is being renamed, and what it is being renamed to. A typo on
+  // a list people pick from had to be deleted and typed again, which on a
+  // list already in use means every record naming the old spelling is
+  // orphaned -- so it is renamed in place instead.
+  const [editAt, setEditAt] = React.useState(null);
+  const [editDraft, setEditDraft] = React.useState("");
   const list = (items || []).map(x => String(x == null ? "" : x));
+
+  // The same entry twice is somebody typing it again, not a second one --
+  // and two identical rows in a list picked from is only confusing. When
+  // renaming, the row being renamed is not its own duplicate.
+  const clashes = (v, exceptAt) => list.some((x, i) =>
+    i !== exceptAt && x.trim().toLowerCase() === v.toLowerCase());
 
   const add = () => {
     const v = draft.trim();
     if (!v) return;
-    // The same entry twice is somebody typing it again, not a second one --
-    // and two identical rows in a list picked from is only confusing.
-    if (list.some(x => x.trim().toLowerCase() === v.toLowerCase())) {
-      setErr("\u201c" + v + "\u201d is already on the list.");
-      return;
-    }
+    if (clashes(v, -1)) { setErr("\u201c" + v + "\u201d is already on the list."); return; }
     setErr(""); setDraft(""); onAdd(v);
+  };
+
+  const startEdit = (i) => { setErr(""); setEditAt(i); setEditDraft(list[i]); };
+  const cancelEdit = () => { setEditAt(null); setEditDraft(""); setErr(""); };
+  const saveEdit = (i) => {
+    const v = editDraft.trim();
+    if (!v) { setErr("An entry needs a name."); return; }
+    if (clashes(v, i)) { setErr("\u201c" + v + "\u201d is already on the list."); return; }
+    // Nothing actually changed: close the row rather than writing the same
+    // list back to the sheet.
+    if (v === list[i]) { cancelEdit(); return; }
+    cancelEdit(); onEdit(i, v);
   };
 
   const cell = { padding:"7px 12px", fontSize:13, borderBottom:`1px solid ${BORDER}` };
@@ -26292,15 +26311,34 @@ function EntryListEditor({ title, blurb, noun, items, onAdd, onRemove }) {
             style:{ display:"grid", gridTemplateColumns:"56px 1fr auto", alignItems:"center",
                     background: i % 2 ? "#fff" : BGS } },
             React.createElement("div", { style:{ ...cell, color:"#3d3d3d" } }, i + 1),
-            React.createElement("div", { style:{ ...cell, fontWeight:600, color:"#2e2e2e" } }, it),
-            React.createElement("div", { style:{ ...cell, textAlign:"right" } },
-              React.createElement("button", {
-                // A flag removed here stops being offered; it asks first and
-                // names which, because the list is short and a misclick is
-                // otherwise silent.
-                onClick:()=>{ if (window.confirm("Delete \u201c" + it + "\u201d?")) onRemove(i); },
-                style:{ padding:"4px 12px", fontSize:12.5, border:"1px solid #e5b4b4", borderRadius:6,
-                        background:"#fff", color:"#b91c1c", fontWeight:700, cursor:"pointer" } }, "Delete")))))
+            editAt === i
+              ? React.createElement("div", { style:{ ...cell } },
+                  React.createElement("input", { style:{ ...inp, width:"100%" }, value:editDraft, autoFocus:true,
+                    onChange:e=>{ setEditDraft(e.target.value); if (err) setErr(""); },
+                    onKeyDown:e=>{ if (e.key === "Enter") saveEdit(i); if (e.key === "Escape") cancelEdit(); } }))
+              : React.createElement("div", { style:{ ...cell, fontWeight:600, color:"#2e2e2e" } }, it),
+            React.createElement("div", { style:{ ...cell, textAlign:"right", whiteSpace:"nowrap" } },
+              editAt === i
+                ? [
+                    React.createElement("button", { key:"s", onClick:()=>saveEdit(i),
+                      style:{ padding:"4px 12px", fontSize:12.5, border:"none", borderRadius:6,
+                              background:"#059669", color:"#fff", fontWeight:700, cursor:"pointer", marginRight:6 } }, "Save"),
+                    React.createElement("button", { key:"c", onClick:cancelEdit,
+                      style:{ padding:"4px 12px", fontSize:12.5, border:`1px solid ${BORDER}`, borderRadius:6,
+                              background:"#fff", color:"#2e2e2e", fontWeight:700, cursor:"pointer" } }, "Cancel")
+                  ]
+                : [
+                    React.createElement("button", { key:"e", onClick:()=>startEdit(i),
+                      style:{ padding:"4px 12px", fontSize:12.5, border:"1px solid #0f6fc5", borderRadius:6,
+                              background:"#fff", color:"#0f6fc5", fontWeight:700, cursor:"pointer", marginRight:6 } }, "Edit"),
+                    React.createElement("button", { key:"d",
+                      // An entry removed here stops being offered; it asks
+                      // first and names which, because the list is short and
+                      // a misclick is otherwise silent.
+                      onClick:()=>{ if (window.confirm("Delete \u201c" + it + "\u201d?")) onRemove(i); },
+                      style:{ padding:"4px 12px", fontSize:12.5, border:"1px solid #e5b4b4", borderRadius:6,
+                              background:"#fff", color:"#b91c1c", fontWeight:700, cursor:"pointer" } }, "Delete")
+                  ]))))
   );
 }
 
@@ -28310,7 +28348,8 @@ function Master() {
             "source report can tell a doctor\u2019s referral from a patient\u2019s.",
       items:referralSources,
       onAdd:(v)=>saveReferralSources([...referralSources, v]),
-      onRemove:(i)=>saveReferralSources(referralSources.filter((_,idx)=>idx!==i))
+      onRemove:(i)=>saveReferralSources(referralSources.filter((_,idx)=>idx!==i)),
+      onEdit:(i,v)=>saveReferralSources(referralSources.map((x,idx)=>idx===i?v:x))
     }),
     patientType: () => React.createElement(EntryListEditor, {
       title:"Patient Type", noun:"patient types",
@@ -28320,7 +28359,8 @@ function Master() {
             "added here is a label, and Registration still asks Normal or Panel.",
       items:patientTypes,
       onAdd:(v)=>savePatientTypes([...patientTypes, v]),
-      onRemove:(i)=>savePatientTypes(patientTypes.filter((_,idx)=>idx!==i))
+      onRemove:(i)=>savePatientTypes(patientTypes.filter((_,idx)=>idx!==i)),
+      onEdit:(i,v)=>savePatientTypes(patientTypes.map((x,idx)=>idx===i?v:x))
     }),
     flags: () => React.createElement(EntryListEditor, {
       title:"Safety Flags", noun:"flags",
@@ -28329,7 +28369,8 @@ function Master() {
             "These are offered on the patient's record and show on their banner.",
       items:safetyFlags,
       onAdd:(v)=>saveSafetyFlags([...safetyFlags, v]),
-      onRemove:(i)=>saveSafetyFlags(safetyFlags.filter((_,idx)=>idx!==i))
+      onRemove:(i)=>saveSafetyFlags(safetyFlags.filter((_,idx)=>idx!==i)),
+      onEdit:(i,v)=>saveSafetyFlags(safetyFlags.map((x,idx)=>idx===i?v:x))
     }),
     occupation: () => React.createElement(EntryListEditor, {
       title:"Occupation", noun:"occupations",
@@ -28339,7 +28380,8 @@ function Master() {
             "add them up.",
       items:occupations,
       onAdd:(v)=>saveOccupations([...occupations, v]),
-      onRemove:(i)=>saveOccupations(occupations.filter((_,idx)=>idx!==i))
+      onRemove:(i)=>saveOccupations(occupations.filter((_,idx)=>idx!==i)),
+      onEdit:(i,v)=>saveOccupations(occupations.map((x,idx)=>idx===i?v:x))
     }),
     docCategories: () => React.createElement(SimpleListEditor, {
       items:docCategories, placeholder:"New document category...",

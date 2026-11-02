@@ -28,16 +28,23 @@ const ok = (name, cond, detail) => checks.push({ name, ok: !!cond, got: detail }
 const eq = (name, got, want) => checks.push({ name, ok: got === want, got, want });
 
 // ── the backend says which build it is ───────────────────────────────────
-ok('Code.gs carries a build stamp', /var BACKEND_BUILD = "\d{4}-\d{2}-\d{2}"/.test(gs));
+// A date, and optionally a letter after it. Two Code.gs changes in one day
+// is ordinary, and a marker that cannot move within a day cannot warn about
+// the second of them -- which is the case this whole mechanism exists for.
+ok('Code.gs carries a build stamp', /var BACKEND_BUILD = "\d{4}-\d{2}-\d{2}[a-z]?"/.test(gs));
 ok('and ping reports it', /message: "pong"[\s\S]{0,80}build: BACKEND_BUILD/.test(gs));
 // ping is public, so this works before anybody has signed in -- which is
 // when you most want to know the backend is stale.
 ok('ping needs no session', /PUBLIC_ACTIONS = \[[\s\S]{0,120}"ping"/.test(gs));
 
-const required = (html.match(/KB_BACKEND_BUILD_REQUIRED = "(\d{4}-\d{2}-\d{2})"/) || [])[1];
-const shipped = (gs.match(/var BACKEND_BUILD = "(\d{4}-\d{2}-\d{2})"/) || [])[1];
+const required = (html.match(/KB_BACKEND_BUILD_REQUIRED = "(\d{4}-\d{2}-\d{2}[a-z]?)"/) || [])[1];
+const shipped = (gs.match(/var BACKEND_BUILD = "(\d{4}-\d{2}-\d{2}[a-z]?)"/) || [])[1];
 ok('the page states which build it needs', !!required, required);
 ok('and the shipped backend is at least that new', shipped >= required, `${shipped} vs ${required}`);
+// Compared as text, which is why the suffix goes after the date and not
+// before it: a revision must sort after the plain date and before tomorrow.
+ok('a same-day revision sorts after the plain date', "2026-11-02b" > "2026-11-02");
+ok('and before the next day', "2026-11-02b" < "2026-11-03");
 
 // ── the hand-typed version label is gone ─────────────────────────────────
 // Comments stripped first: this file explains what the old label said, and

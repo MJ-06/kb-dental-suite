@@ -490,13 +490,39 @@ var DEFAULT_SAFETY_FLAGS = [
 // Occupations, picked from rather than typed: "Govt. Service", "Government
 // service" and "Govt service" are one occupation typed three ways, and no
 // report can add them up. A master list so the clinic keeps its own.
-// How the patient came to hear of the clinic. The same six Registration
-// has always offered, now the clinic's own to change.
+// How the patient came to hear of the clinic -- the clinic's own list.
 var REFERRAL_SOURCES_SHEET = "Referral Sources";
 var DEFAULT_REFERRAL_SOURCES = [
+  "Instagram",
+  "Facebook",
+  "Website",
+  "Referred by old patient",
+  "Family/Friends",
+  "Walk in",
+  "Referred by Internal Dr.",
+  "Referred by External Dr.",
+  "Practo",
+  "Referred by Family Friend",
+  "Referred by Internal Staff",
+  "Known",
+  "Just Dial"
+];
+// What the tab shipped with before the clinic gave me theirs. A tab still
+// holding exactly these has never been curated, so it is replaced wholesale
+// the next time it is read. One that differs by so much as an entry has been
+// edited by somebody, and is left alone -- which also makes this run once
+// without needing a marker: afterwards it no longer matches.
+var LEGACY_REFERRAL_SOURCES = [
   "An Existing Patient", "Website", "Word of Mouth",
   "Sign Board", "Social Media", "Google"
 ];
+function sameListIgnoringCase_(a, b) {
+  if (!a || !b || a.length !== b.length) return false;
+  var norm = function (x) { return String(x == null ? "" : x).trim().toLowerCase(); };
+  var x = a.map(norm).sort(), y = b.map(norm).sort();
+  for (var i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+  return true;
+}
 
 // Patient types. "Panel" is not just a label -- it is what sends a patient
 // to the panel register instead of the main one -- so it and "Normal" are
@@ -545,14 +571,22 @@ function parseList_(raw, label) {
 
 function getReferralSourcesList() {
   var sh = getSheet(REFERRAL_SOURCES_SHEET);
+  var now = new Date().toISOString();
   if (sh.getLastRow() === 0) {
     sh.appendRow(["Referral Source", "Updated At"]);
-    var now = new Date().toISOString();
     DEFAULT_REFERRAL_SOURCES.forEach(function(x) { sh.appendRow([x, now]); });
   }
   var data = sh.getDataRange().getValues();
   var items = [];
   for (var i = 1; i < data.length; i++) { if (data[i][0]) items.push(String(data[i][0])); }
+  // Still exactly the six it shipped with: nobody has touched it, so the
+  // clinic's own list takes its place. Anything else is left alone.
+  if (sameListIgnoringCase_(items, LEGACY_REFERRAL_SOURCES)) {
+    sh.clearContents();
+    sh.appendRow(["Referral Source", "Updated At"]);
+    DEFAULT_REFERRAL_SOURCES.forEach(function(x) { sh.appendRow([x, now]); });
+    items = DEFAULT_REFERRAL_SOURCES.slice();
+  }
   return { success: true, sources: items };
 }
 
@@ -721,7 +755,7 @@ function doPost(e) {
 //
 // The app reads this from ping and says so when it is behind. Bump it
 // whenever this file changes in a way the app depends on.
-var BACKEND_BUILD = "2026-11-02";
+var BACKEND_BUILD = "2026-11-02b";
 
 var SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 // Always session-protected, even while the global rollout flag is off.
