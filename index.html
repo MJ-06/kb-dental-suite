@@ -6092,7 +6092,7 @@ const REASON_FAMILY_CODE = {
 // or runs twenty-minute slots, is a master edit and not a code change. The
 // list below is what the book falls back to until the master answers, and
 // what it uses if the master holds something impossible.
-const DEFAULT_TIMINGS = { open: "09:00", close: "19:00", slotMinutes: 30 };
+const DEFAULT_TIMINGS = { open: "09:00", close: "19:00", slotMinutes: 30, breaks: [] };
 const TIME_SLOTS = [
   "09:00","09:30","10:00","10:30","11:00","11:30","12:00","12:30","13:00","13:30",
   "14:00","14:30","15:00","15:30","16:00","16:30","17:00","17:30","18:00","18:30"
@@ -6103,7 +6103,38 @@ function hhmmToMin(v) {
   const h = +m[1], mi = +m[2];
   return (h > 23 || mi > 59) ? NaN : h * 60 + mi;
 }
-function buildSlots(t) {
+// The day's breaks — lunch, and tea for the clinics that take one. A list,
+// because how many a clinic takes is the clinic's business, not this app's.
+// Anything that cannot be read as a break is dropped: a break with no end
+// would shut the rest of the day.
+function cleanBreaks(raw) {
+  let list = raw;
+  if (typeof list === "string") {
+    const t = list.trim();
+    if (!t) return [];
+    try { list = JSON.parse(t); } catch (e) { return []; }
+  }
+  if (!Array.isArray(list)) return [];
+  return list.map(b => {
+    if (!b || typeof b !== "object") return null;
+    const from = hhmmToMin(b.from), to = hhmmToMin(b.to);
+    if (isNaN(from) || isNaN(to) || to <= from) return null;
+    return { name: String(b.name == null ? "" : b.name).trim() || "Break",
+             from: String(b.from).trim(), to: String(b.to).trim() };
+  }).filter(Boolean).sort((x, y) => hhmmToMin(x.from) - hhmmToMin(y.from));
+}
+// Which break a slot falls inside, or null. Half-open: a slot starting
+// exactly when the break ends is working time again.
+function breakAt(t, slot) {
+  const m = hhmmToMin(slot);
+  if (isNaN(m)) return null;
+  return cleanBreaks(t && t.breaks)
+    .filter(b => m >= hhmmToMin(b.from) && m < hhmmToMin(b.to))[0] || null;
+}
+// Every slot in the day, breaks included. The grid draws these, so a break
+// is VISIBLE as a band across the day and an appointment already booked
+// inside one does not quietly disappear off the screen.
+function buildAllSlots(t) {
   const a = hhmmToMin(t && t.open), b = hhmmToMin(t && t.close);
   const step = parseInt(t && t.slotMinutes, 10);
   // Anything that would draw an empty book — or never stop drawing — falls
@@ -6114,6 +6145,15 @@ function buildSlots(t) {
     out.push(String(Math.floor(m / 60)).padStart(2, "0") + ":" + String(m % 60).padStart(2, "0"));
   }
   return out;
+}
+// The slots somebody can actually be booked into.
+function buildSlots(t) {
+  const all = buildAllSlots(t);
+  const open = all.filter(x => !breakAt(t, x));
+  // Breaks that swallow the whole day would leave the clinic unable to book
+  // anybody with nothing on screen to explain it. Master refuses to save
+  // that, but a book edited by hand can still hold it.
+  return open.length ? open : all;
 }
 // The slot a booking should open on.
 //
@@ -6184,12 +6224,30 @@ function useClinicTimings() {
     let alive = true;
     api("getClinicTimings").then(r => {
       if (!alive || !r || !r.success) return;
-      _timingsCache = { open: r.open, close: r.close, slotMinutes: r.slotMinutes };
+      _timingsCache = { open: r.open, close: r.close, slotMinutes: r.slotMinutes,
+                        breaks: cleanBreaks(r.breaks) };
       setTimings(_timingsCache);
     }).catch(() => {});
     return () => { alive = false; };
   }, []);
-  return { timings, slots: React.useMemo(() => buildSlots(timings), [timings]) };
+  return {
+    timings,
+    // Bookable slots, for the dropdowns.
+    slots: React.useMemo(() => buildSlots(timings), [timings]),
+    // Every slot, for the grid — a break is drawn, not deleted.
+    allSlots: React.useMemo(() => buildAllSlots(timings), [timings]),
+    breakAt: React.useCallback(slot => breakAt(timings, slot), [timings])
+  };
+}
+// The options a time dropdown should offer: the bookable slots, plus the
+// time this appointment is ALREADY on if a break has since been put over
+// it. Without that the select falls to its first option and saving the
+// form moves the appointment to nine in the morning without a word.
+function timeOptions(slots, current) {
+  const list = slots.slice();
+  const now = String(current || "").trim();
+  if (now && list.indexOf(now) < 0) list.push(now);
+  return list.sort();
 }
 const STATUS_COL = { Scheduled:"#0078B4", "Checked In":"#059669", "In Chair":"#D97706", Completed:"#6B7280", Cancelled:"#e24b4a", "No Show":"#9ca3af" };
 const DOCTOR_COL = ["#0078B4", "#7C3AED", "#059669", "#D97706", "#DB2777"];
@@ -6343,7 +6401,10 @@ function MiniCalendar({ selDate, onSelect }) {
 }
 
 function Appointments({ globalPat, setGlobalPat, setPage }) {
-  const { slots: TIME_SLOTS } = useClinicTimings();
+  // TIME_SLOTS is what can be BOOKED; GRID_SLOTS is the whole day, breaks
+  // included, so the grid shows them instead of silently dropping anything
+  // already booked inside one.
+  const { slots: TIME_SLOTS, allSlots: GRID_SLOTS, breakAt: slotBreak } = useClinicTimings();
   const { closedReason } = useWorkingDays();
   const todayISO = new Date().toISOString().split("T")[0];
   const [selDate, setSelDate] = useState(todayISO);
@@ -6871,6 +6932,20 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
 
   const sortedAppts = byDoctor([...appts].sort((a,b) => (a.time||"").localeCompare(b.time||"")));
   const activeAppts = sortedAppts.filter(a => a.status !== "Cancelled");
+  // The rows the day grid draws: the whole day, breaks and all, PLUS any
+  // time something is already booked at that the day has no slot for —
+  // a lunch break put over an existing appointment, or a booking made
+  // before the slot length changed. A row that is not drawn is a patient
+  // nobody sees coming.
+  const gridRows = React.useMemo(() => {
+    const seen = {}, rows = [];
+    GRID_SLOTS.forEach(t => { if (!seen[t]) { seen[t] = 1; rows.push(t); } });
+    activeAppts.forEach(a => {
+      const t = String(a.time || "").trim();
+      if (t && !seen[t]) { seen[t] = 1; rows.push(t); }
+    });
+    return rows.sort();
+  }, [GRID_SLOTS, activeAppts]);
   const counts = {
     total: activeAppts.length,
     checkedIn: activeAppts.filter(a=>a.status==="Checked In").length,
@@ -7181,15 +7256,18 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
             React.createElement("div", { style:{ padding:"8px 6px", fontSize:10, fontWeight:700 } }, "Time"),
             chairs.map(c => React.createElement("div", { key:c, style:{ padding:"8px 10px", fontSize:12, fontWeight:700, borderLeft:"1px solid rgba(255,255,255,.25)" } }, c))
           ),
-          TIME_SLOTS.map(slot => React.createElement("div", {
+          gridRows.map(slot => React.createElement("div", {
             key:slot, style:{ display:"grid", gridTemplateColumns:`64px repeat(${chairs.length}, 1fr)`, borderTop:`1px solid ${BORDER}` }
           },
-            React.createElement("div", { style:{ padding:"6px", fontSize:12, fontWeight:700, color:"#3d3d3d", background:BGS, display:"flex", alignItems:"center" } }, slot),
+            React.createElement("div", { style:{ padding:"6px", fontSize:12, fontWeight:700, color:"#3d3d3d", background:BGS, display:"flex", alignItems:"center", gap:5, flexWrap:"wrap" } },
+              slot,
+              slotBreak(slot) && React.createElement("span", { style:{ fontSize:12, fontWeight:700, color:"#8A4B00" } }, slotBreak(slot).name)),
             chairs.map(chair => {
               const cellAppts = activeAppts.filter(a => a.time===slot && (a.chair||chairs[0])===chair);
               // A closed day's empty cells must not invite a click that only
               // gets refused at Save — they are shown shut, like a block.
-              const blocked = isBlocked(chair, slot) || !!closedReason(selDate);
+              // A break is shut the same way: visible, labelled, not bookable.
+              const blocked = isBlocked(chair, slot) || !!closedReason(selDate) || !!slotBreak(slot);
               const dc = DOCTOR_COL[chairs.indexOf(chair) % DOCTOR_COL.length];
               return React.createElement("div", { key:chair,
                 style:{ padding:4, borderLeft:`1px solid ${BORDER}`, minHeight:40, cursor: (cellAppts.length||blocked)?"default":"pointer",
@@ -7198,6 +7276,7 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
                 // A cell shut because the clinic is closed says so, rather
                 // than reading "Blocked:" with nothing after it.
                 title: closedReason(selDate) ? "Clinic closed — " + closedReason(selDate)
+                     : slotBreak(slot) ? slotBreak(slot).name + " — " + slotBreak(slot).from + " to " + slotBreak(slot).to
                      : blocked ? "Blocked: " + (blocks.find(b=>b.chair===chair&&slot>=b.fromTime&&slot<b.toTime)?.reason||"") : undefined
               },
                 cellAppts.length===0 && !blocked && React.createElement("div", { style:{ height:32, borderRadius:5, border:`1px dashed ${BORDER}` } }),
@@ -7228,7 +7307,7 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
             weekDates.map((d,i) => React.createElement("div", { key:d, style:{ padding:"8px 6px", fontSize:10.5, fontWeight:700, textAlign:"center", borderLeft:"1px solid rgba(255,255,255,.25)" } },
               WEEK_DAY_LBL[i]+" "+new Date(d+"T00:00:00").getDate()))
           ),
-          TIME_SLOTS.map(slot => React.createElement("div", { key:slot, style:{ display:"grid", gridTemplateColumns:`64px repeat(7, 1fr)`, borderTop:`1px solid ${BORDER}` } },
+          GRID_SLOTS.map(slot => React.createElement("div", { key:slot, style:{ display:"grid", gridTemplateColumns:`64px repeat(7, 1fr)`, borderTop:`1px solid ${BORDER}` } },
             React.createElement("div", { style:{ padding:"6px", fontSize:10.5, fontWeight:700, color:"#3d3d3d", background:BGS, display:"flex", alignItems:"center" } }, slot),
             weekDates.map(d => {
               const cellAppts = byDoctor(rangeAppts).filter(a => a.date===d && a.time===slot && a.status!=="Cancelled");
@@ -7338,7 +7417,8 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
           fErrors.date && React.createElement("div", { style:{ fontSize:12, color:"#e24b4a", marginTop:2 } }, "⚠ "+fErrors.date)),
         React.createElement("div", null, React.createElement(Lbl,{c:"Time *"}),
           React.createElement("select", { style:{ ...inp, borderColor:fErrors.time?"#e24b4a":"" }, value:fTime, onChange:e=>setFTime(e.target.value) },
-            TIME_SLOTS.map(t => React.createElement("option", { key:t, value:t }, t)))),
+            timeOptions(TIME_SLOTS, fTime).map(t => React.createElement("option", { key:t, value:t },
+              t + (slotBreak(t) ? "  (" + slotBreak(t).name + ")" : ""))))),
         React.createElement("div", null, React.createElement(Lbl,{c:"Att. Doctor *"}),
           React.createElement("select", { style:{ ...inp, borderColor:fErrors.doctor?"#e24b4a":"" }, value:fDoctor, onChange:e=>setFDoctor(e.target.value) },
             doctors.map(d => React.createElement("option", { key:d, value:d }, d))),
@@ -7462,7 +7542,7 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
 // "+ Add Walk-in" so it can stay on the Daysheet page and only close on
 // save/cancel, instead of navigating away to the Appointments page.
 function QuickApptModal({ show, defaultDate, onClose, onSaved }) {
-  const { slots: TIME_SLOTS } = useClinicTimings();
+  const { slots: TIME_SLOTS, breakAt: slotBreak } = useClinicTimings();
   const [patientMode, setPatientMode] = React.useState("established");
   const [fUhid, setFUhid] = React.useState("");
   const [fFirstName, setFFirstName] = React.useState("");
@@ -7636,7 +7716,8 @@ function QuickApptModal({ show, defaultDate, onClose, onSaved }) {
         fErrors.date && React.createElement("div", { style:{ fontSize:12, color:"#e24b4a", marginTop:2 } }, "⚠ "+fErrors.date)),
       React.createElement("div", null, React.createElement(Lbl,{c:"Time *"}),
         React.createElement("select", { style:{ ...inp, borderColor:fErrors.time?"#e24b4a":"" }, value:fTime, onChange:e=>setFTime(e.target.value) },
-          TIME_SLOTS.map(t => React.createElement("option", { key:t, value:t }, t)))),
+          timeOptions(TIME_SLOTS, fTime).map(t => React.createElement("option", { key:t, value:t },
+            t + (slotBreak(t) ? "  (" + slotBreak(t).name + ")" : ""))))),
       React.createElement("div", null, React.createElement(Lbl,{c:"Att. Doctor *"}),
         React.createElement("select", { style:{ ...inp, borderColor:fErrors.doctor?"#e24b4a":"" }, value:fDoctor, onChange:e=>setFDoctor(e.target.value) },
           doctors.map(d => React.createElement("option", { key:d, value:d }, d))),
@@ -25975,20 +26056,48 @@ function ClinicTimingsEditor({ timings, onSave }) {
   const txt = (v) => (v === undefined || v === null) ? "" : String(v);
   const [form, setForm] = React.useState({
     open: txt(timings.open), close: txt(timings.close), slotMinutes: txt(timings.slotMinutes) });
+  // Breaks are edited as a list. How many a clinic takes is the clinic's
+  // business — lunch for everybody, tea as well for some.
+  const [breaks, setBreaks] = React.useState(() => cleanBreaks(timings.breaks));
   React.useEffect(() => {
     setForm({ open: txt(timings.open), close: txt(timings.close), slotMinutes: txt(timings.slotMinutes) });
-  }, [timings.open, timings.close, timings.slotMinutes]);
+    setBreaks(cleanBreaks(timings.breaks));
+  }, [timings.open, timings.close, timings.slotMinutes, JSON.stringify(timings.breaks || [])]);
 
   const step = parseInt(form.slotMinutes, 10);
   const a = hhmmToMin(form.open), b = hhmmToMin(form.close);
+  // A break half-filled in is not an error to shout about — it is somebody
+  // still typing. One that reads as a break but cannot BE one is.
+  const started = breaks.filter(x => txt(x.from).trim() || txt(x.to).trim() || txt(x.name).trim());
+  const badBreak = started.filter(x => {
+    const f = hhmmToMin(x.from), t = hhmmToMin(x.to);
+    return isNaN(f) || isNaN(t) || t <= f;
+  })[0];
+  // Two breaks over the same minutes is almost always one typed twice.
+  const overlap = (() => {
+    const ok = started.filter(x => !isNaN(hhmmToMin(x.from)) && !isNaN(hhmmToMin(x.to)) &&
+                                   hhmmToMin(x.to) > hhmmToMin(x.from))
+                      .sort((x, y) => hhmmToMin(x.from) - hhmmToMin(y.from));
+    for (let i = 1; i < ok.length; i++)
+      if (hhmmToMin(ok[i].from) < hhmmToMin(ok[i-1].to)) return [ok[i-1], ok[i]];
+    return null;
+  })();
+  const cleaned = cleanBreaks(breaks);
+  const left = (isNaN(a) || isNaN(b) || !(step > 0) || b <= a) ? []
+             : buildAllSlots({ open: form.open, close: form.close, slotMinutes: step })
+                 .filter(t => !breakAt({ breaks: cleaned }, t));
   const bad = isNaN(a) ? "The opening time must read as HH:MM."
             : isNaN(b) ? "The closing time must read as HH:MM."
             : !(step > 0) ? "A slot must be at least one minute long."
             : b <= a ? "The clinic cannot close before it opens."
+            : badBreak ? "\u201c" + (txt(badBreak.name).trim() || "A break") + "\u201d needs a start and an end, and must end after it starts."
+            : overlap ? "\u201c" + txt(overlap[0].name) + "\u201d and \u201c" + txt(overlap[1].name) + "\u201d overlap."
+            : !left.length ? "Those breaks leave no time to book anybody in."
             : "";
-  const preview = bad ? [] : buildSlots({ open: form.open, close: form.close, slotMinutes: step });
+  const preview = bad ? [] : buildAllSlots({ open: form.open, close: form.close, slotMinutes: step });
   const dirty = txt(timings.open) !== form.open || txt(timings.close) !== form.close ||
-                txt(timings.slotMinutes) !== form.slotMinutes;
+                txt(timings.slotMinutes) !== form.slotMinutes ||
+                JSON.stringify(cleanBreaks(timings.breaks)) !== JSON.stringify(cleaned);
 
   const field = (label, key, type, placeholder) => React.createElement("div", null,
     React.createElement("div", { style:{ fontSize:12.5, fontWeight:700, color:"#383838", marginBottom:5 } }, label),
@@ -26003,22 +26112,57 @@ function ClinicTimingsEditor({ timings, onSave }) {
       field("Opens", "open", "time"),
       field("Closes", "close", "time"),
       field("Minutes per appointment", "slotMinutes", "number", "30"),
-      React.createElement("button", { onClick:()=>onSave({ open:form.open, close:form.close, slotMinutes:step }),
+      React.createElement("button", { onClick:()=>onSave({ open:form.open, close:form.close, slotMinutes:step, breaks:cleaned }),
         disabled: !!bad || !dirty,
         style:{ padding:"9px 20px", fontSize:13, border:"none", borderRadius:7, fontWeight:700,
                 cursor: (bad || !dirty) ? "default" : "pointer",
                 background: (bad || !dirty) ? "#9ca3af" : T, color:"#fff" } }, "Save")
     ),
+    // ── breaks ──────────────────────────────────────────────────────────
+    React.createElement("div", { style:{ fontSize:12.5, fontWeight:700, color:"#383838", textTransform:"uppercase",
+      letterSpacing:".04em", marginBottom:6, marginTop:4, paddingTop:14, borderTop:`1px solid ${BORDER}` } }, "Breaks"),
+    React.createElement("div", { style:{ fontSize:13, color:"#383838", marginBottom:10, lineHeight:1.5 } },
+      "Lunch, tea, anything else the day stops for. Nothing can be booked into one \u2014 the book still shows ",
+      "the hours, shut and named, so the gap is obvious rather than missing."),
+    breaks.map((bk, i) => React.createElement("div", { key:i,
+      style:{ display:"grid", gridTemplateColumns:"1.4fr 1fr 1fr auto", gap:10, alignItems:"end", marginBottom:8 } },
+      React.createElement("div", null,
+        i === 0 && React.createElement("div", { style:{ fontSize:12.5, fontWeight:700, color:"#383838", marginBottom:5 } }, "Name"),
+        React.createElement("input", { style:inp, value:txt(bk.name), placeholder:"e.g. Lunch",
+          onChange:e=>setBreaks(breaks.map((x,j)=>j===i?{ ...x, name:e.target.value }:x)) })),
+      React.createElement("div", null,
+        i === 0 && React.createElement("div", { style:{ fontSize:12.5, fontWeight:700, color:"#383838", marginBottom:5 } }, "From"),
+        React.createElement("input", { style:inp, type:"time", value:txt(bk.from),
+          onChange:e=>setBreaks(breaks.map((x,j)=>j===i?{ ...x, from:e.target.value }:x)) })),
+      React.createElement("div", null,
+        i === 0 && React.createElement("div", { style:{ fontSize:12.5, fontWeight:700, color:"#383838", marginBottom:5 } }, "To"),
+        React.createElement("input", { style:inp, type:"time", value:txt(bk.to),
+          onChange:e=>setBreaks(breaks.map((x,j)=>j===i?{ ...x, to:e.target.value }:x)) })),
+      React.createElement("button", { onClick:()=>setBreaks(breaks.filter((_,j)=>j!==i)),
+        style:{ padding:"9px 14px", fontSize:13, border:"1px solid #e5b4b4", borderRadius:7,
+                background:"#fff", color:"#b91c1c", fontWeight:700, cursor:"pointer" } }, "Remove"))),
+    React.createElement("button", { onClick:()=>setBreaks(breaks.concat([{ name:"", from:"", to:"" }])),
+      style:{ padding:"8px 16px", fontSize:13, border:`1px solid ${BORDER}`, borderRadius:7,
+              background:"#fff", color:"#2e2e2e", fontWeight:700, cursor:"pointer", marginBottom:14 } },
+      breaks.length ? "+ Add another break" : "+ Add a break"),
+
     bad
       ? React.createElement("div", { style:{ fontSize:13, fontWeight:600, color:"#b91c1c", background:"#fdf2f2",
           border:"1px solid #e5b4b4", borderRadius:7, padding:"8px 11px" } }, bad)
       : React.createElement("div", { style:{ background:BGS, borderRadius:8, padding:"12px 14px", border:`1px solid ${BORDER}` } },
           React.createElement("div", { style:{ fontSize:12.5, fontWeight:700, color:"#383838", marginBottom:7 } },
-            preview.length + " slots a day \u2014 " + (preview.length ? preview[0] + " to " + preview[preview.length-1] : "none")),
+            left.length + " slots a day \u2014 " + (left.length ? left[0] + " to " + left[left.length-1] : "none")
+            + (cleaned.length ? "  \u00b7  " + cleaned.map(x => x.name + " " + x.from + "\u2013" + x.to).join(", ") : "")),
           React.createElement("div", { style:{ display:"flex", flexWrap:"wrap", gap:5 } },
-            preview.map(t => React.createElement("span", { key:t,
-              style:{ fontSize:12, fontWeight:600, color:"#2e2e2e", background:"#fff",
-                      border:`1px solid ${BORDER}`, borderRadius:5, padding:"3px 7px" } }, t))))
+            preview.map(t => {
+              const onBreak = breakAt({ breaks: cleaned }, t);
+              return React.createElement("span", { key:t, title: onBreak ? onBreak.name : undefined,
+                style:{ fontSize:12, fontWeight:600,
+                        color: onBreak ? "#8A4B00" : "#2e2e2e",
+                        background: onBreak ? "#FFF8E1" : "#fff",
+                        border:`1px solid ${onBreak ? "#F0D58A" : BORDER}`, borderRadius:5, padding:"3px 7px",
+                        textDecoration: onBreak ? "line-through" : "none" } }, t);
+            })))
   );
 }
 
@@ -27685,7 +27829,10 @@ function Master() {
       if (wd && wd.success) { setWeekOff(wd.weekOff || []); setHolidays(wd.holidays || []); }
       // A backend without this answers with the usual clinic day, which is
       // also what the book falls back to, so the two never disagree.
-      if (ct && ct.success) setTimings({ open: ct.open, close: ct.close, slotMinutes: ct.slotMinutes });
+      // A backend that predates breaks simply answers without them, and the
+      // day runs unbroken the way it always did.
+      if (ct && ct.success) setTimings({ open: ct.open, close: ct.close, slotMinutes: ct.slotMinutes,
+                                         breaks: cleanBreaks(ct.breaks) });
     }).catch(() => setLoading(false));
   }, []);
 
@@ -27744,7 +27891,10 @@ function Master() {
   const saveTimings = (next) => {
     const prev = timings;
     return persist("saveClinicTimings",
-      { open: next.open, close: next.close, slotMinutes: String(next.slotMinutes) },
+      // As JSON: the number of breaks is the clinic's to choose, and a
+      // parameter apiece could not carry a list that grows.
+      { open: next.open, close: next.close, slotMinutes: String(next.slotMinutes),
+        breaks: JSON.stringify(cleanBreaks(next.breaks)) },
       next, setTimings, prev).then(saved => {
         // The book keeps its own copy for the page's lifetime; refresh it so
         // the columns change without a reload.

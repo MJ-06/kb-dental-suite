@@ -68,17 +68,17 @@ const HEAD = ["Setting", "Value", "Updated At"];
 
 let e = boot([HEAD, ["Open", "09:00", ""], ["Close", "19:00", ""], ["Slot Minutes", 30, ""]]);
 eq("the sheet's timings come back", e.api.getClinicTimings(),
-   { success: true, open: "09:00", close: "19:00", slotMinutes: 30 });
+   { success: true, open: "09:00", close: "19:00", slotMinutes: 30, breaks: [] });
 
 eq("an unfilled tab answers with the usual clinic day, not an empty book",
    boot([HEAD]).api.getClinicTimings(),
-   { success: true, open: "09:00", close: "19:00", slotMinutes: 30 });
+   { success: true, open: "09:00", close: "19:00", slotMinutes: 30, breaks: [] });
 
 // Sheets turns something that looks like a time into a Date; both forms have
 // to end up as "HH:MM" or the book draws nothing.
 e = boot([HEAD, ["Open", new Date("2026-01-01T08:30:00Z"), ""], ["Close", "17:00", ""], ["Slot Minutes", 20, ""]]);
 eq("a time cell that is a real Date still reads as a time",
-   e.api.getClinicTimings(), { success: true, open: "08:30", close: "17:00", slotMinutes: 20 });
+   e.api.getClinicTimings(), { success: true, open: "08:30", close: "17:00", slotMinutes: 20, breaks: [] });
 
 e = boot([HEAD]);
 eq("saving reports success",
@@ -87,7 +87,7 @@ ok("the time is written as text, so Sheets cannot reformat it under us",
    e.sheet.rows.some(r => r[0] === "Open" && r[1] === "'09:00"), JSON.stringify(e.sheet.rows));
 eq("and it reads back as what was saved",
    boot(e.sheet.rows.map(r => [r[0], String(r[1]).replace(/^'/, ""), r[2]])).api.getClinicTimings(),
-   { success: true, open: "09:00", close: "19:00", slotMinutes: 30 });
+   { success: true, open: "09:00", close: "19:00", slotMinutes: 30, breaks: [] });
 
 e = boot([HEAD, ["Open", "09:00", ""]]);
 let res = e.api.saveClinicTimings({ open: "19:00", close: "09:00", slotMinutes: "30" });
@@ -105,10 +105,12 @@ ok("Clinic Timings is a real tab now, not a placeholder",
 ok("wired to its editor", /clinicTimings: \(\) => React\.createElement\(ClinicTimingsEditor/.test(HTML));
 ok("the master loads it", /"getWorkingDays", "getClinicTimings"/.test(HTML));
 ok("and destructures it in the same position", /pnl,wd,ct[,\]]/.test(HTML));
+// It also takes the whole day separately, so a break is drawn rather than
+// deleted and nothing already booked inside one disappears off the screen.
 ok("the appointment book reads the master, not the fixed list",
-   /function Appointments\(\{[^}]*\}\) \{\n  const \{ slots: TIME_SLOTS \} = useClinicTimings\(\);/.test(HTML));
+   /function Appointments\(\{[^}]*\}\) \{[\s\S]{0,260}const \{ slots: TIME_SLOTS, allSlots: GRID_SLOTS, breakAt: slotBreak \} = useClinicTimings\(\);/.test(HTML));
 ok("and so does the quick-booking box",
-   /function QuickApptModal\(\{[^}]*\}\) \{\n  const \{ slots: TIME_SLOTS \} = useClinicTimings\(\);/.test(HTML));
+   /function QuickApptModal\(\{[^}]*\}\) \{\n  const \{ slots: TIME_SLOTS, breakAt: slotBreak \} = useClinicTimings\(\);/.test(HTML));
 ok("the timings are fetched once per page and shared",
    /let _timingsCache = null;/.test(HTML) && /_timingsCache \|\| DEFAULT_TIMINGS/.test(HTML));
 ok("and a save refreshes that copy, so the columns change without a reload",
