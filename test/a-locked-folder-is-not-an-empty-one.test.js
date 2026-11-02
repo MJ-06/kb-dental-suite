@@ -100,8 +100,10 @@ function runBatch(batchResponse) {
   }
 
   // ── 2. the Documents screen tells the two empties apart ────────────────
-  const loadDocs = html.slice(html.indexOf('  const loadDocs = (uhid) => {'),
-                              html.indexOf('React.useEffect(() => {', html.indexOf('  const loadDocs = (uhid) => {')));
+  // It takes a second argument now -- every patient's folder asks for the
+  // password, and `force` is how unlocking one says it may be read.
+  const loadDocs = html.slice(html.indexOf('  const loadDocs = (uhid, force) => {'),
+                              html.indexOf('React.useEffect(() => {', html.indexOf('  const loadDocs = (uhid, force) => {')));
   ok('a failed read no longer leaves the list quietly empty',
      /setDocs\(\[\]\);\s*\n\s*setDocsError\(/.test(loadDocs), loadDocs.slice(0, 400));
   ok('a locked folder says it is locked',
