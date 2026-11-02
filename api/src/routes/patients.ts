@@ -4,6 +4,7 @@ import { sql } from "kysely";
 import { asActor } from "../http/context.js";
 import { HttpError, notFound } from "../http/errors.js";
 import type { AppOptions } from "../app.js";
+import { withSharedIdentity } from "../patient-identity.js";
 
 const Nullable = <T extends TSchema>(t: T) => Type.Union([t, Type.Null()]);
 const Mobile = Type.String({ pattern: "^\\+?[0-9]{10,15}$" });
@@ -65,10 +66,13 @@ export const patientRoutes: FastifyPluginAsyncTypebox<AppOptions> = async (app, 
       query = query.where((eb) => eb.or([
         eb("uhid", "ilike", q),
         eb(sql<string>`lower(full_name)`, "like", name),
+        sql<boolean>`EXISTS(SELECT 1 FROM org_clinical_patient_links l JOIN org_patients o ON o.id=l.organization_patient_id
+          WHERE l.patient_id=patients.id AND l.clinic_id=app_clinic_id()
+          AND (lower(o.name) LIKE ${name} OR o.uhid ILIKE ${q} OR o.phone LIKE ${`%${digits}%`} AND ${digits.length >= 4}))`,
         ...(digits.length >= 4 ? [eb("mobile", "like", `%${digits}%`)] : [])
       ]));
     }
-    return { patients: await query.execute() };
+    return { patients: await withSharedIdentity(tx,await query.execute()) };
   }));
 
   app.get("/:id", { schema: { params: IdParams } },
@@ -77,7 +81,7 @@ export const patientRoutes: FastifyPluginAsyncTypebox<AppOptions> = async (app, 
         .where("id", "=", req.params.id).where("deleted_at", "is", null)
         .executeTakeFirst();
       if (!patient) throw notFound("Patient");
-      return { patient };
+      return { patient: (await withSharedIdentity(tx,[patient]))[0] };
     }));
 
   app.post("/", { schema: { body: CreatePatientBody } },

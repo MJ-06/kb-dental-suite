@@ -1,5 +1,22 @@
 # Handover for the next tool (31 Oct 2026)
 
+## Latest implementation — shared patient identity (3 November2026)
+
+Read `docs/SHARED-PATIENT-IDENTITY.md`. Migration0025 adds links between existing
+clinic patients and the existing org_patients canonical identity. Main Patient
+Search now searches the organization directory in linked local runtimes; an explicit
+Add to this clinic and open creates a local shell with the same identity. No
+medical/clinical/financial history is copied, and old matching records are never
+automatically merged. Existing local identities were published with count-only,
+idempotent backfill; a fictional Orion Shared Demo journey passed in the browser.
+Full API suite282/282 passed. Complete longitudinal history/visits/material ledger,
+legacy registration duplicate/concurrency parity and remaining identity read-path
+consolidation are still next work. UI layout remains familiar.
+The user also requested a separate review chat: Clinical UI improvements and native
+backend opportunities (01a19dd2-afc1-7a32-9348-fdb8e38f1d7d). Its recommendations
+are in `docs/UI-NATIVE-OPPORTUNITIES.md`; it performed no application edits/DB tests.
+
+
 ## Latest implementation — clinic switching and Organization (3 November 2026)
 
 Read `docs/CLINIC-SWITCHING.md`. The user explicitly chose the EXISTING Master

@@ -63,6 +63,12 @@ onboard production organizations. The independent Org A/B demos remain separate.
   stale saves are refused. New profile/switch changes require POST. Master password
   verification/change from the frontend also uses POST, keeping passwords out of URLs.
 
+## Shared identity update
+
+The subsequent [shared-patient identity slice](SHARED-PATIENT-IDENTITY.md) links
+clinic records through the organization directory. The historical boundary below
+predates that slice; clinical/financial history remains clinic-scoped.
+
 ## Boundary and next work
 
 The existing legacy patient/clinical tables remain clinic-scoped in this bridge.

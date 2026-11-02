@@ -60,12 +60,17 @@ interface Row {
 
 export async function findPatient(tx: Tx, uhid: string): Promise<Row | undefined> {
   const r = await sql<Row>`
-    SELECT p.id, p.uhid, p.full_name, p.gender, p.date_of_birth::text AS dob, p.mobile, p.mobile_2, p.whatsapp,
+    SELECT p.id, p.uhid, coalesce(identity.name,p.full_name) AS full_name,
+           CASE WHEN identity.id IS NOT NULL THEN identity.gender ELSE p.gender END AS gender,
+           (CASE WHEN identity.id IS NOT NULL THEN identity.dob ELSE p.date_of_birth END)::text AS dob,
+           CASE WHEN identity.id IS NOT NULL THEN nullif(identity.phone,'') ELSE p.mobile END AS mobile, p.mobile_2, p.whatsapp,
            p.email::text AS email, p.blood_group, p.occupation, p.marital_status, p.address,
            p.emergency_name, p.emergency_relation, p.emergency_contact, p.referred_by, p.referred_by_type,
            p.patient_type, pn.name AS panel, p.panel_category, p.card_id, p.registered_on, p.registration_status,
            r.conditions, r.allergies, r.medicines, r.habits, r.chief_complaint, r.pain_level, r.how_known, r.id AS reg_id
       FROM patients p
+      LEFT JOIN org_clinical_patient_links identity_link ON identity_link.patient_id=p.id AND identity_link.clinic_id=p.clinic_id
+      LEFT JOIN org_patients identity ON identity.id=identity_link.organization_patient_id
       LEFT JOIN panels pn ON pn.id = p.panel_id
       LEFT JOIN LATERAL (
         SELECT * FROM patient_registrations x WHERE x.patient_id = p.id ORDER BY x.collected_at DESC LIMIT 1

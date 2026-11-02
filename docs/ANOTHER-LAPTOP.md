@@ -74,6 +74,21 @@ synthetic East clinic at the bottom left. Master > Organization uses the existin
 Master password. No patient records are moved. This is a transition bridge; shared
 legacy patient identity is still pending. See [clinic switching](CLINIC-SWITCHING.md).
 
+## Publish shared identities for the familiar clinical suite
+
+After the clinic linker, run from api/:
+
+```powershell
+node --import tsx scripts/publish-clinical-patient-identities.ts
+node --import tsx scripts/publish-clinical-patient-identities.ts --apply
+node --import tsx scripts/seed-shared-patient-demo.ts --apply
+```
+
+The last command is optional and limited to the named local development fixture.
+Use Patient Search from the East clinic to find the fictional Orion Shared Demo.
+Existing patient records are not merged/moved; historical records remain scoped.
+See [shared identity scope and next work](SHARED-PATIENT-IDENTITY.md).
+
 ## Organization demo A: two clinics
 
 ```powershell

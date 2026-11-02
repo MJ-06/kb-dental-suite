@@ -109,6 +109,52 @@ describe("preserved clinical UI organization bridge", () => {
   it("does not allow the runtime database account to grant itself clinic access", async () => {
     await expect(sql`SELECT * FROM org_clinical_access`.execute(w.db)).rejects.toThrow();
   });
+  it("shares one identity across clinics without copying registration history", async () => {
+    const issued=await call("getNextUHID");
+    expect((await call("saveRegistration",{uhid:issued.uhid,name:"Orbit Synthetic",mobile:"9000000061",dob:"14/03/1990",complaint:"Fictional private clinic A note",regStatus:"Quick"})).success).toBe(true);
+    const first=(await call("searchOrganizationPatients",{query:"Orbit Synthetic"})).patients[0];
+    expect(first.atCurrentClinic).toBe(true);
+    const moved=await call("switchWorkingClinic",{clinicId:w.clinicB}); clinic=w.clinicB; revision=moved.revision;
+    const found=(await call("searchOrganizationPatients",{query:"Orbit Synthetic"})).patients[0];
+    expect(found.organization_patient_id).toBe(first.organization_patient_id);
+    expect(found.atCurrentClinic).toBe(false);
+    expect((await call("getPatient",{uhid:issued.uhid})).success).toBe(false);
+    const attached=await call("attachOrganizationPatient",{organizationPatientId:found.organization_patient_id});
+    expect(attached.success).toBe(true);
+    expect((await call("getPatient",{uhid:attached.uhid})).patient).toMatchObject({name:"Orbit Synthetic",complaint:""});
+    const again=await call("attachOrganizationPatient",{organizationPatientId:found.organization_patient_id});
+    expect(again.id).toBe(attached.id);
+    expect((await call("attachOrganizationPatient",{organizationPatientId:found.organization_patient_id},{method:"GET"})).success).toBe(false);
+    expect((await call("attachOrganizationPatient",{organizationPatientId:"00000000-0000-4000-8000-000000000099"})).success).toBe(false);
+    await call("saveRegistration",{uhid:attached.uhid,name:"Orbit Synthetic Updated",regStatus:"Quick"});
+    const back=await call("switchWorkingClinic",{clinicId:w.clinicA}); clinic=w.clinicA; revision=back.revision;
+    expect((await call("getPatient",{uhid:issued.uhid})).patient).toMatchObject({name:"Orbit Synthetic Updated",complaint:"Fictional private clinic A note"});
+    expect((await call("searchOrganizationPatients",{query:"Orbit Synthetic Updated"})).patients).toHaveLength(1);
+    const rest=await w.app.inject({url:"/api/v1/patients/",query:{q:"Orbit Synthetic Updated"},headers:{cookie,"x-kb-clinic":clinic,"x-kb-clinic-revision":String(revision)}});
+    expect(rest.statusCode).toBe(200);
+    expect(rest.json().patients[0].full_name).toBe("Orbit Synthetic Updated");
+  });
+  it("does not equate matching UHIDs or names and refuses unpermitted linking", async () => {
+    const issued=await call("getNextUHID");
+    await call("saveRegistration",{uhid:issued.uhid,name:"Same Synthetic",dob:"02/02/1980",mobile:"9000000062"});
+    await owner(async c=>{
+      await c.query("SELECT set_config('app.clinic_id',$1,true)",[w.clinicB]);
+      await c.query("INSERT INTO patients(uhid,full_name,mobile,date_of_birth) VALUES($1,'Same Synthetic','9000000062','1980-02-02')",[issued.uhid]);
+    });
+    const matches=(await call("searchOrganizationPatients",{query:"Same Synthetic"})).patients;
+    expect(matches).toHaveLength(2);
+    expect(new Set(matches.map((x:any)=>x.organization_patient_id)).size).toBe(2);
+    expect(new Set(matches.map((x:any)=>x.organization_uhid)).size).toBe(2);
+    const remote=matches.find((x:any)=>!x.atCurrentClinic);
+    expect((await call("attachOrganizationPatient",{organizationPatientId:remote.organization_patient_id})).success).toBe(true);
+    await owner(async c=>{
+      await c.query("SELECT set_config('app.clinic_id',$1,true)",[w.clinicA]);
+      await c.query("UPDATE roles SET permissions=ARRAY['patients:read'] WHERE id=(SELECT role_id FROM app_users WHERE username='a-desk')");
+    });
+    expect((await call("searchOrganizationPatients",{query:"Same Synthetic"},{cookie:desk,revision:1})).success).toBe(true);
+    expect((await call("attachOrganizationPatient",{organizationPatientId:remote.organization_patient_id},{cookie:desk,revision:1})).forbidden).toBe(true);
+    await expect(sql`DELETE FROM org_clinical_patient_links`.execute(w.db)).rejects.toThrow();
+  });
   it("serializes competing switches so only one page context can win", async () => {
     const results = await Promise.all([
       call("switchWorkingClinic",{clinicId:w.clinicB}),

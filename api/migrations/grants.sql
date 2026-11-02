@@ -35,3 +35,6 @@ GRANT UPDATE (resolved_at, resolved_by, resolution) ON system_log TO kb_app;
 
 -- Clinical organization links and grants are owner-managed, including future migrations.
 REVOKE ALL ON org_clinical_units, org_clinical_access, org_clinical_context FROM kb_app;
+
+-- Identity linking is performed only by the validated database functions.
+REVOKE INSERT, UPDATE, DELETE ON org_clinical_patient_links FROM kb_app;

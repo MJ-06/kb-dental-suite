@@ -475,7 +475,7 @@ async function apiDirect(action, data = {}) {
     const query = p.toString();
     const url = SCRIPT_URL + "?" + query;
     // Sign-in always goes in the body so a password never lands in a URL.
-    const long = query.length > 1800 || ["staffLogin", "verifyMasterPassword", "saveMasterPassword", "switchWorkingClinic", "saveOrganizationProfile"].includes(action);
+    const long = query.length > 1800 || ["staffLogin", "verifyMasterPassword", "saveMasterPassword", "switchWorkingClinic", "saveOrganizationProfile", "attachOrganizationPatient"].includes(action);
     const body = long ? JSON.stringify(Object.assign({ action }, data,
                                        (tok && KB_BACKEND_IS_APPS_SCRIPT) ? { token: tok } : {})) : null;
     const attempts = 3;
@@ -8375,12 +8375,18 @@ function PatientSearch({ setGlobalPat, onNavigate }) {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [selected, setSelected] = useState(null);
-  const debRef = useRef(null);
+  const debRef = useRef(null), searchVersion = useRef(0);
+  const [pendingIdentity,setPendingIdentity] = useState(null), [error,setError] = useState("");
+  const organizationDirectory = !!window.KB_CLINIC_CONTEXT;
 
   const doSearch = async (q) => {
     if (!q.trim()) { setResults([]); setSearched(false); return; }
     setLoading(true); setSearched(false);
-    const res = await api("searchPatients", { query: q.trim() });
+    const version=++searchVersion.current;
+    setError("");
+    const res = await api(organizationDirectory ? "searchOrganizationPatients" : "searchPatients", { query: q.trim() });
+    if (version !== searchVersion.current) return;
+    if (!res.success) setError(res.error || "Patient search could not load. Try again.");
     setLoading(false); setSearched(true);
     if (res.success && res.patients) {
       setResults(res.patients);
@@ -8390,12 +8396,20 @@ function PatientSearch({ setGlobalPat, onNavigate }) {
   const onType = (e) => {
     const v = e.target.value;
     setQuery(v);
-    setSelected(null);
+    setSelected(null); setPendingIdentity(null); searchVersion.current++;
     if (debRef.current) clearTimeout(debRef.current);
     debRef.current = setTimeout(() => doSearch(v), 400);
   };
 
+  const attach = async () => {
+    setLoading(true); setError("");
+    const res=await api("attachOrganizationPatient", { organizationPatientId:pendingIdentity.organization_patient_id });
+    setLoading(false);
+    if (!res.success) { setError(res.error || "Could not add patient to this clinic"); return; }
+    selectPat({ ...pendingIdentity, uhid:res.uhid, atCurrentClinic:true });
+  };
   const selectPat = (p) => {
+    if (organizationDirectory && p.organization_patient_id && !p.atCurrentClinic) { setPendingIdentity(p); return; }
     const pat = {
       uhid:   p.uhid   || p.UHID   || p["Registration ID"] || "",
       name:   p.name   || p["Full Name"] || "",
@@ -8418,7 +8432,7 @@ function PatientSearch({ setGlobalPat, onNavigate }) {
     React.createElement(ClinicHeader, null),
 
     React.createElement("div", { style:{ fontSize:18, fontWeight:700, marginBottom:4 } }, "Patient Search"),
-    React.createElement("div", { style:{ fontSize:13, color:"#444444", marginBottom:20 } }, "Search by name — if two patients share a name, date of birth shown for disambiguation"),
+    React.createElement("div", { style:{ fontSize:13, color:"#444444", marginBottom:20 } }, organizationDirectory ? "Search organization patients by name, UHID or phone. Confirm identity using date of birth before adding to this clinic." : "Search by name — if two patients share a name, date of birth shown for disambiguation"),
 
     // Search input
     React.createElement("div", { style:{ position:"relative", maxWidth:540, marginBottom:20 } },
@@ -8433,8 +8447,14 @@ function PatientSearch({ setGlobalPat, onNavigate }) {
       loading && React.createElement("div", { style:{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", fontSize:12, color:T } }, "searching...")
     ),
 
+    error && React.createElement("div", { role:"alert", style:{ color:"#b42318", marginBottom:12 } }, error),
+    pendingIdentity && React.createElement("div", { style:{ background:TL, padding:16, borderRadius:8, marginBottom:16 } },
+      React.createElement("strong", null, "Use existing organization patient at this clinic?"),
+      React.createElement("p", { style:{ margin:"8px 0", fontSize:13 } }, pendingIdentity.name + " · " + pendingIdentity.uhid + ". Confirm the patient identity. This adds their identity to this clinic; other clinics' clinical notes and payments are not copied."),
+      React.createElement("button", { onClick:attach, disabled:loading, style:{ padding:"8px 14px", cursor:"pointer" } }, "Add to this clinic and open"),
+      React.createElement("button", { onClick:()=>setPendingIdentity(null), disabled:loading, style:{ padding:"8px 14px", marginLeft:8, cursor:"pointer" } }, "Cancel")),
     // Results
-    searched && results.length === 0 && React.createElement("div", {
+    searched && !error && results.length === 0 && React.createElement("div", {
       style:{ background:BGS, borderRadius:8, padding:"24px", textAlign:"center", fontSize:14, color:"#5a5a5a", border:`1px dashed ${BORDER}` }
     }, "No patients found for this name. Check spelling or try the UHID directly."),
 
@@ -8482,7 +8502,7 @@ function PatientSearch({ setGlobalPat, onNavigate }) {
               ? React.createElement("div", { style:{ fontSize:13, fontWeight:600, color:"#059669", display:"flex", alignItems:"center", gap:4 } },
                   "✓ Active Patient"
                 )
-              : React.createElement("div", { style:{ fontSize:12, color:"#5a5a5a" } }, "Click to select")
+              : React.createElement("div", { style:{ fontSize:12, color:"#5a5a5a" } }, p.organization_patient_id && !p.atCurrentClinic ? "Organization patient · add to clinic" : "Click to select")
           );
         })
       )
