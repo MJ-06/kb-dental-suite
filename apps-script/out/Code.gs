@@ -1100,7 +1100,7 @@ function saveRegistration(p) {
   // a blank cannot say which it is. Without this the main book had no Panel
   // Type column at all and the value was written into nothing.
   ensureRegColumns_(sh, ["Patient Type", "Panel", "Panel Category", "Card ID",
-                         "Referred By Type", "Mobile 2"]);
+                         "Referred By Type", "Mobile 2", "Safety Flags"]);
 
   if (sh.getLastRow() === 0) {
     sh.appendRow([
@@ -1137,6 +1137,9 @@ function saveRegistration(p) {
     "Medicines you are taking currently:|Medicines": p.medicines,
     "Are you allergic to any of the following?|Allergies": safeJSON(p.allergies),
     "How did you know about this clinic?|Referred By": p.referredBy,
+    // What the staff need to know before this patient sits down. Written the
+    // same way as conditions and allergies, so it reads back the same way.
+    "Safety Flags": safeJSON(p.safetyFlags),
     "What is your chief complaint?|Complaint": p.complaint,
     "Are you in Pain?": p.painLevel ? "Yes" : "",
     "What is your level of pain on a scale of 0-10?|Pain Level": p.painLevel,
@@ -1513,6 +1516,7 @@ function getPatient(p) {
         conditions:        regList_(get("Conditions", "Have you ever suffered/suffering from any of the following?")),
         medicines:         get("Medicines", "Medicines you are taking currently:"),
         allergies:         regList_(get("Allergies", "Are you allergic to any of the following?")),
+        safetyFlags:       regList_(get("Safety Flags")),
         habits:            get("Habits"),
         complaint:         get("Complaint", "What is your chief complaint?"),
         painLevel:         get("Pain Level", "What is your level of pain on a scale of 0-10?"),
