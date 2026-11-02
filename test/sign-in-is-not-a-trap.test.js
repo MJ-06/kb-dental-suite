@@ -124,8 +124,15 @@ async function render(browser, status, errors) {
   {
     const page = await render(browser, { success: true, authRequired: true, valid: false, passwordSet: true }, errors);
     const text = await page.locator('#root').innerText();
+    // IN FRONT OF, not instead of. This used to insist the app was GONE --
+    // which is precisely the glitch: returning the sign-in screen in place
+    // of the app unmounted it, and signing in brought it back from scratch
+    // on the dashboard with the patient closed. The app stays mounted and
+    // the box covers it. See signing-in-keeps-your-place.test.js.
     ok('with auth on, the password box stands in front of the app',
-       /Staff Sign In/.test(text) && !(await page.locator('#app').isVisible()), text.slice(0, 200));
+       /Staff Sign In/.test(text), text.slice(0, 200));
+    ok('and the app behind it was not thrown away',
+       await page.locator('#app').count() === 1);
     ok('it says what the password opens',
        /kept behind this password/.test(text), text.slice(0, 400));
     ok('and how long signing in lasts', /twelve hours/.test(text), text.slice(0, 400));

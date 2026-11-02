@@ -27573,6 +27573,14 @@ function PatientDocuments({ globalPat }) {
     });
   };
 
+  // The documents were refused for want of the password, the box came up,
+  // and it has just been typed. Ask again -- that is what it was typed for.
+  React.useEffect(() => {
+    const again = () => { if (pat && pat.uhid) loadDocs(pat.uhid); };
+    window.addEventListener("kb-signed-in", again);
+    return () => window.removeEventListener("kb-signed-in", again);
+  }, [pat]);
+
   React.useEffect(() => {
     if (globalPat && globalPat.uhid) {
       setPat(globalPat); setUhidInput(globalPat.uhid); setNotFound(false);
@@ -31388,13 +31396,28 @@ function StaffLoginGate({ children }) {
     if (res && res.success && res.token) {
       setSessionToken(res.token);
       setPw(""); setNeedsLogin(false);
+      // Whatever was refused a moment ago can be asked for again now. The
+      // password was typed to open something, and stopping at "you are
+      // signed in" leaves the clinic to work out that they have to click
+      // the same thing a second time.
+      try { window.dispatchEvent(new Event("kb-signed-in")); } catch (e) {}
     } else setErr((res && res.error) || "Sign-in failed");
   };
 
   if (checking) return React.createElement("div", { style:{ padding:40, textAlign:"center", color:"#444444", fontSize:14 } }, "⏳ Loading...");
-  if (!needsLogin) return children;
-
-  return React.createElement("div", { style:{ minHeight:"100vh", display:"flex", alignItems:"center", justifyContent:"center", background:BGS, padding:20 } },
+  // The sign-in box sits ON TOP of the app, which stays mounted behind it.
+  //
+  // It used to be returned INSTEAD of children, so asking for the password
+  // unmounted the entire app -- the open patient, the page they were on,
+  // every bit of state -- and signing in mounted it again from scratch,
+  // which is the dashboard. Opening a patient's documents, typing the right
+  // password and landing on the dashboard with the patient closed was that,
+  // not a fault in the password.
+  //
+  // Nothing behind it can be reached while it is up: it covers the screen.
+  return React.createElement(React.Fragment, null,
+    children,
+    needsLogin && React.createElement("div", { style:{ position:"fixed", inset:0, zIndex:10000, display:"flex", alignItems:"center", justifyContent:"center", background:"rgba(20,20,25,.45)", padding:20, overflowY:"auto" } },
     React.createElement("div", { style:{ background:"#fff", border:`1px solid ${BORDER}`, borderRadius:12, padding:"28px 30px", width:"min(380px,100%)", boxShadow:"0 4px 20px rgba(0,0,0,.08)" } },
       React.createElement("div", { style:{ fontSize:17, fontWeight:800, color:T, marginBottom:4 } }, "🔐 Staff Sign In"),
       passwordSet === false
@@ -31420,7 +31443,7 @@ function StaffLoginGate({ children }) {
         style:{ width:"100%", padding:"10px", fontSize:14, border:"none", borderRadius:8, cursor:busy?"wait":"pointer",
           background:T, color:"#fff", fontWeight:700, opacity:(busy||!pw.trim())?0.6:1 } },
         busy ? "Signing in..." : "Sign In")
-    )
+    ))
   );
 }
 
