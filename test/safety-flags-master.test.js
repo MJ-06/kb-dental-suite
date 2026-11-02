@@ -52,7 +52,7 @@ ok('saving goes through the usual path',
    /persist\("saveSafetyFlagsList", \{ flags: JSON\.stringify\(arr\) \}/.test(html));
 
 // ── the screen, rendered and driven ─────────────────────────────────────
-const A = html.indexOf('function EntryListEditor({ title, blurb, noun, items, onAdd, onRemove }) {');
+const A = html.indexOf('function EntryListEditor({ title, blurb, noun, items, onAdd, onRemove, onEdit }) {');
 const B = html.indexOf('// When the day runs, and how long a slot is.', A);
 ok('the screen was found', A > 0 && B > A, `${A}..${B}`);
 const SRC = html.slice(A, B);
