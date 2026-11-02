@@ -5,6 +5,7 @@ Practice management and patient/clinic CRM, in development on `saas/multi-clinic
 - **Start on another laptop:** [setup and commands for both versions](docs/ANOTHER-LAPTOP.md).
 - **Current handover:** [docs/HANDOVER.md](docs/HANDOVER.md).
 - **Latest product direction:** [patient-first clinical CRM](docs/PATIENT-CRM-DIRECTION.md).
+- **UI/UX proposal awaiting review:** [clinical UI review](docs/CLINICAL-UI-REVIEW-2026-11-01.md) and [separate prototype](design/clinical-review-v1/README.md).
 - **Organization demo:** [runbook](docs/DEMO-RUNBOOK.md) and [verified scope](docs/DEMO-VERIFICATION.md).
 
 The familiar clinic suite runs at port8080; the separate organization demos run at

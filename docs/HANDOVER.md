@@ -1,5 +1,18 @@
 # Handover for the next tool (31 Oct 2026)
 
+## UI / UX review checkpoint (1 November 2026)
+
+The user requested review of the familiar8080/live clinical UI before implementation.
+Read `docs/CLINICAL-UI-REVIEW-2026-11-01.md`. The existing UI was inspected locally
+and on the published site, with read-only authorized reference-patient navigation.
+No live clinical record or credential was copied into the design. Existing local
+kb_pms migrations0020-0023 were applied (no reset) to make dev sign-in work.
+An independent static prototype is at `design/clinical-review-v1/`, served locally
+on8090. It retains the familiar blue clinical-suite shell and folder/forms structure,
+adds proposed patient/visit/doctor/item history views, and uses fictional records.
+Application screens are unchanged. User review of this UI/UX proposal comes before
+application UI implementation; prior D01-D18 approval is not approval of a new layout.
+
 ## Latest priority: portable handoff and patient-centred clinical CRM
 
 Read `docs/PATIENT-CRM-DIRECTION.md`: keep familiar clinical screens and organize
