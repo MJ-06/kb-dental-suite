@@ -490,6 +490,20 @@ var DEFAULT_SAFETY_FLAGS = [
 // Occupations, picked from rather than typed: "Govt. Service", "Government
 // service" and "Govt service" are one occupation typed three ways, and no
 // report can add them up. A master list so the clinic keeps its own.
+// How the patient came to hear of the clinic. The same six Registration
+// has always offered, now the clinic's own to change.
+var REFERRAL_SOURCES_SHEET = "Referral Sources";
+var DEFAULT_REFERRAL_SOURCES = [
+  "An Existing Patient", "Website", "Word of Mouth",
+  "Sign Board", "Social Media", "Google"
+];
+
+// Patient types. "Panel" is not just a label -- it is what sends a patient
+// to the panel register instead of the main one -- so it and "Normal" are
+// the two the app acts on. Anything else the clinic adds here is a label.
+var PATIENT_TYPES_SHEET = "Patient Types";
+var DEFAULT_PATIENT_TYPES = ["Normal", "Panel"];
+
 var OCCUPATIONS_SHEET = "Occupations";
 var DEFAULT_OCCUPATIONS = [
   "Business", "Government Service", "Private Service", "Self Employed",
@@ -527,6 +541,54 @@ function parseList_(raw, label) {
   }
   if (!Array.isArray(arr)) return { __bad: "the " + label + " was not a list" };
   return arr;
+}
+
+function getReferralSourcesList() {
+  var sh = getSheet(REFERRAL_SOURCES_SHEET);
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(["Referral Source", "Updated At"]);
+    var now = new Date().toISOString();
+    DEFAULT_REFERRAL_SOURCES.forEach(function(x) { sh.appendRow([x, now]); });
+  }
+  var data = sh.getDataRange().getValues();
+  var items = [];
+  for (var i = 1; i < data.length; i++) { if (data[i][0]) items.push(String(data[i][0])); }
+  return { success: true, sources: items };
+}
+
+function saveReferralSourcesList(p) {
+  var arr = parseList_(p.sources, "referral sources");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
+  var sh = getSheet(REFERRAL_SOURCES_SHEET);
+  sh.clearContents();
+  sh.appendRow(["Referral Source", "Updated At"]);
+  var now = new Date().toISOString();
+  arr.forEach(function(v) { sh.appendRow([v, now]); });
+  return { success: true };
+}
+
+function getPatientTypesList() {
+  var sh = getSheet(PATIENT_TYPES_SHEET);
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(["Patient Type", "Updated At"]);
+    var now = new Date().toISOString();
+    DEFAULT_PATIENT_TYPES.forEach(function(x) { sh.appendRow([x, now]); });
+  }
+  var data = sh.getDataRange().getValues();
+  var items = [];
+  for (var i = 1; i < data.length; i++) { if (data[i][0]) items.push(String(data[i][0])); }
+  return { success: true, types: items };
+}
+
+function savePatientTypesList(p) {
+  var arr = parseList_(p.types, "patient types");
+  if (arr && arr.__bad) return { success: false, error: arr.__bad };
+  var sh = getSheet(PATIENT_TYPES_SHEET);
+  sh.clearContents();
+  sh.appendRow(["Patient Type", "Updated At"]);
+  var now = new Date().toISOString();
+  arr.forEach(function(v) { sh.appendRow([v, now]); });
+  return { success: true };
 }
 
 function getOccupationsList() {
@@ -848,6 +910,10 @@ function route(p) {
       case "saveSafetyFlagsList":        return saveSafetyFlagsList(p);
       case "getOccupationsList":         return getOccupationsList();
       case "saveOccupationsList":        return saveOccupationsList(p);
+      case "getReferralSourcesList":     return getReferralSourcesList();
+      case "saveReferralSourcesList":    return saveReferralSourcesList(p);
+      case "getPatientTypesList":        return getPatientTypesList();
+      case "savePatientTypesList":       return savePatientTypesList(p);
       case "createDocumentPDF":         return createDocumentPDF(p);
       case "getPatientDocumentContent": return getPatientDocumentContent(p);
 

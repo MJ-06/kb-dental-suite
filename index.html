@@ -1411,6 +1411,22 @@ function useOccupations() {
   return list;
 }
 
+let _referralSourcesCache = null;
+function useReferralSources() {
+  const [list, setList] = React.useState(() => _referralSourcesCache || []);
+  React.useEffect(() => {
+    if (_referralSourcesCache) return;
+    let alive = true;
+    api("getReferralSourcesList").then(r => {
+      if (!alive || !r || !r.success) return;
+      _referralSourcesCache = r.sources || [];
+      setList(_referralSourcesCache);
+    }).catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  return list;
+}
+
 function patientFlags(pat) {
   const raw = pat && pat.safetyFlags;
   if (!raw) return [];
@@ -1843,6 +1859,7 @@ function Registration({
   // a backend that does not serve it — the step simply shows no chips then.
   const safetyFlagOptions = useSafetyFlags();
   const occupationOptions = useOccupations();
+  const referralOptions = useReferralSources();
   const [D, setD] = useState({
     howKnown: [],
     howKnownOther: "",
@@ -3319,7 +3336,14 @@ function Registration({
       gap: 8,
       marginBottom: 12
     }
-  }, [...HOW_KNOWN, "Other"].map(h => /*#__PURE__*/React.createElement("label", {
+  },
+  // The clinic's own list from Master, falling back to the six this has
+  // always offered while it loads and for a backend that does not serve
+  // it -- the question must never come up with nothing to tick. Anything
+  // already ticked on a record is kept, so a source retired in Master does
+  // not vanish off the patient who gave it.
+  [...new Set([...(referralOptions.length ? referralOptions : HOW_KNOWN),
+               ...D.howKnown, "Other"])].map(h => /*#__PURE__*/React.createElement("label", {
     key: h,
     style: {
       display: "flex",
@@ -26977,7 +27001,8 @@ const MASTER_STRUCTURE = [
     { id:"procedureLibrary", label:"Procedure Library" }
   ]},
   { id:"patient", label:"Patient", subtabs:[
-    { id:"referralSource", label:"Referral Source", placeholder:true },
+    { id:"referralSource", label:"Referral Source" },
+    { id:"patientType",    label:"Patient Type" },
     { id:"flags",          label:"Safety Flags" },
     { id:"occupation",     label:"Occupation" },
     { id:"docCategories",  label:"Document Categories" }
@@ -27989,6 +28014,8 @@ function Master() {
   const [docCategories, setDocCategories] = React.useState([]);
   const [safetyFlags, setSafetyFlags] = React.useState([]);
   const [occupations, setOccupations] = React.useState([]);
+  const [referralSources, setReferralSources] = React.useState([]);
+  const [patientTypes, setPatientTypes] = React.useState([]);
   const [implantBrands, setImplantBrands] = React.useState([]);
   const [panels, setPanels] = React.useState([]);
   const [timings, setTimings] = React.useState(DEFAULT_TIMINGS);
@@ -28013,8 +28040,9 @@ function Master() {
       "getMedicineInstructionsList", "getMedicineNotesList", "getReasonsList",
       "getClinicProfile", "getDocumentCategoriesList", "getProcedureLibrary",
       "getImplantBrandsList", "getPanelsList", "getWorkingDays", "getClinicTimings",
-      "getSafetyFlagsList", "getOccupationsList"
-    ]).then(([t,d,e,c,m,tpl,ch,med,dos,freq,dur,instr,mn,ar,cp,dc,pl,ib,pnl,wd,ct,sf,oc]) => {
+      "getSafetyFlagsList", "getOccupationsList",
+      "getReferralSourcesList", "getPatientTypesList"
+    ]).then(([t,d,e,c,m,tpl,ch,med,dos,freq,dur,instr,mn,ar,cp,dc,pl,ib,pnl,wd,ct,sf,oc,rs,pt]) => {
       setLoading(false);
       if (t.success) setTreatments(t.treatments || []);
       // An older backend without this list simply leaves it empty, and the
@@ -28042,6 +28070,8 @@ function Master() {
       // shows none rather than breaking.
       if (sf && sf.success) setSafetyFlags(sf.flags || []);
       if (oc && oc.success) setOccupations(oc.occupations || []);
+      if (rs && rs.success) setReferralSources(rs.sources || []);
+      if (pt && pt.success) setPatientTypes(pt.types || []);
       if (pl.success) { setProcedureLibrary(pl.library || []); setProcedureFamilies(pl.families || []); }
       // A backend without this list leaves the clinic open every day, which is
       // the honest answer until the days are filled in — not an invented week.
@@ -28098,6 +28128,8 @@ function Master() {
   const saveDocCategories = (arr) => persist("saveDocumentCategoriesList", { categories: JSON.stringify(arr) }, arr, setDocCategories, docCategories);
   const saveSafetyFlags = (arr) => persist("saveSafetyFlagsList", { flags: JSON.stringify(arr) }, arr, setSafetyFlags, safetyFlags);
   const saveOccupations = (arr) => persist("saveOccupationsList", { occupations: JSON.stringify(arr) }, arr, setOccupations, occupations);
+  const saveReferralSources = (arr) => persist("saveReferralSourcesList", { sources: JSON.stringify(arr) }, arr, setReferralSources, referralSources);
+  const savePatientTypes = (arr) => persist("savePatientTypesList", { types: JSON.stringify(arr) }, arr, setPatientTypes, patientTypes);
   const saveProcedureLibrary = (arr) => persist("saveProcedureLibrary", { library: JSON.stringify(arr) }, arr, setProcedureLibrary, procedureLibrary);
   // Both halves travel together: they are one answer to "is the clinic open
   // that day", and saving them apart would leave a moment where it is wrong.
@@ -28248,6 +28280,25 @@ function Master() {
     }),
     procedureLibrary: () => React.createElement(ProcedureLibraryEditor, {
       items:procedureLibrary, families:procedureFamilies, onSave:saveProcedureLibrary
+    }),
+    referralSource: () => React.createElement(EntryListEditor, {
+      title:"Referral Source", noun:"referral sources",
+      blurb:"How the patient came to hear of the clinic \u2014 what Registration offers under " +
+            "\u201cHow did you know about us\u201d. Carried on to the lead in the CRM, so the " +
+            "source report can tell a doctor\u2019s referral from a patient\u2019s.",
+      items:referralSources,
+      onAdd:(v)=>saveReferralSources([...referralSources, v]),
+      onRemove:(i)=>saveReferralSources(referralSources.filter((_,idx)=>idx!==i))
+    }),
+    patientType: () => React.createElement(EntryListEditor, {
+      title:"Patient Type", noun:"patient types",
+      blurb:"\u201cPanel\u201d is not only a label: it is what sends a patient to the panel " +
+            "register instead of the main one, and what the CRM reads to put them on the panel " +
+            "board. It and \u201cNormal\u201d are the two the app acts on \u2014 anything else " +
+            "added here is a label, and Registration still asks Normal or Panel.",
+      items:patientTypes,
+      onAdd:(v)=>savePatientTypes([...patientTypes, v]),
+      onRemove:(i)=>savePatientTypes(patientTypes.filter((_,idx)=>idx!==i))
     }),
     flags: () => React.createElement(EntryListEditor, {
       title:"Safety Flags", noun:"flags",
