@@ -27007,6 +27007,9 @@ const MASTER_STRUCTURE = [
     { id:"occupation",     label:"Occupation" },
     { id:"docCategories",  label:"Document Categories" }
   ]},
+  // Held open, with nothing under it yet. A category with no subtabs says
+  // so on its own page rather than opening blank -- see `content` below.
+  { id:"clinicalConfig", label:"Clinical Configuration", placeholder:true },
   { id:"prescriptions", label:"Prescriptions", subtabs:[
     { id:"drugCategories", label:"Drugs categories", placeholder:true },
     { id:"medicines",      label:"Drugs" },
@@ -28352,6 +28355,11 @@ function Master() {
       ? CONTENT.security()
       : topTab === "sales"
       ? CONTENT.sales()
+      // A top-level category with nothing under it yet. Without this it
+      // would open to an empty page with no second row and no notice, which
+      // reads as broken rather than as not built.
+      : (currentTop.placeholder || !(currentTop.subtabs && currentTop.subtabs.length))
+      ? React.createElement(MasterPlaceholder, { label: currentTop.label })
       : subMeta
         ? (subMeta.placeholder ? React.createElement(MasterPlaceholder, { label: subMeta.label }) : (CONTENT[subTab] ? CONTENT[subTab]() : null))
         : null
