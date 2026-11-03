@@ -174,7 +174,7 @@ const KB_BACKEND_BUILD_REQUIRED = "2026-11-02b";
 //
 // It moves with every change to this file. Same shape as the backend's: a
 // date, and a letter when there is more than one in a day.
-const KB_APP_BUILD = "2026-11-03";
+const KB_APP_BUILD = "2026-11-03a";
 
 // Three answers, not two. A build string is a plain date, so comparing
 // them as text compares them as dates.
@@ -807,6 +807,13 @@ const inp = {
   width: "100%",
   boxSizing: "border-box"
 };
+// ONE WIDTH FOR EVERY MASTER LIST.
+//
+// The newer lists were drawn at 520 and the older ones at whatever the page
+// was wide, so Document Categories ran the full width of the screen while
+// Occupation sat in a column a third of that -- the same kind of list,
+// looking like two different screens. Named once so they cannot drift again.
+const MASTER_LIST_WIDTH = 520;
 const ta = {
   ...inp,
   resize: "vertical",
@@ -26099,10 +26106,12 @@ function SimpleListEditor({ items, onAdd, onRemove, onEdit, placeholder }) {
   };
   const btn = (bg, col, bd) => ({ padding:"5px 12px", fontSize:12.5, fontFamily:"inherit",
     cursor:"pointer", borderRadius:6, background:bg, color:col, border:bd, fontWeight:700 });
-  return React.createElement("div", null,
-    React.createElement("div", { style:{ display:"flex", gap:8, marginBottom:14 } },
+  // Held to the same width as every other Master list. Without this these
+  // ran the full width of the screen.
+  return React.createElement("div", { style:{ maxWidth:MASTER_LIST_WIDTH } },
+    React.createElement("div", { style:{ display:"flex", gap:10, alignItems:"center", marginBottom:14 } },
       React.createElement("input", { style:{...inp, flex:1}, value:text, placeholder, onChange:e=>setText(e.target.value), onKeyDown:e=>e.key==="Enter"&&add() }),
-      React.createElement("button", { onClick:add, style:{ padding:"9px 20px", fontSize:13, border:"none", borderRadius:7, cursor:"pointer", background:T, color:"#fff", fontWeight:700 } }, "+ Add")
+      React.createElement("button", { onClick:add, style:{ padding:"9px 22px", fontSize:13, border:"none", borderRadius:7, cursor:"pointer", background:T, color:"#fff", fontWeight:700 } }, "Add")
     ),
     items.length===0
       ? React.createElement("div", { style:{ background:BGS, borderRadius:8, padding:24, textAlign:"center", color:"#5a5a5a", fontSize:14, border:`1px dashed ${BORDER}` } }, "No entries yet.")
@@ -26362,12 +26371,16 @@ function EntryListEditor({ title, blurb, noun, items, onAdd, onRemove, onEdit })
   };
 
   const cell = { padding:"7px 12px", fontSize:13, borderBottom:`1px solid ${BORDER}` };
-  return React.createElement("div", null,
+  // The WHOLE screen, not just the list inside it. Capping only the table
+  // and the add row left the heading and the explanation running the full
+  // width of the page above a column a third of that.
+  return React.createElement("div", { style:{ maxWidth:MASTER_LIST_WIDTH } },
     React.createElement("div", { style:{ fontSize:15, fontWeight:700, marginBottom:2 } }, title),
-    React.createElement("div", { style:{ fontSize:13, color:"#383838", marginBottom:14, maxWidth:620, lineHeight:1.5 } }, blurb),
+    React.createElement("div", { style:{ fontSize:13, color:"#383838", marginBottom:14, lineHeight:1.5 } }, blurb),
 
-    React.createElement("div", { style:{ display:"flex", gap:10, alignItems:"center", marginBottom:14, flexWrap:"wrap" } },
-      React.createElement("input", { style:{ ...inp, width:300, maxWidth:"100%" }, value:draft,
+    React.createElement("div", { style:{ display:"flex", gap:10, alignItems:"center", marginBottom:14,
+      flexWrap:"wrap", maxWidth:MASTER_LIST_WIDTH } },
+      React.createElement("input", { style:{ ...inp, flex:1 }, value:draft,
         placeholder:"Type new entry here",
         onChange:e=>{ setDraft(e.target.value); if (err) setErr(""); },
         onKeyDown:e=>{ if (e.key === "Enter") add(); } }),
@@ -26383,7 +26396,7 @@ function EntryListEditor({ title, blurb, noun, items, onAdd, onRemove, onEdit })
     list.length === 0
       ? React.createElement("div", { style:{ fontSize:13, color:"#444444" } },
           "No " + (noun || "entries") + " yet. Type one above and press Add.")
-      : React.createElement("div", { style:{ border:`1px solid ${BORDER}`, borderRadius:8, overflow:"hidden", maxWidth:520 } },
+      : React.createElement("div", { style:{ border:`1px solid ${BORDER}`, borderRadius:8, overflow:"hidden", maxWidth:MASTER_LIST_WIDTH } },
           React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"56px 1fr auto",
             background:T, color:"#fff", fontSize:12.5, fontWeight:700 } },
             React.createElement("div", { style:{ padding:"7px 12px" } }, "Sr"),
