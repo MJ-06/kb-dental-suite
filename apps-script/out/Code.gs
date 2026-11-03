@@ -755,7 +755,7 @@ function doPost(e) {
 //
 // The app reads this from ping and says so when it is behind. Bump it
 // whenever this file changes in a way the app depends on.
-var BACKEND_BUILD = "2026-11-02b";
+var BACKEND_BUILD = "2026-11-03";
 
 var SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 // Always session-protected, even while the global rollout flag is off.
@@ -1657,6 +1657,18 @@ function getPatient(p) {
         habits:            get("Habits"),
         complaint:         get("Complaint", "What is your chief complaint?"),
         painLevel:         get("Pain Level", "What is your level of pain on a scale of 0-10?"),
+        // The panel a patient is on, and the card it is claimed against.
+        // These were written by the registration and then never handed back:
+        // this function returns a hand-picked set of fields, and they were
+        // not in it. So a panel patient looked like a private one to
+        // everything downstream -- the CGHS endorsement above all, which
+        // could not see a panel however carefully it had been saved, and the
+        // registration form itself, which could not show it back when the
+        // patient was opened again.
+        patientType:       get("Patient Type"),
+        panel:             get("Panel"),
+        panelCategory:     get("Panel Category"),
+        cardId:            get("Card ID"),
         registeredOn:      get("Registered On", "Timestamp")
       }};
     }

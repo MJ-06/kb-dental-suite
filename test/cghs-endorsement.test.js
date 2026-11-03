@@ -30,7 +30,15 @@ ok('it prints and previews through the same switch as the other two',
 ok('the rates come from the panel rate card, not the plan fees',
    /api\("getPanelRates", \{ panel: patPanel \}\)/.test(html));
 ok('the chosen code is carried on the plan row, so it is saved with the plan',
-   /i === at \? \{ \.\.\.r, cghsCode: code \} : r/.test(html));
+   /i !== at \? r : \{\s*\.\.\.r, cghsCode: code,/.test(html));
+// A line started on the endorsement has no name until a code is picked, so
+// picking one names it -- otherwise it would print as a blank treatment.
+ok('picking a code names a line that has no name yet',
+   /procedure: String\(r\.procedure \|\| ""\)\.trim\(\) \|\| \(card \? String\(card\.procedure \|\| ""\) : ""\)/.test(html));
+ok('a line can be started on the endorsement itself',
+   /selected: true, endAdded: true/.test(html));
+ok('and such a line reaches the sheet without Document 1',
+   /x\.r\.selected && \(x\.r\.procedure \|\| x\.r\.endAdded\)/.test(html));
 
 const A = html.indexOf('function EndorsementView({');
 const B = html.indexOf('\n// DASHBOARD', A);
@@ -114,6 +122,7 @@ const VIEW = html.slice(A, B);
   // here is the patient with NO panel on record.
   const mount = (props) => page.evaluate((p) => {
     window.__set = []; window.__field = []; window.__tooth = []; window.__panel = [];
+    window.__added = 0; window.__removed = [];
     const e = React.createElement;
     const root = window.__root || (window.__root = ReactDOM.createRoot(document.getElementById('root')));
     // A fresh key each time: rendering the same component into the same
@@ -144,6 +153,8 @@ const VIEW = html.slice(A, B);
             return { ...x, r: { ...x.r, tooth: next.join(", ") } };
           }));
         },
+        onAdd: () => { window.__added++; },
+        onRemove: (at) => { window.__removed.push(at); },
         onSave(){}, onPreview(){}, onPrint(){}, saving: false, saved: false }));
     };
   ` });
@@ -171,7 +182,7 @@ const VIEW = html.slice(A, B);
      await page.$$eval('button', b => b.filter(x => /Print Endorsement/.test(x.textContent)).map(x => x.disabled)),
      [false]);
   ok('it says the panel is missing and can be chosen here',
-     /no panel on their registration/.test(noPanel), noPanel.slice(0, 200));
+     /none on their registration/.test(noPanel), noPanel.slice(0, 220));
 
   // The picker must offer the panels master, so the fix is on this screen.
   eq('the panel picker offers every panel the clinic has',
@@ -193,17 +204,22 @@ const VIEW = html.slice(A, B);
   const text = await page.textContent('#root');
   ok('the card details the Wellness Centre checks are on screen',
      /C-77/.test(text) && /Pensioner/.test(text), text.slice(0, 200));
-  ok("it says the rates are the panel's, not the clinic's", /not the clinic's own fees/.test(text));
   eq('the columns are in the printed order, with the amount alongside',
      await page.$$eval('thead th', t => t.map(x => x.textContent)),
-     ['Code', 'Treatment Advised', 'Tooth Number', 'Units', 'Amount']);
+     ['Code', 'Treatment Advised', 'Tooth Number', 'Units', 'Amount', '']);
   eq('each row is priced at the panel rate times its quantity',
-     await page.$$eval('tbody tr td:last-child', t => t.map(x => x.textContent)),
+     await page.$$eval('tbody tr td:nth-child(5)', t => t.map(x => x.textContent)),
      ['₹1,000', '₹1,600']);
+  // Nothing shouts at you once the screen is in order: a notice that is
+  // always there stops being read.
+  ok('with a panel, a rate card and every code picked, there is no notice at all',
+     !/⚠|have no code yet|could not be read|which panel/.test(
+       await page.$$eval('#root > div', d => d.map(x => x.textContent).slice(1, 2).join(''))),
+     text.slice(0, 200));
 
   // ── the tooth grid ────────────────────────────────────────────────────
   ok('the grid starts by saying it needs a row',
-     /Pick a row above, then click its teeth/.test(await page.textContent('#root')));
+     /Click a line above, then click its teeth/.test(await page.textContent('#root')));
   // The grid is shared with Document 1, where clicking fills the next empty
   // row. Here it toggles teeth on one chosen row, so it must not keep
   // promising the other thing.
@@ -219,6 +235,9 @@ const VIEW = html.slice(A, B);
   await page.click('tbody tr:nth-child(2) td:nth-child(2)');
   ok('choosing a row says which procedure the teeth are for',
      /Teeth for Crown - Metal/.test(await page.textContent('#root')));
+  eq('and the row can be taken off the sheet',
+     await (async () => { await page.click('tbody tr:nth-child(1) td:last-child button');
+       return page.evaluate(() => window.__removed); })(), [0]);
   ok('and says what clicking a tooth will do',
      /click it again to take it off/.test(await page.textContent('#root')));
   await page.click('button[title="#26"]');
@@ -243,11 +262,22 @@ const VIEW = html.slice(A, B);
      await page.$eval('tbody tr:nth-child(1) td:nth-child(4) input', i => i.value), '2');
 
   // ── nothing ticked on Document 1 ──────────────────────────────────────
+  // The case that caused the report: Document 1 is empty for this patient,
+  // so the endorsement used to show nothing at all. It must still be a
+  // working screen -- a grid, a way to add a line, and a say in what to do.
   await mount({ pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
                 rates: RATES, ratesMsg: '', rows: [], total: 0, missing: 0 });
-  ok('an empty plan says to tick the procedures first',
-     /Tick the procedures on the treatment plan/.test(await page.textContent('#root')));
-  eq('and Print is off, because there would be nothing on the sheet',
+  const empty = await page.textContent('#root');
+  ok('an empty plan still draws the sheet and says how to fill it',
+     /Nothing on the endorsement yet/.test(empty), empty.slice(0, 220));
+  eq('the tooth grid is there with no lines at all',
+     (await page.$$('button[title^="#"]')).length, 32);
+  ok('and the grid says to add a treatment first',
+     /Add a treatment above, then click its teeth/.test(empty));
+  await page.click('text=+ Add a treatment');
+  eq('adding a treatment is one click, with no Document 1 involved',
+     await page.evaluate(() => window.__added), 1);
+  eq('Print is off only while the sheet would be empty',
      await page.$$eval('button', b => b.filter(x => /Print|Preview/.test(x.textContent)).map(x => x.disabled)),
      [true, true]);
 
