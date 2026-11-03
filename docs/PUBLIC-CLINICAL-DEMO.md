@@ -70,6 +70,7 @@ First follow `ANOTHER-LAPTOP.md` for Node/PostgreSQL/repository setup. From `api
 ```powershell
 node --import tsx scripts/provision-public-clinical-demo.ts
 node --import tsx scripts/provision-public-clinical-demo.ts --apply
+node --import tsx scripts/enrich-public-clinical-demo.ts --apply
 node --import tsx src/public-demo-server.ts
 ```
 
@@ -89,5 +90,20 @@ node --import tsx scripts/verify-public-clinical-demo.ts https://YOUR-URL.tryclo
 ```
 
 The verifier uses the private synthetic state file without printing credentials.
+For an existing provisioned review DB, run
+`node --import tsx scripts/migrate-public-clinical-demo.ts` before restarting the
+server after new migrations. This preserves dedicated-role grants rather than
+applying the default development role grants. Run enrichment again safely to add
+missing examples without replacing reviewer edits. It seeds plans, staged payments,
+expenses and appointments for the existing synthetic patients in their clinics.
+
+The default patient list now loads without typing. The dashboard patient total is
+organization-wide; its appointments and plan totals are clinic-specific. Diary and
+Daysheet use clinic-local dates. Unassigned-chair bookings remain visible in a
+separate diary section. Master > Organization > All-clinic Reports uses current
+clinic grants and dates; it never changes the working clinic to fetch reports.
+
+See `SCREEN-API-DATA-GUIDE.md` for the per-screen API/storage/link map, and
+`FAMILIAR-UI-IMPROVEMENTS.md` for small UI proposals and remaining form review.
 Stop only the dedicated tunnel/server processes to withdraw access. Never point
 the public tunnel at the development database/server containing existing data.

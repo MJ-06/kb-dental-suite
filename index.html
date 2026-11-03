@@ -788,6 +788,15 @@ function togArr(arr, val) {
   return arr.includes(val) ? arr.filter(x => x !== val) : [...arr, val];
 }
 let rowId = 0;
+function clinicISODate(now = new Date()) {
+  const parts=new Intl.DateTimeFormat("en-CA",{timeZone:window.KB_CLINIC_TIMEZONE || "Asia/Kolkata",year:"numeric",month:"2-digit",day:"2-digit"}).formatToParts(now);
+  const part=key=>parts.find(p=>p.type===key).value;
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+function treatmentProcedures(departments, row) {
+  const known=Array.isArray(departments[row.dept])?departments[row.dept]:[];
+  return row.procedure && !known.includes(row.procedure)?[row.procedure,...known]:known;
+}
 function mkRow(ph, to, de, pr, px, qt) {
   return {
     id: ++rowId,
@@ -5237,7 +5246,7 @@ function CarePlan({
     onChange: e => uCPRow(i, "procedure", e.target.value)
   }, /*#__PURE__*/React.createElement("option", {
     value: ""
-  }, "Select procedure..."), DEPTS[row.dept].map(p => /*#__PURE__*/React.createElement("option", {
+  }, "Select procedure..."), treatmentProcedures(DEPTS,row).map(p => /*#__PURE__*/React.createElement("option", {
     key: p,
     value: p
   }, p))))), /*#__PURE__*/React.createElement("textarea", {
@@ -5657,7 +5666,7 @@ function TreatmentPlan({
     }, "Department..."), Object.keys(DEPTS).map(d => /*#__PURE__*/React.createElement("option", {
       key: d,
       value: d
-    }, d))), row.dept ? /*#__PURE__*/React.createElement("select", {
+    }, d)), row.dept && !Object.prototype.hasOwnProperty.call(DEPTS,row.dept) && React.createElement("option",{value:row.dept},row.dept)), row.dept ? /*#__PURE__*/React.createElement("select", {
       style: {
         ...inp,
         fontSize: 13,
@@ -5667,7 +5676,7 @@ function TreatmentPlan({
       onChange: e => updateRow(row.id, "procedure", e.target.value)
     }, /*#__PURE__*/React.createElement("option", {
       value: ""
-    }, "Procedure..."), DEPTS[row.dept].map(p => /*#__PURE__*/React.createElement("option", {
+    }, "Procedure..."), treatmentProcedures(DEPTS,row).map(p => /*#__PURE__*/React.createElement("option", {
       key: p,
       value: p
     }, p))) : /*#__PURE__*/React.createElement("div", {
@@ -6663,7 +6672,7 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
   // already booked inside one.
   const { slots: TIME_SLOTS, allSlots: GRID_SLOTS, breakAt: slotBreak } = useClinicTimings();
   const { closedReason } = useWorkingDays();
-  const todayISO = new Date().toISOString().split("T")[0];
+  const todayISO = clinicISODate();
   const [selDate, setSelDate] = useState(todayISO);
   const [viewMode, setViewMode] = useState("chairs"); // "month" | "week" | "chairs"
   const [appts, setAppts] = useState([]);       // selDate's appointments (chairs view)
@@ -7504,6 +7513,9 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
 
         // ── CHAIRS VIEW ──────────────────────
         viewMode==="chairs" && loading && React.createElement("div", { style:{ textAlign:"center", padding:20, color:"#444444", fontSize:14 } }, "⏳ Loading appointments..."),
+        viewMode==="chairs" && !loading && appts.filter(a=>!a.chair || !chairs.includes(a.chair)).length>0 && React.createElement("section",{style:{background:"#fff",border:`1px solid ${BORDER}`,borderRadius:8,padding:12,marginBottom:12}},
+          React.createElement("strong",null,"Appointments without a current chair"),
+          appts.filter(a=>(!a.chair || !chairs.includes(a.chair)) && (doctorFilter==="All Doctors" || a.doctor===doctorFilter)).map(a=>React.createElement("button",{key:a.id,onClick:()=>{setSelectedAppt(a);setPopupMode("view");},style:{display:"block",width:"100%",textAlign:"left",padding:10,marginTop:6,border:`1px solid ${BORDER}`,borderRadius:6,background:BGS,cursor:"pointer"}},[a.time,a.patientName,a.doctor,a.status].filter(Boolean).join(" · ")))),
         viewMode==="chairs" && !loading && closedReason(selDate) && React.createElement("div", {
           style:{ fontSize:13.5, fontWeight:700, color:"#b91c1c", background:"#fdf2f2", border:"1px solid #e5b4b4",
                   borderRadius:7, padding:"9px 12px", marginBottom:12 } },
@@ -7520,7 +7532,7 @@ function Appointments({ globalPat, setGlobalPat, setPage }) {
               slot,
               slotBreak(slot) && React.createElement("span", { style:{ fontSize:12, fontWeight:700, color:"#8A4B00" } }, slotBreak(slot).name)),
             chairs.map(chair => {
-              const cellAppts = activeAppts.filter(a => a.time===slot && (a.chair||chairs[0])===chair);
+              const cellAppts = activeAppts.filter(a => a.time===slot && a.chair===chair);
               // A closed day's empty cells must not invite a click that only
               // gets refused at Save — they are shown shut, like a block.
               // A break is shut the same way: visible, labelled, not bookable.
@@ -8034,7 +8046,7 @@ function QuickApptModal({ show, defaultDate, onClose, onSaved }) {
 }
 
 function Daysheet({ globalPat, setGlobalPat, openPatientAt }) {
-  const todayISO = new Date().toISOString().split("T")[0];
+  const todayISO = clinicISODate();
   const [visitDate, setVisitDate] = useState(todayISO);
   const [doctorFilter, setDoctorFilter] = useState("All Doctors");
   const [search, setSearch] = useState("");
@@ -8414,13 +8426,13 @@ function PatientSearch({ setGlobalPat, onNavigate }) {
   const debRef = useRef(null), searchVersion = useRef(0);
   const [error,setError] = useState("");
   const organizationDirectory = !!window.KB_CLINIC_CONTEXT;
+  const [recentSort,setRecentSort] = useState("registered");
 
   const doSearch = async (q) => {
-    if (!q.trim()) { setResults([]); setSearched(false); return; }
     setLoading(true); setSearched(false);
     const version=++searchVersion.current;
     setError("");
-    const res = await api(organizationDirectory ? "searchOrganizationPatients" : "searchPatients", { query: q.trim() });
+    const res = await api(!q.trim() && window.KB_SCRIPT_URL_OVERRIDE ? "getRecentPatients" : organizationDirectory ? "searchOrganizationPatients" : "searchPatients", { query: q.trim(), sort:recentSort, limit:20 });
     if (version !== searchVersion.current) return;
     if (!res.success) setError(res.error || "Patient search could not load. Try again.");
     setLoading(false); setSearched(true);
@@ -8428,6 +8440,8 @@ function PatientSearch({ setGlobalPat, onNavigate }) {
       setResults(res.patients);
     } else setResults([]);
   };
+
+  useEffect(() => { if(window.KB_SCRIPT_URL_OVERRIDE && !query.trim()) doSearch(""); return () => {searchVersion.current++; if(debRef.current) clearTimeout(debRef.current);}; },[recentSort]);
 
   const onType = (e) => {
     const v = e.target.value;
@@ -8477,21 +8491,26 @@ function PatientSearch({ setGlobalPat, onNavigate }) {
         style:{ ...inp, paddingLeft:36, fontSize:15, height:46, borderRadius:10, border:`1.5px solid ${loading ? TM : BORDER}` },
         value:query,
         onChange:onType,
-        placeholder:"Type patient name or UHID...",
+        placeholder:"Type patient name, UHID or phone...",
         autoFocus:true
       }),
       loading && React.createElement("div", { style:{ position:"absolute", right:12, top:"50%", transform:"translateY(-50%)", fontSize:12, color:T } }, "searching...")
     ),
 
+    !query.trim() && window.KB_SCRIPT_URL_OVERRIDE && React.createElement("div",{style:{display:"flex",alignItems:"center",gap:12,marginBottom:14}},
+      React.createElement("label",{htmlFor:"recent-patient-sort",style:{fontSize:13}},"Recent patients at this clinic"),
+      React.createElement("select",{id:"recent-patient-sort",value:recentSort,onChange:e=>setRecentSort(e.target.value),style:{...inp,width:"auto"}},
+        React.createElement("option",{value:"registered"},"Latest registered"),React.createElement("option",{value:"appointments"},"Most recent appointment"))),
+
     error && React.createElement("div", { role:"alert", style:{ color:"#b42318", marginBottom:12 } }, error),
     // Results
     searched && !error && results.length === 0 && React.createElement("div", {
       style:{ background:BGS, borderRadius:8, padding:"24px", textAlign:"center", fontSize:14, color:"#5a5a5a", border:`1px dashed ${BORDER}` }
-    }, "No patients found for this name. Check spelling or try the UHID directly."),
+    }, query.trim() ? "No patients found. Check spelling or try the UHID directly." : "No patients at this clinic yet. Search the organization by name, UHID or phone."),
 
     results.length > 0 && React.createElement("div", null,
       React.createElement("div", { style:{ fontSize:13, color:"#444444", marginBottom:8 } },
-        results.length + " result" + (results.length !== 1 ? "s" : "") + " found"
+        query.trim() ? results.length + " result" + (results.length !== 1 ? "s" : "") + " found" : "Showing up to 20 recent patients · search to find anyone in the organization"
       ),
       React.createElement("div", { style:{ display:"flex", flexDirection:"column", gap:6 } },
         results.map((p, i) => {
@@ -8526,7 +8545,7 @@ function PatientSearch({ setGlobalPat, onNavigate }) {
                 pat.dob && React.createElement("span", null, "DOB: ", pat.dob, ageLabel(pat.dob) ? " (" + ageLabel(pat.dob) + ")" : ""),
                 pat.gender && React.createElement("span", null, pat.gender),
                 pat.mobile && React.createElement("span", null, "📱 ", pat.mobile)
-              )
+              ), p.last_appointment && React.createElement("div",{style:{fontSize:12,color:"#5a5a5a",marginTop:4}},"Last appointment: "+new Date(p.last_appointment).toLocaleDateString("en-IN"))
             ),
             // Select indicator
             isSelected
@@ -8622,22 +8641,21 @@ function Dashboard({
   const [followUpsLoading, setFollowUpsLoading] = useState(true);
   // The greeting names whoever is signed in, not a fixed doctor.
   const [whoami, setWhoami] = useState(null);
+  const [overview,setOverview] = useState(null), [overviewError,setOverviewError] = useState("");
   useEffect(() => {
     api("whoAmI").then(res => { if (res && res.success) setWhoami(res); });
   }, []);
   useEffect(() => {
-    api("getAllPatients").then(res => {
-      if (res.success) setStats(prev => [...prev.map((s, i) => i === 1 ? {
-        ...s,
-        v: String((res.patients || []).length)
-      } : s)]);
+    if(window.KB_SCRIPT_URL_OVERRIDE) api("getClinicOverview").then(res=>{
+      if(!res.success){setOverviewError(res.error||"Clinic summary could not load. Refresh to retry.");return;}
+      setOverview(res);
+      setStats([
+        {l:"Pending Registrations",v:String(res.pending),s:"At this clinic",c:"#D97706",page:"registration"},
+        {l:"Patients",v:String(res.patients),s:window.KB_CLINIC_CONTEXT?"Across the organization":"Registered patients",c:"#0078B4",page:"search"},
+        {l:"Care Plans",v:res.carePlans===null?"—":String(res.carePlans),s:res.carePlans===null?"Clinical permission required":"Saved at this clinic",c:"#7C3AED",page:"careplan"},
+        {l:"Treatment Plans",v:res.treatmentPlans===null?"—":String(res.treatmentPlans),s:res.treatmentPlans===null?"Clinical permission required":"Saved at this clinic",c:"#059669",page:"treatmentplan"}]);
     });
-    api("getPending").then(res => {
-      if (res.success) setStats(prev => [...prev.map((s, i) => i === 0 ? {
-        ...s,
-        v: String((res.pending || []).length)
-      } : s)]);
-    });
+    else {api("getAllPatients").then(res=>{if(res.success)setStats(prev=>prev.map((s,i)=>i===1?{...s,v:String((res.patients||[]).length)}:s));});api("getPending").then(res=>{if(res.success)setStats(prev=>prev.map((s,i)=>i===0?{...s,v:String((res.pending||[]).length)}:s));});}
     api("getTodaysBirthdays").then(res => {
       setBirthdaysLoading(false);
       if (res.success) setBirthdays(res.patients || []);
@@ -8659,10 +8677,18 @@ function Dashboard({
       color: "#444444",
       marginBottom: 20
     }
-  }, TODAY), /*#__PURE__*/React.createElement("div", {
+  }, (overview?.today || TODAY) + (whoami?.clinic ? " · " + whoami.clinic : "")),
+  overviewError && React.createElement("p",{role:"alert",style:{color:"#b42318"}},overviewError),
+  overview?.canViewAppointments && React.createElement("section",{style:{background:"#fff",border:`1px solid ${BORDER}`,borderRadius:10,padding:16,marginBottom:20}},
+    React.createElement("div",{style:{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}},
+      React.createElement("h3",{style:{fontSize:15,margin:0}},"Today's appointments"),
+      React.createElement("button",{style:{padding:"8px 16px",border:"none",borderRadius:6,background:T,color:"#fff",cursor:"pointer",fontWeight:600},onClick:()=>onNavigate("appointments")},"Open diary")),
+    overview.appointments.length ? overview.appointments.map(a=>React.createElement("div",{key:a.id,style:{display:"flex",gap:12,flexWrap:"wrap",padding:"9px 0",borderBottom:`1px solid ${BORDER}`}},
+      React.createElement("strong",{style:{color:T}},a.time),React.createElement("span",{style:{flex:1}},a.name),React.createElement("span",{style:{fontSize:12,color:"#555"}},[a.doctor,a.reason,a.status].filter(Boolean).join(" · ")))) : React.createElement("p",{style:{fontSize:13,color:"#555"}},"No appointments recorded for today. Use Patient Search to review patient history.")),
+  /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
-      gridTemplateColumns: "1fr 1fr 1fr 1fr",
+      gridTemplateColumns: "repeat(auto-fit,minmax(160px,1fr))",
       gap: 12,
       marginBottom: 24
     }
@@ -11704,7 +11730,9 @@ function TreatmentProgress({ globalPat, setGlobalPat, initialTab }) {
   const [pat, setPat] = useState(globalPat || null);
   const [notFound, setNotFound] = useState(false);
   const [tab, setTab] = useState(initialTab || "procedure"); // "procedure" | "progress" | "feesheet"
-  const [entries, setEntries] = useState([]);
+  const [allEntries, setEntries] = useState([]);
+  const [recordDoctor,setRecordDoctor]=useState("");
+  const entries=recordDoctor?allEntries.filter(e=>(e.doctor||e.operatingDoctor||"")===recordDoctor):allEntries;
   const [apiMsg, setApiMsg] = useState("");
   const [loadErr, setLoadErr] = useState("");
   const [preview, setPreview] = useState(false);
@@ -12021,7 +12049,6 @@ function TreatmentProgress({ globalPat, setGlobalPat, initialTab }) {
   );
 
   return React.createElement("div", null,
-    showSettings && React.createElement(DoctorsSettings, { onClose:()=>setShowSettings(false) }),
     React.createElement(ClinicHeader, null),
     React.createElement(PatientBanner, {
       pat, uhid:uhidInput, setUhid:setUhidInput,
@@ -12050,10 +12077,8 @@ function TreatmentProgress({ globalPat, setGlobalPat, initialTab }) {
           }
         }, t.label))
       ),
-      React.createElement("button", {
-        onClick:()=>setShowSettings(true),
-        style:{ padding:"6px 12px", fontSize:12, border:`1px solid ${BORDER}`, borderRadius:6, cursor:"pointer", background:"#fff", color:"#383838" }
-      }, "⚙ Doctors")
+      React.createElement("label",{style:{fontSize:13}},"Treating doctor ",React.createElement("select",{value:recordDoctor,onChange:e=>setRecordDoctor(e.target.value),style:{...inp,width:"auto"}},
+        React.createElement("option",{value:""},"All recorded doctors"),[...new Set(allEntries.map(e=>e.doctor||e.operatingDoctor||"").filter(Boolean))].sort().map(d=>React.createElement("option",{key:d,value:d},d))))
     ),
 
     tab === "procedure" && React.createElement(ProcedureView, null),
@@ -12723,7 +12748,7 @@ function mapPedoData(records) {
 }
 
 // ── Main ClinicalSheets Component (read-only report over Forms' saved data) ──
-function ClinicalSheets({ globalPat, setGlobalPat }) {
+function ClinicalSheets({ globalPat, setGlobalPat, embedded=false }) {
   const [uhidInput, setUhidInput] = React.useState(globalPat?.uhid||"");
   const [pat, setPat] = React.useState(globalPat||null);
   const [notFound, setNotFound] = React.useState(false);
@@ -12826,8 +12851,8 @@ function ClinicalSheets({ globalPat, setGlobalPat }) {
   const currentTeeth = teeth[tab]||[];
 
   return React.createElement("div",null,
-    React.createElement(ClinicHeader,null),
-    React.createElement(PatientBanner,{
+    !embedded && React.createElement(ClinicHeader,null),
+    (!embedded || !globalPat) && React.createElement(PatientBanner,{
       pat,uhid:uhidInput,setUhid:setUhidInput,
       onLoad:p=>p===null?setPat(null):loadPat(),
       compact:!!globalPat&&!!pat
@@ -12932,7 +12957,7 @@ function matchClinicalFormPrompt(text) {
 }
 
 function DailyRegister({ globalPat, setGlobalPat, setPage }) {
-  const todayISO = new Date().toISOString().split("T")[0];
+  const todayISO = clinicISODate();
   const [fromDate, setFromDate] = React.useState(todayISO);
   const [toDate, setToDate] = React.useState(todayISO);
   const [entries, setEntries] = React.useState([]);
@@ -27197,7 +27222,7 @@ function ProcedureLibraryEditor({ items, families, onSave }) {
 // pills. Sub-tabs marked `placeholder:true` have no backend/editor yet —
 // they render a "not built yet" notice until a follow-up wires them up.
 const MASTER_STRUCTURE = [
-  { id:"organization", label:"Organization", subtabs:[{ id:"organizationProfile", label:"Organization Details" }] },
+  { id:"organization", label:"Organization", subtabs:[{ id:"organizationProfile", label:"Organization Details" },{id:"rolesAccess",label:"Roles & access"},{id:"organizationReports",label:"All-clinic Reports"}] },
   { id:"clinic", label:"CLINIC", subtabs:[
     { id:"clinicProfile", label:"Clinic" },
     { id:"doctors",       label:"Doctors" },
@@ -27513,7 +27538,7 @@ function DocumentsPasswordChanger() {
   if (window.KB_SCRIPT_URL_OVERRIDE) return React.createElement("div", {style:{background:"#fff",border:`1px solid ${BORDER}`,borderRadius:10,padding:20,maxWidth:560}},
     React.createElement("strong",null,"Staff account access"),
     React.createElement("p",{style:{fontSize:13,marginTop:8}},"Patient records and documents use individual staff logins and role permissions. Manage accounts in Roles & access."),
-    React.createElement("a",{href:"/roles.html",target:"_blank",rel:"noopener"},"Open Roles & access"));
+    React.createElement(RolesAccessPanel,null));
 
   const [pwSet, setPwSet] = React.useState(false);
   const [loading, setLoading] = React.useState(true);
@@ -28340,6 +28365,32 @@ function OrganizationProfileEditor() {
     : busy && React.createElement("p", null, "Loading..."));
 }
 
+function OrganizationReportsPanel(){
+  const [from,setFrom]=useState(clinicISODate().slice(0,7)+"-01"),[to,setTo]=useState(clinicISODate()),[clinic,setClinic]=useState("");
+  const [data,setData]=useState(null),[error,setError]=useState(""),[busy,setBusy]=useState(false);
+  const load=async()=>{setBusy(true);setError("");const r=await api("getOrganizationReports",{fromDate:from,toDate:to,clinicId:clinic});setBusy(false);if(r.success)setData(r);else{setData(null);setError(r.error||"Reports could not load");}};
+  useEffect(()=>{load();},[]);
+  return React.createElement("section",null,React.createElement("h3",null,"All-clinic Reports"),
+   React.createElement("div",{style:{display:"flex",gap:10,flexWrap:"wrap",margin:"14px 0"}},
+    React.createElement("label",null,"From ",React.createElement("input",{type:"date",value:from,onChange:e=>setFrom(e.target.value),style:inp})),
+    React.createElement("label",null,"To ",React.createElement("input",{type:"date",value:to,onChange:e=>setTo(e.target.value),style:inp})),
+    React.createElement("select",{value:clinic,"aria-label":"Report clinic",onChange:e=>setClinic(e.target.value),style:{...inp,width:"auto"}},React.createElement("option",{value:""},"All authorized clinics"),(data?.clinics||[]).map(c=>React.createElement("option",{key:c.id,value:c.id},c.name))),
+    React.createElement("button",{onClick:load,disabled:busy,style:{padding:8,cursor:"pointer"}},busy?"Loading...":"Apply")),
+   error&&React.createElement("p",{role:"alert"},error),data&&React.createElement("div",{style:{overflowX:"auto"}},
+    React.createElement("p",{style:{fontSize:12,marginBottom:12}},data.scope),
+    React.createElement("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:13}},
+     React.createElement("thead",null,React.createElement("tr",null,["Clinic","Appointments","Patients with appointments","Care plans (all time)","Treatment plans (all time)","Collections ₹","Expenses ₹"].map(t=>React.createElement("th",{key:t,style:{padding:10,textAlign:"left",borderBottom:`1px solid ${BORDER}`}},t)))),
+     React.createElement("tbody",null,data.rows.map(r=>React.createElement("tr",{key:r.clinicId},[r.clinicName,r.appointments,r.patientsseen,r.careplans,r.treatmentplans,r.collections,r.expenses].map((v,i)=>React.createElement("td",{key:i,style:{padding:10,borderBottom:`1px solid ${BORDER}`}},v))))))));
+}
+function RolesAccessPanel(){
+  const [allowed,setAllowed]=React.useState(null);
+  React.useEffect(()=>{let alive=true;api("whoAmI").then(r=>{if(alive)setAllowed(!!r.success && (r.permissions||[]).includes("roles:manage"));});return()=>{alive=false;};},[]);
+  if(!window.KB_SCRIPT_URL_OVERRIDE)return React.createElement("p",null,"Roles & access is available in the local backend setup.");
+  if(allowed===null)return React.createElement("p",{role:"status"},"Loading access settings...");
+  if(!allowed)return React.createElement("p",{role:"alert"},"Your account does not have permission to manage staff access.");
+  return React.createElement("div",null,React.createElement("p",{style:{fontSize:13,color:"#555"}},"Staff accounts and permissions for the selected clinic."),
+    React.createElement("iframe",{src:"/roles.html",title:"Roles and access for this clinic",style:{width:"100%",height:"75vh",minHeight:560,border:`1px solid ${BORDER}`,borderRadius:10,background:"#fff"}}));
+}
 function Master() {
   const [topTab, setTopTab] = React.useState("clinic");
   const [subTab, setSubTab] = React.useState("doctors");
@@ -28687,6 +28738,8 @@ function Master() {
         "↗ Open Sales Tracker")
     ),
     organizationProfile: () => React.createElement(OrganizationProfileEditor, null),
+    rolesAccess: () => React.createElement(RolesAccessPanel, null),
+    organizationReports: () => React.createElement(OrganizationReportsPanel, null),
     clinicProfile: () => React.createElement(ClinicProfileEditor, {
       profile: clinicProfile,
       onSave: saveClinicProfile
@@ -29243,7 +29296,7 @@ function ClinicalRecords({ globalPat, setGlobalPat }) {
         ))
       )
     ),
-    section === "sheets" && React.createElement(ClinicalSheets, { key:(globalPat&&globalPat.uhid)||"x", globalPat:globalPat, setGlobalPat:setGlobalPat })
+    section === "sheets" && React.createElement(ClinicalSheets, { key:(globalPat&&globalPat.uhid)||"x", globalPat:globalPat, setGlobalPat:setGlobalPat, embedded:true })
   );
 }
 
@@ -30635,15 +30688,18 @@ function SimplePasswordGate({ verifyAction, sessionKey, message, children }) {
   const [pw, setPw] = React.useState("");
   const [checking, setChecking] = React.useState(false);
   const [err, setErr] = React.useState("");
+  const [policyChecking,setPolicyChecking]=React.useState(!!window.KB_SCRIPT_URL_OVERRIDE && verifyAction==="verifyReportsPassword");
+  const [accessDenied,setAccessDenied]=React.useState(false);
 
   React.useEffect(() => {
-    if (verifyAction !== "verifyMasterPassword" || !window.KB_SCRIPT_URL_OVERRIDE) return;
+    if (!["verifyMasterPassword","verifyReportsPassword"].includes(verifyAction) || !window.KB_SCRIPT_URL_OVERRIDE) return;
     let alive = true;
     // An unset Master password retains the existing backend behavior. A set
     // password is never skipped, and protected Organization actions also verify
     // the server-side unlock rather than trusting sessionStorage.
     api(verifyAction, { password:"" }).then(res => {
       if (alive && res.success && res.correct) { sessionStorage.setItem(scopedKey(sessionKey), "1"); setUnlocked(true); }
+      if(alive){setAccessDenied(!!res.forbidden);setPolicyChecking(false);}
     });
     return () => { alive = false; };
   }, [verifyAction, sessionKey]);
@@ -30657,6 +30713,8 @@ function SimplePasswordGate({ verifyAction, sessionKey, message, children }) {
   };
 
   if (unlocked) return children;
+  if(policyChecking)return React.createElement("p",{role:"status"},"Checking report access...");
+  if(accessDenied)return React.createElement("p",{role:"alert"},"Your account does not have permission to view Reports.");
 
   return React.createElement("div", { style:{ maxWidth:360, margin:"60px auto", background:"#fff", border:`1px solid ${BORDER}`, borderRadius:12, padding:"28px 24px", textAlign:"center" } },
     React.createElement("div", { style:{ fontSize:30, marginBottom:8 } }, "🔒"),

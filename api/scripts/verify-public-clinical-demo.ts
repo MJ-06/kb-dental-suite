@@ -27,6 +27,16 @@ try {
  const first=await admin.call("searchOrganizationPatients",{query:"Aster Demo"});
  check(first.success && first.patients.length===1,"central synthetic patient found");
  const id=first.patients[0].organization_patient_id;
+ const recent=await admin.call("getRecentPatients");check(recent.success && recent.patients.some((p:any)=>p.name==="Aster Demo Patient"),"default recent list includes demo patient");
+ const overview=await admin.call("getClinicOverview");check(overview.success && overview.carePlans>0 && overview.treatmentPlans>0 && overview.appointments.length>0,"dashboard contains actual plans and appointments");
+ const uhid=first.patients[0].uhid;
+ check((await admin.call("getCarePlan",{uhid})).page4.rows.length>0,"care plan has treatment rows");
+ check((await admin.call("getTreatmentPlan",{uhid})).rows.length>0,"treatment plan has priced rows");
+ const finance=await admin.call("getFinanceSummary");check(finance.success && finance.totalReceipts>0,"finance has fictional receipt history");
+ check((await admin.call("verifyReportsPassword",{password:""})).correct,"administrator Reports opens without another password");
+ const orgReport=await admin.call("getOrganizationReports");check(orgReport.success && orgReport.rows.length===2,"Master reports aggregate two authorized clinics without a switch");
+ check((await admin.call("getOrganizationReports",{clinicId:"00000000-0000-4000-8000-000000000099"})).forbidden,"organization reports reject ungranted clinic filters");
+ check((await fetch(`${base}/roles.html`)).headers.get("content-security-policy")?.includes("frame-ancestors 'self'"),"roles page can be integrated from the same app only");
  const history=await admin.call("getPatientHistory",{organizationPatientId:id});
  check(history.success && new Set(history.events.map((e:any)=>e.clinicId)).size===2,"patient history contains both clinics");
  check(history.events.some((e:any)=>e.doctor) && history.events.some((e:any)=>e.details.Material),"history includes recorded doctor and material");
@@ -38,6 +48,7 @@ try {
  const changed=await admin.call("switchWorkingClinic",{clinicId:target.id});check(changed.success,"clinic switch accepted");
  admin.set(changed.clinicId,changed.revision);
  const second=await admin.call("searchOrganizationPatients",{query:"Aster Demo"});check(second.patients[0].organization_patient_id===id,"clinic switch preserves central patient identity");
+ const other=await admin.call("getClinicOverview");check(other.carePlans>0 && other.treatmentPlans>0,"other clinic has its own demo plans");
  check((await admin.call("getOrganizationProfile")).locked,"switch clears Master unlock");
  const ai=await admin.call("chatbotReply");check(ai.success===false && /disabled/.test(ai.error),"external AI disabled");
 } finally {await admin.logout();}

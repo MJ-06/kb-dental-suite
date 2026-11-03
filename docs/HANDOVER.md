@@ -1,5 +1,39 @@
 # Handover for the next tool (31 Oct 2026)
 
+## Clinical review fixes and API/data guide — 3 November2026
+
+Read `SCREEN-API-DATA-GUIDE.md` for screen actions, PostgreSQL tables, file storage,
+central UUID/UHID links and limitations. Read `FAMILIAR-UI-IMPROVEMENTS.md` for the
+small UI backlog. Existing Add Record forms/save contracts are preserved; a full
+layout redesign still needs side-by-side user review.
+
+Implemented recent20 patients/sort, actual dashboard plan counts and today's
+appointments; patient total is organization-wide, not a clinic registration count.
+Diary/Daysheet/register default to clinic-local date, avoiding UTC-midnight blanks.
+Unassigned-chair bookings have their own visible section rather than appearing
+under an invented first chair. Treatment Plan retains historical departments and
+procedures missing from current masters. Procedure/Progress doctor setup is replaced
+by a read filter; doctor maintenance stays in Master. Nested Sheets removes duplicate
+headers. Roles & access is embedded in Master with same-origin framing only.
+Administrators with reports permission auto-open Reports; server permissions remain.
+Master > Organization > All-clinic Reports aggregates only clinics whose mapped
+account has reports+finance permission; it does not mutate the working session.
+Migration0029 implements that target-grant check. Applied in the dedicated public
+demo only; other DBs need their usual migrations.
+
+Demo enrichment adds fictional care/treatment plans, staged receipts, expenses and
+appointments without replacing reviewer edits. The dedicated migration helper
+skips default kb_app grants and grants only the new reporting function to the
+existing synthetic runtime role. No extension-function/owner privilege expansion
+was performed. Credentials and Cloudflare logs remain ignored.
+
+Verification: full serialized suite293/293 across24 files; TypeScript/build and
+inline-script parse passed;33 public HTTP checks passed before the tunnel expired.
+Browser confirmed organization count and matching clinic date/appointments in the
+diary. Original Treatment Plan crash was reproduced; historical procedure regression
+tests pass. Authenticated final browser acceptance of all edited screens and all17
+Add Record forms remains review work. Tunnel is temporary; latest link is in chat.
+
 ## Public synthetic clinical review — 3 November2026
 
 User requested Cloudflare sharing. See `PUBLIC-CLINICAL-DEMO.md` for access,

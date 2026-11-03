@@ -94,6 +94,7 @@ export const pageRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) => {
       let head = OVERRIDE;
       const token = req.cookies[SESSION_COOKIE];
       const actor = token ? await opts.db.transaction().execute(tx => resumeSession(tx, hashToken(token))) : null;
+      if(actor) head += `<script>window.KB_CLINIC_TIMEZONE = ${JSON.stringify(actor.timezone)};</script>`;
       if (actor?.organizationId) {
         const clinic = JSON.stringify({ id: actor.clinicId, revision: actor.clinicRevision });
         // Each page, including embedded blob forms, pins requests to its rendered
@@ -147,8 +148,9 @@ return embed(h).replace(/<head>/i, '<head><script nonce="${nonce}">parent.KB_PIN
       html = html
         .replace(/<script(?=[\s>])/gi, `<script nonce="${nonce}"`)
         .replace(/<head>/i, `<head>\n${head.replaceAll("<script>", `<script nonce="${nonce}">`)}`);
-      reply.header("Content-Security-Policy", csp(nonce, file === "chatbot.html", file === "chatbot.html"));
-      if (file === "chatbot.html") reply.header("X-Frame-Options", "SAMEORIGIN"); // the main app shows it in a frame
+      const framedBySelf = file === "chatbot.html" || file === "roles.html";
+      reply.header("Content-Security-Policy", csp(nonce, file === "chatbot.html", framedBySelf));
+      if (framedBySelf) reply.header("X-Frame-Options", "SAMEORIGIN");
       return reply.type("text/html; charset=utf-8").send(html);
     });
   }

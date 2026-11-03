@@ -8,7 +8,7 @@ import pg from "pg";
 
 const dir = fileURLToPath(new URL("../migrations/", import.meta.url));
 
-export async function migrate(ownerUrl: string, log: (s: string) => void = console.log): Promise<void> {
+export async function migrate(ownerUrl: string, log: (s: string) => void = console.log, options: {applyGrants?:boolean} = {}): Promise<void> {
   const client = new pg.Client({ connectionString: ownerUrl });
   await client.connect();
   try {
@@ -38,7 +38,7 @@ export async function migrate(ownerUrl: string, log: (s: string) => void = conso
         throw new Error(`${name} failed: ${(e as Error).message}`);
       }
     }
-    await client.query(readFileSync(dir + "grants.sql", "utf8"));
+    if(options.applyGrants!==false) await client.query(readFileSync(dir + "grants.sql", "utf8"));
   } finally {
     await client.end();
   }

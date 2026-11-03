@@ -231,6 +231,10 @@ describe("preserved clinical UI organization bridge", () => {
     expect((await call("getPatientHistory",{organizationPatientId:"00000000-0000-4000-8000-000000000099"})).success).toBe(false);
   });
   it("logout revokes the original session even after a clinic switch", async () => {
+    const report=await call("getOrganizationReports",{fromDate:"2026-01-01",toDate:"2026-12-31"});
+    expect(report.success).toBe(true);expect(report.rows.length).toBeGreaterThan(0);
+    expect((await call("getOrganizationReports",{clinicId:"00000000-0000-4000-8000-000000000099"})).forbidden).toBe(true);
+    expect((await call("getOrganizationReports",{}, {cookie:desk,clinic:w.clinicA,revision:1})).forbidden).toBe(true);
     const next=await call("switchWorkingClinic",{clinicId:w.clinicB}); clinic=w.clinicB; revision=next.revision;
     expect((await call("staffLogout")).success).toBe(true);
     expect((await call("authStatus")).valid).toBe(false);

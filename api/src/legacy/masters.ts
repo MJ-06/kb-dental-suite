@@ -394,11 +394,12 @@ masters.saveReportsPassword = write("masters:write", async (p, { tx }) => {
   await putSetting(tx, `reports_password_${slot}`, await hashPassword(pw));
   return { success: true };
 });
-masters.verifyReportsPassword = read(async (p, { tx }) => {
+masters.verifyReportsPassword = read(async (p, { tx, actor }) => {
+  if(actor.permissions.has("roles:manage")) return {success:true,correct:true};
   const a = await getSetting<string>(tx, "reports_password_1");
   const b = await getSetting<string>(tx, "reports_password_2");
   if (!a && !b) return { success: true, correct: true };
   const entered = str(p.password);
   const correct = (!!a && await verifyPassword(entered, a)) || (!!b && await verifyPassword(entered, b));
   return { success: true, correct };
-});
+}, "reports:read");
