@@ -174,7 +174,7 @@ const KB_BACKEND_BUILD_REQUIRED = "2026-11-02b";
 //
 // It moves with every change to this file. Same shape as the backend's: a
 // date, and a letter when there is more than one in a day.
-const KB_APP_BUILD = "2026-11-03d";
+const KB_APP_BUILD = "2026-11-03e";
 
 // Three answers, not two. A build string is a plain date, so comparing
 // them as text compares them as dates.
@@ -5675,16 +5675,18 @@ function TreatmentPlan({
     const panel = patPanel || "Panel";
     const field = (label, value) =>
       `<div class="fl"><div class="lbl">${esc(label)}</div><div class="val">${esc(value) || "&nbsp;"}</div></div>`;
-    const trs = endRows.map(x => `<tr><td style="text-align:center;font-weight:700">${esc(x.r.tooth) || "—"}</td>` +
-      `<td style="text-align:center;font-weight:700">${esc(x.code) || "—"}</td>` +
+    // Column order is the clinic's, matching the form the Wellness Centre
+    // reads: code first, then what was advised, then the tooth and the
+    // units. The rate per line is not printed -- the Centre prices the
+    // claim from the code against its own card -- only the total asked for.
+    const trs = endRows.map(x => `<tr><td style="text-align:center;font-weight:700">${esc(x.code) || "—"}</td>` +
       `<td>${esc((x.card && x.card.procedure) || x.r.procedure)}</td>` +
-      `<td style="text-align:right">${x.card ? money(x.rate) : "—"}</td>` +
-      `<td style="text-align:right">${x.qty}</td>` +
-      `<td style="text-align:right;font-weight:700">${x.card ? money(x.amt) : "—"}</td></tr>`).join("");
+      `<td style="text-align:center;font-weight:700">${esc(x.r.tooth) || "—"}</td>` +
+      `<td style="text-align:center">${x.qty}</td></tr>`).join("");
     const body = endRows.length
-      ? `<table><thead><tr><th style="width:9%">Tooth</th><th style="width:12%">${esc(panel)} Code</th><th>Procedure</th>` +
-        `<th style="width:14%;text-align:right">Rate</th><th style="width:7%;text-align:right">Qty</th>` +
-        `<th style="width:15%;text-align:right">Amount</th></tr></thead><tbody>${trs}</tbody></table>` +
+      ? `<table><thead><tr><th style="width:13%">Code</th><th>Treatment Advised</th>` +
+        `<th style="width:16%;text-align:center">Tooth Number</th>` +
+        `<th style="width:14%;text-align:center">No. of Units</th></tr></thead><tbody>${trs}</tbody></table>` +
         `<div class="tots"><div class="tr trg"><span>Total as per ${esc(panel)} rates</span><span>${money(endTotal)}</span></div></div>`
       : `<div style="text-align:center;padding:16pt;color:#5a5a5a;border:0.5pt dashed #ddd;border-radius:4pt">No procedures selected on the treatment plan</div>`;
     return pW(pH(window.LOGO_B64, "KBDC/FORMS/EN-01") +

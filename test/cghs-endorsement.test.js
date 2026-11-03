@@ -186,6 +186,56 @@ const VIEW = html.slice(A, B);
   ok('a rate card that failed to load is reported',
      /could not be read/.test(await page.textContent('#root')));
 
+  // ── the printed sheet ─────────────────────────────────────────────────
+  // "The column sequence required for print should be: Code, Treatment
+  //  Advised, Tooth Number, no. of units." The screen keeps its rate and
+  // amount columns, because that is how a code is chosen; the sheet that
+  // goes to the Wellness Centre is the clinic's order, so it is built here
+  // and read back rather than trusted to a diff.
+  const doc = await (async () => {
+    const p2 = await browser.newPage();
+    await p2.setContent('<div></div>');
+    await p2.addScriptTag({ content: pick('const PCSS = ', 'function toothG(rows) {') });
+    await p2.addScriptTag({ content: `
+      window.LOGO_B64 = "";
+      const TODAY = "03-11-2026";
+      const signatureLine = d => "Dr. A | Date: " + d;
+      const patPanel = "CGHS";
+      const pat = { name:"Asha Rao", uhid:"KB1", "Card ID":"C-77", "Panel Category":"Pensioner" };
+      const endRows = [
+        { r:{ tooth:"16", procedure:"RCT Single Rooted", qty:1 }, code:"DP030",
+          card:{ code:"DP030", procedure:"Root Canal Treatment - Single Rooted", rate:"1000" },
+          rate:1000, qty:1, amt:1000 },
+        { r:{ tooth:"36", procedure:"Composite Restoration", qty:3 }, code:"",
+          card:null, rate:0, qty:3, amt:0 }
+      ];
+      const endTotal = 1000;
+    ` });
+    await p2.addScriptTag({ content: pick('  function buildEndHTML() {', '  const docHTML = which =>') });
+    const out = await p2.evaluate(() => buildEndHTML());
+    await p2.setContent(out);
+    const got = await p2.evaluate(() => ({
+      heads: Array.from(document.querySelectorAll('thead th')).map(t => t.textContent),
+      rows: Array.from(document.querySelectorAll('tbody tr')).map(r =>
+        Array.from(r.querySelectorAll('td')).map(t => t.textContent)),
+      text: document.body.textContent
+    }));
+    await p2.close();
+    return got;
+  })();
+
+  eq('the printed columns are in the order the clinic asked for',
+     doc.heads, ['Code', 'Treatment Advised', 'Tooth Number', 'No. of Units']);
+  eq('and a row reads in that same order',
+     doc.rows[0], ['DP030', 'Root Canal Treatment - Single Rooted', '16', '1']);
+  eq('a row with no code still prints, with the plan\'s own wording',
+     doc.rows[1], ['\u2014', 'Composite Restoration', '36', '3']);
+  ok('the beneficiary\'s card details are on the sheet',
+     /C-77/.test(doc.text) && /Pensioner/.test(doc.text));
+  ok('the Wellness Centre has a block to endorse in',
+     /Endorsement \/ Permission No\./.test(doc.text) && /CMO/.test(doc.text));
+  ok('the total asked for is still stated', /\u20b91,000/.test(doc.text), doc.text.slice(-200));
+
   ok('nothing threw', errors.length === 0, errors.join(' // '));
   await browser.close();
 
