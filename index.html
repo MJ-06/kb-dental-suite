@@ -181,7 +181,7 @@ const KB_BACKEND_BUILD_REQUIRED = "2026-11-02b";
 //
 // It moves with every change to this file. Same shape as the backend's: a
 // date, and a letter when there is more than one in a day.
-const KB_APP_BUILD = "2026-11-03k";
+const KB_APP_BUILD = "2026-11-03m";
 
 // Three answers, not two. A build string is a plain date, so comparing
 // them as text compares them as dates.
@@ -29775,6 +29775,28 @@ function Prescription({ globalPat }) {
   // and whichever answered last would decide what the pad looks like.
   const [padMargins, setPadMargins] = React.useState(null);
   const [clinicName, setClinicName] = React.useState(null);
+  // What came back endorsed on this patient's CGHS endorsement. A procedure
+  // that was not endorsed must not be prescribed, so only ticked lines are
+  // read -- this screen never shows the whole plan.
+  const [rxEnd, setRxEnd] = React.useState([]);
+  const [rxLoaded, setRxLoaded] = React.useState(false);
+  // The date is the clinic's to set: an endorsement comes back days after it
+  // went out, and the prescription is written for the day the patient is in
+  // the chair, not for the day somebody opened the screen.
+  const [rxDate, setRxDate] = React.useState(() => toISODate(new Date()));
+  React.useEffect(() => {
+    setRxEnd([]); setRxLoaded(false);
+    setRxDate(toISODate(new Date()));
+    if (!globalPat || !globalPat.uhid) return;
+    let dropped = false;
+    api("getTreatmentPlan", { uhid: globalPat.uhid }).then(res => {
+      if (dropped) return;
+      const rows = (res && res.success && res.rows) || [];
+      setRxEnd(rows.filter(r => r && r.selected && r.endApproved && (r.procedure || r.cghsCode)));
+      setRxLoaded(true);
+    }).catch(() => { if (!dropped) setRxLoaded(true); });
+    return () => { dropped = true; };
+  }, [globalPat && globalPat.uhid]);
 
   React.useEffect(() => {
     api("getClinicProfile").then(res => {
@@ -29905,6 +29927,65 @@ function Prescription({ globalPat }) {
   React.useEffect(() => { sendPadMarginsToForm(); }, [padMargins]);
   React.useEffect(() => { sendClinicNameToForm(); }, [clinicName]);
 
+  // Printed on the clinic's own pad, like the endorsement: the letterhead is
+  // already on the paper, so this draws none and keeps clear of it. The
+  // margins are the ones the form itself was given, so the two sheets come
+  // out of the same pad the same way.
+  const buildRxHTML = () => {
+    const esc = (v) => String(v === undefined || v === null ? "" : v)
+      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+    const m = padMargins || { top:"44mm", right:"15mm", bottom:"15mm", left:"52mm", flip:false };
+    const margins = m.flip ? [m.bottom, m.left, m.top, m.right].join(" ")
+                           : [m.top, m.right, m.bottom, m.left].join(" ");
+    const flipCss = m.flip ? "body{transform:rotate(180deg);transform-origin:50% 50%;}" : "";
+    const when = fmtDMY(rxDate) || TODAY;
+    const trs = rxEnd.map((r, i) => `<tr><td class="c">${i + 1}</td>` +
+      `<td class="c b">${esc(r.cghsCode) || "\u2014"}</td>` +
+      `<td>${esc(r.procedure)}</td>` +
+      `<td class="c b">${esc(r.tooth) || "\u2014"}</td>` +
+      `<td class="c">${esc(r.qty) || 1}</td></tr>`).join("");
+    return `<!DOCTYPE html><html><head><meta charset="UTF-8"/><style>` +
+      `@page{size:A4 portrait;margin:${margins};}` +
+      `*{box-sizing:border-box;margin:0;padding:0;}${flipCss}` +
+      `body{font-family:'Segoe UI',Arial,sans-serif;font-size:10.5pt;color:#111;background:#fff;}` +
+      `.dtitle{text-align:center;font-size:12.5pt;font-weight:800;color:#0078B4;` +
+      `text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8pt;}` +
+      `.g4{display:grid;grid-template-columns:2fr 0.8fr 1.2fr 1.2fr;gap:5pt 8pt;margin-bottom:6pt;}` +
+      `.fl{margin-bottom:4pt;}` +
+      `.lbl{font-size:7pt;font-weight:700;color:#383838;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:1pt;}` +
+      `.val{font-size:10.5pt;border-bottom:0.5pt solid #ccc;padding-bottom:1pt;min-height:14pt;}` +
+      `.sec{background:#f0f6fb;border-left:3pt solid #0078B4;padding:3pt 7pt;font-size:8pt;font-weight:800;` +
+      `text-transform:uppercase;letter-spacing:0.06em;color:#0078B4;margin:8pt 0 5pt;}` +
+      `table{width:100%;border-collapse:collapse;}` +
+      `th{background:#f0f6fb;color:#0078B4;padding:4pt 6pt;font-size:8pt;font-weight:700;text-align:left;` +
+      `border-bottom:1pt solid #0078B4;}` +
+      `td{padding:4pt 6pt;border-bottom:0.5pt solid #eee;font-size:10pt;vertical-align:middle;}` +
+      `.c{text-align:center;} .b{font-weight:700;}` +
+      `.sig{margin-top:22pt;width:60%;}` +
+      `.sigbox{border-bottom:0.5pt solid #bbb;height:34pt;margin-bottom:3pt;}` +
+      `</style></head><body>` +
+      `<div class="dtitle">Prescription \u2014 Treatment Advised</div>` +
+      `<div class="g4">` +
+        `<div class="fl"><div class="lbl">Patient Name</div><div class="val">${esc(globalPat.name) || "&nbsp;"}</div></div>` +
+        `<div class="fl"><div class="lbl">Age</div><div class="val">${esc(calcAge(globalPat.dob || globalPat.DOB)) || "&nbsp;"}</div></div>` +
+        `<div class="fl"><div class="lbl">UHID</div><div class="val">${esc(globalPat.uhid) || "&nbsp;"}</div></div>` +
+        `<div class="fl"><div class="lbl">Date</div><div class="val">${esc(when)}</div></div>` +
+      `</div>` +
+      `<div class="sec">Treatment Advised \u2014 Endorsed</div>` +
+      `<table><thead><tr><th style="width:8%" class="c">Sn</th><th style="width:15%">Code</th>` +
+      `<th>Treatment Advised</th><th style="width:16%" class="c">Tooth Number</th>` +
+      `<th style="width:12%" class="c">No. of Units</th></tr></thead><tbody>${trs}</tbody></table>` +
+      `<div class="sig"><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div>` +
+      `<div style="font-size:8.5pt;color:#2e2e2e">${signatureLine(when)}</div></div>` +
+      `</body></html>`;
+  };
+  const printRx = () => {
+    const w = window.open("", "_blank");
+    w.document.write(buildRxHTML());
+    w.document.close();
+    setTimeout(() => w.print(), 600);
+  };
+
   if (!globalPat || !globalPat.uhid) {
     return React.createElement("div", null,
       React.createElement(ClinicHeader, null),
@@ -29916,6 +29997,26 @@ function Prescription({ globalPat }) {
   return React.createElement("div", {
     style:{ display:"flex", flexDirection:"column", height:"100%", margin:"-28px -32px", overflow:"hidden" }
   },
+    // Only when this patient has something endorsed. A panel case is a small
+    // part of the day, and a bar that is always there -- usually saying
+    // nothing -- is a bar nobody reads.
+    rxEnd.length ? React.createElement("div", { style:{ display:"flex", gap:12, alignItems:"center",
+      flexWrap:"wrap", padding:"10px 32px", background:"#f0fdf6", borderBottom:`1px solid #059669` } },
+      React.createElement("div", { style:{ fontSize:13.5, fontWeight:700, color:"#065f46" } },
+        "\u2713 " + rxEnd.length + " endorsed treatment" + (rxEnd.length === 1 ? "" : "s") + " on the CGHS endorsement"),
+      React.createElement("div", { style:{ fontSize:13, color:"#2e2e2e" } },
+        rxEnd.map(r => String(r.procedure || r.cghsCode || "").trim())
+          .filter(Boolean).slice(0, 3).join(", ") + (rxEnd.length > 3 ? "\u2026" : "")),
+      React.createElement("div", { style:{ display:"flex", gap:8, alignItems:"center", marginLeft:"auto" } },
+        React.createElement("span", { style:{ fontSize:12, fontWeight:700, color:"#065f46",
+          textTransform:"uppercase", letterSpacing:".04em" } }, "Date"),
+        React.createElement("input", { type:"date", value:rxDate,
+          onChange: e => setRxDate(e.target.value),
+          style:{ ...inp, width:160 } }),
+        React.createElement("button", { onClick:printRx,
+          style:{ padding:"8px 18px", fontSize:13.5, fontWeight:700, border:"none", borderRadius:7,
+            cursor:"pointer", background:"#059669", color:"#fff" } },
+          "\uD83D\uDDA8 Print Treatment Advised"))) : null,
     React.createElement("iframe", {
       ref: iframeRef,
       src: getPrescriptionFormUrl(),

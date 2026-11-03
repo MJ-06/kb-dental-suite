@@ -56,8 +56,11 @@ ok("and plenty of it reached 14",
 // prescription pad now, and only the doctor signs it. 10pt went 44 -> 45
 // with the pad sheet's own table cells. A count that moves for any other
 // reason is a sheet whose type was changed by accident.
-ok("the other printed documents keep their 8.5pt", count(/font-size:8\.5pt/g) === 30);
-ok("and their 10pt", count(/font-size:10pt/g) === 45);
+// 30 -> 31 and 45 -> 46 with the CGHS prescription: its signature line and
+// its table cells are set at the same sizes as every other sheet's, which is
+// the point of pinning this.
+ok("the other printed documents keep their 8.5pt", count(/font-size:8\.5pt/g) === 31);
+ok("and their 10pt", count(/font-size:10pt/g) === 46);
 ok("and their 11pt", count(/font-size:11pt/g) === 14);
 
 const clcss = src.slice(src.indexOf("const CL_PCSS = `"), src.indexOf("`;", src.indexOf("const CL_PCSS = `")));
