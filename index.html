@@ -174,7 +174,7 @@ const KB_BACKEND_BUILD_REQUIRED = "2026-11-02b";
 //
 // It moves with every change to this file. Same shape as the backend's: a
 // date, and a letter when there is more than one in a day.
-const KB_APP_BUILD = "2026-11-03b";
+const KB_APP_BUILD = "2026-11-03c";
 
 // Three answers, not two. A build string is a plain date, so comparing
 // them as text compares them as dates.
@@ -814,6 +814,13 @@ const inp = {
 // Occupation sat in a column a third of that -- the same kind of list,
 // looking like two different screens. Named once so they cannot drift again.
 const MASTER_LIST_WIDTH = 520;
+// Master screens that are a real table -- a fee schedule, the procedure
+// library, the note templates -- cannot live in one 520-wide column, but
+// they were running the full width of the page, which is what made every
+// Master screen look like a different app. This is the ceiling for all of
+// them, applied once where Master draws whichever screen is open, so a
+// screen added later is capped without anyone remembering to do it.
+const MASTER_SCREEN_WIDTH = 880;
 const ta = {
   ...inp,
   resize: "vertical",
@@ -26492,7 +26499,7 @@ function ClinicTimingsEditor({ timings, onSave }) {
     React.createElement("input", { style:inp, type, value:form[key], placeholder,
       onChange:e=>setForm({ ...form, [key]:e.target.value }) }));
 
-  return React.createElement("div", null,
+  return React.createElement("div", { style:{ maxWidth:MASTER_LIST_WIDTH } },
     React.createElement("div", { style:{ fontSize:13, color:"#383838", marginBottom:14, lineHeight:1.5 } },
       "The appointment book is drawn from these. The last slot starts before closing time, so a ",
       "9:00 to 7:00 day at 30 minutes ends with a 6:30 appointment."),
@@ -26596,7 +26603,7 @@ function WorkingDaysEditor({ weekOff, holidays, onSave }) {
            + " " + dt.getFullYear() + " \u00b7 " + WD_DAYS[dt.getDay()];
   };
 
-  return React.createElement("div", null,
+  return React.createElement("div", { style:{ maxWidth:MASTER_LIST_WIDTH } },
     React.createElement("div", { style:{ fontSize:13.5, fontWeight:700, color:"#2e2e2e", marginBottom:8 } }, "Weekly off"),
     React.createElement("div", { style:{ fontSize:13, color:"#383838", marginBottom:10, lineHeight:1.5 } },
       "The days the clinic is closed every week. Everything else counts as a working day."),
@@ -28663,7 +28670,10 @@ function Master() {
     errMsg && React.createElement("div", { style:{ fontSize:13, fontWeight:600, color:"#b91c1c", background:"#fdf2f2",
       border:"1px solid #e5b4b4", borderRadius:7, padding:"8px 11px", marginBottom:10 } }, errMsg),
     loading && React.createElement("div", { style:{ textAlign:"center", padding:20, color:"#444444", fontSize:14 } }, "⏳ Loading..."),
-    content
+    // Every Master screen is drawn through here, so this is the one place
+    // that decides how wide any of them may be. Screens that are a single
+    // column cap themselves tighter still, at MASTER_LIST_WIDTH.
+    content && React.createElement("div", { style:{ maxWidth:MASTER_SCREEN_WIDTH, overflowX:"auto" } }, content)
   );
 }
 
