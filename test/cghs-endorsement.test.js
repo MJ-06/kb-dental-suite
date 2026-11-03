@@ -188,7 +188,7 @@ const VIEW = html.slice(A, B);
 
   // ── the patient with no panel on record ───────────────────────────────
   await mount({ ...CARD, pat: PAT, panel: '', recordedPanel: '', panels: ['CGHS', 'DGEHS'],
-                rates: [], ratesMsg: '', rows: mkRows(), total: 2600, missing: 0 });
+                rates: [], ratesMsg: '', rows: mkRows(), total: 2600, missing: 0, approvedCount: 0, approvedTotal: 0 });
   const noPanel = await page.textContent('#root');
   eq('a patient with no panel still gets the sheet, not a dead end',
      (await page.$$('tbody tr')).length, 2);
@@ -208,14 +208,14 @@ const VIEW = html.slice(A, B);
   // A panel recorded on the patient but missing from the master must still
   // be offered, or it would vanish from its own sheet.
   await mount({ ...CARD, pat: PAT, panel: 'BSES', recordedPanel: 'BSES', panels: ['CGHS'],
-                rates: [], ratesMsg: '', rows: mkRows(), total: 0, missing: 0 });
+                rates: [], ratesMsg: '', rows: mkRows(), total: 0, missing: 0, approvedCount: 0, approvedTotal: 0 });
   eq('a panel not in the master is still offered',
      await page.$eval('#root select', s => Array.from(s.options).map(o => o.value)), ['', 'BSES', 'CGHS']);
   eq('and is the one selected', await page.$eval('#root select', s => s.value), 'BSES');
 
   // ── the working screen ────────────────────────────────────────────────
   await mount({ ...CARD, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
-                rates: RATES, ratesMsg: '', rows: mkRows(), total: 2600, missing: 0 });
+                rates: RATES, ratesMsg: '', rows: mkRows(), total: 2600, missing: 0, approvedCount: 0, approvedTotal: 0 });
   const text = await page.textContent('#root');
   eq('the card details are boxes you can type into, not a line of text',
      await page.$$eval('#root > div > div:first-child input, #root > div > div:first-child select',
@@ -231,15 +231,15 @@ const VIEW = html.slice(A, B);
   eq('and they are saved onto the patient', await page.evaluate(() => window.__savedPanel), 1);
   eq('the columns are in the printed order, with the rate and amount alongside',
      await page.$$eval('thead th', t => t.map(x => x.textContent)),
-     ['Code', 'Treatment Advised', 'Tooth Number', 'Units', 'Rate', 'Amount', '']);
+     ['Endorsed', 'Code', 'Treatment Advised', 'Tooth Number', 'Units', 'Rate', 'Amount', '']);
   eq('each row is priced at the panel rate times its quantity',
-     await page.$$eval('tbody tr td:nth-child(6)', t => t.map(x => x.textContent)),
+     await page.$$eval('tbody tr td:nth-child(7)', t => t.map(x => x.textContent)),
      ['₹1,000', '₹1,600']);
   // The RATE is held: the card is the claim and a rate edited over it would
   // be a wrong one. The treatment is not, because typing it is one of the
   // two ways round a line gets filled in.
   eq('a code on the card fills the treatment and rate, and holds the rate',
-     await page.$$eval('tbody tr:nth-child(1) input', i =>
+     await page.$$eval('tbody tr:nth-child(1) input:not([type=checkbox])', i =>
        i.map(x => [x.value, x.readOnly])),
      [['DP030', false], ['RCT Single Rooted', false], ['16', false], ['1', false], ['1000', true]]);
   // Nothing shouts at you once the screen is in order: a notice that is
@@ -249,19 +249,50 @@ const VIEW = html.slice(A, B);
        await page.$$eval('#root > div', d => d.map(x => x.textContent).slice(1, 2).join(''))),
      text.slice(0, 200));
 
+  // ── what came back endorsed ─────────────────────────────
+  // The sheet goes out as a request; what comes back is a decision, line by
+  // line. Only endorsed lines may be prescribed and only they may be billed,
+  // so this tick is what both of those will read.
+  await mount({ ...CARD, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
+                rates: RATES, ratesMsg: '', rows: mkRows(), total: 2600, missing: 0,
+                approvedCount: 0, approvedTotal: 0 });
+  eq('every line has a tick for coming back endorsed',
+     (await page.$$('tbody tr input[type=checkbox]')).length, 2);
+  eq('and none is ticked to begin with',
+     await page.$$eval('tbody tr input[type=checkbox]', c => c.map(x => x.checked)), [false, false]);
+  await page.check('tbody tr:nth-child(2) input[type=checkbox]');
+  eq('ticking one reaches the plan, for the right line',
+     (await page.evaluate(() => window.__field)).slice(-1), [[1, 'endApproved', true]]);
+  await page.uncheck('tbody tr:nth-child(2) input[type=checkbox]');
+  eq('and un-ticking it says so',
+     (await page.evaluate(() => window.__field)).slice(-1), [[1, 'endApproved', false]]);
+
+  await mount({ ...CARD, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
+                rates: RATES, ratesMsg: '',
+                rows: mkRows().map((r, i) => i === 0 ? { ...r, r: { ...r.r, endApproved: true } } : r),
+                total: 2600, missing: 0, approvedCount: 1, approvedTotal: 1000 });
+  eq('a line that came back endorsed shows as ticked',
+     await page.$$eval('tbody tr input[type=checkbox]', c => c.map(x => x.checked)), [true, false]);
+  const endText = await page.textContent('#root');
+  ok('the screen says how many were endorsed', /1 of 2 endorsed/.test(endText), endText.slice(-200));
+  ok('and what they come to, apart from the total asked for',
+     /Endorsed:\s*\u20b91,000/.test(endText) && /\u20b92,600/.test(endText), endText.slice(-200));
+
+  // The printed sheet IS the request. A request that ticks its own answers
+  // is not one, so the tick stays on screen.
   // ── the two boxes fill each other in ──────────────────────────────────
   // "Is it possible to enter the treatment and accordingly the code comes —
   //  I mean either ways it should work."
   await mount({ ...CARD, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
-                rates: RATES, ratesMsg: '', rows: mkRows(), total: 2600, missing: 0 });
+                rates: RATES, ratesMsg: '', rows: mkRows(), total: 2600, missing: 0, approvedCount: 0, approvedTotal: 0 });
   eq('the treatment box suggests every treatment on the card',
      await page.$$eval('datalist#kb-panel-treatments option', o => o.map(x => x.value)),
      ['RCT Single Rooted', 'Crown - Metal']);
-  await page.fill('tbody tr:nth-child(1) td:nth-child(2) input', 'Crown - Metal');
+  await page.fill('tbody tr:nth-child(1) td:nth-child(3) input', 'Crown - Metal');
   eq('typing a treatment reaches the plan, which finds its code',
      (await page.evaluate(() => window.__proc)).slice(-1), [[0, 'Crown - Metal']]);
   ok('the treatment box is never locked, so either box can be the first one',
-     await page.$eval('tbody tr:nth-child(1) td:nth-child(2) input', i => i.readOnly) === false);
+     await page.$eval('tbody tr:nth-child(1) td:nth-child(3) input', i => i.readOnly) === false);
   // The source that does the matching, run directly: a name the card carries
   // once finds its code, a name it carries twice is left alone.
   const two = await page.evaluate(() => {
@@ -277,7 +308,7 @@ const VIEW = html.slice(A, B);
 
   // ── the tooth grid ────────────────────────────────────────────────────
   await mount({ ...CARD, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
-                rates: RATES, ratesMsg: '', rows: mkRows(), total: 2600, missing: 0 });
+                rates: RATES, ratesMsg: '', rows: mkRows(), total: 2600, missing: 0, approvedCount: 0, approvedTotal: 0 });
   ok('the grid starts by saying it needs a row',
      /Click a line above, then click its teeth/.test(await page.textContent('#root')));
   // Above the table, the way Document 1 is laid out.
@@ -300,7 +331,7 @@ const VIEW = html.slice(A, B);
   eq('a tooth clicked with no row chosen is ignored',
      await page.evaluate(() => window.__tooth), []);
 
-  await page.click('tbody tr:nth-child(2) td:nth-child(2)');
+  await page.click('tbody tr:nth-child(2) td:nth-child(3)');
   ok('choosing a row says which procedure the teeth are for',
      /Teeth for Crown - Metal/.test(await page.textContent('#root')));
   eq('and the row can be taken off the sheet',
@@ -311,30 +342,30 @@ const VIEW = html.slice(A, B);
   await page.click('button[title="#26"]');
   await page.click('button[title="#16"]');
   eq('clicking teeth puts them on that row',
-     await page.$eval('tbody tr:nth-child(2) td:nth-child(3) input', i => i.value), '26, 16');
+     await page.$eval('tbody tr:nth-child(2) td:nth-child(4) input', i => i.value), '26, 16');
   await page.click('button[title="#26"]');
   eq('and clicking one again takes it off',
-     await page.$eval('tbody tr:nth-child(2) td:nth-child(3) input', i => i.value), '16');
+     await page.$eval('tbody tr:nth-child(2) td:nth-child(4) input', i => i.value), '16');
   eq("the first row's tooth was never touched",
-     await page.$eval('tbody tr:nth-child(1) td:nth-child(3) input', i => i.value), '16');
+     await page.$eval('tbody tr:nth-child(1) td:nth-child(4) input', i => i.value), '16');
 
   // ── typing instead of clicking ────────────────────────────────────────
-  await page.fill('tbody tr:nth-child(1) td:nth-child(3) input', '16, 26');
+  await page.fill('tbody tr:nth-child(1) td:nth-child(4) input', '16, 26');
   eq('a tooth can be typed as well as clicked',
      (await page.evaluate(() => window.__field)).slice(-1), [[0, 'tooth', '16, 26']]);
-  await page.fill('tbody tr:nth-child(1) td:nth-child(4) input', '3');
+  await page.fill('tbody tr:nth-child(1) td:nth-child(5) input', '3');
   eq('and the number of units is editable here',
      (await page.evaluate(() => window.__field)).slice(-1), [[0, 'qty', '3']]);
-  await page.fill('tbody tr:nth-child(1) td:nth-child(4) input', '2x');
+  await page.fill('tbody tr:nth-child(1) td:nth-child(5) input', '2x');
   eq('units take digits only',
-     await page.$eval('tbody tr:nth-child(1) td:nth-child(4) input', i => i.value), '2');
+     await page.$eval('tbody tr:nth-child(1) td:nth-child(5) input', i => i.value), '2');
 
   // ── nothing ticked on Document 1 ──────────────────────────────────────
   // The case that caused the report: Document 1 is empty for this patient,
   // so the endorsement used to show nothing at all. It must still be a
   // working screen -- a grid, a way to add a line, and a say in what to do.
   await mount({ ...CARD, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
-                rates: RATES, ratesMsg: '', rows: [], total: 0, missing: 0 });
+                rates: RATES, ratesMsg: '', rows: [], total: 0, missing: 0, approvedCount: 0, approvedTotal: 0 });
   const empty = await page.textContent('#root');
   ok('an empty plan still draws the sheet and says how to fill it',
      /Nothing on the endorsement yet/.test(empty), empty.slice(0, 220));
@@ -356,19 +387,19 @@ const VIEW = html.slice(A, B);
   await mount({ ...CARD, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'], rates: [], ratesMsg: '',
     rows: [{ at: 0, r: { tooth: '16', procedure: 'Composite Restoration', qty: 2, cghsRate: '450' },
              code: 'DP114', card: null, rate: 450, qty: 2, priced: true, amt: 900 }],
-    total: 900, missing: 0 });
+    total: 900, missing: 0, approvedCount: 0, approvedTotal: 0 });
   eq('with no rate card, the code, treatment and rate are all typed',
-     await page.$$eval('tbody tr:nth-child(1) input', i => i.map(x => [x.value, x.readOnly])),
+     await page.$$eval('tbody tr:nth-child(1) input:not([type=checkbox])', i => i.map(x => [x.value, x.readOnly])),
      [['DP114', false], ['Composite Restoration', false], ['16', false], ['2', false], ['450', false]]);
   eq('and the line is priced from what was typed',
-     await page.$eval('tbody tr:nth-child(1) td:nth-child(6)', t => t.textContent), '₹900');
-  await page.fill('tbody tr:nth-child(1) td:nth-child(5) input', '500');
+     await page.$eval('tbody tr:nth-child(1) td:nth-child(7)', t => t.textContent), '₹900');
+  await page.fill('tbody tr:nth-child(1) td:nth-child(6) input', '500');
   eq('typing a rate reaches the plan',
      (await page.evaluate(() => window.__field)).slice(-1), [[0, 'cghsRate', '500']]);
-  await page.fill('tbody tr:nth-child(1) td:nth-child(5) input', '12a.5');
+  await page.fill('tbody tr:nth-child(1) td:nth-child(6) input', '12a.5');
   eq('a rate takes digits and a point, nothing else',
-     await page.$eval('tbody tr:nth-child(1) td:nth-child(5) input', i => i.value), '12.5');
-  await page.fill('tbody tr:nth-child(1) td:nth-child(1) input', 'DP999');
+     await page.$eval('tbody tr:nth-child(1) td:nth-child(6) input', i => i.value), '12.5');
+  await page.fill('tbody tr:nth-child(1) td:nth-child(2) input', 'DP999');
   eq('and the code is typed straight in, with no dropdown to get stuck in',
      (await page.evaluate(() => window.__set)).slice(-1), [[0, 'DP999']]);
   eq('the rate card is offered as suggestions, not as the only way',
@@ -377,12 +408,12 @@ const VIEW = html.slice(A, B);
   // ── a line with no rate at all ────────────────────────────────────────
   await mount({ ...CARD, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'], rates: [], ratesMsg: '',
     rows: [{ at: 0, r: { tooth: '16', procedure: 'Something', qty: 1 }, code: 'DP900',
-             card: null, rate: 0, qty: 1, priced: false, amt: 0 }], total: 0, missing: 0 });
+             card: null, rate: 0, qty: 1, priced: false, amt: 0 }], total: 0, missing: 0, approvedCount: 0, approvedTotal: 0 });
   eq('a line with no rate shows a dash rather than a wrong zero',
-     await page.$eval('tbody tr:nth-child(1) td:nth-child(6)', t => t.textContent), '\u2014');
+     await page.$eval('tbody tr:nth-child(1) td:nth-child(7)', t => t.textContent), '\u2014');
 
   await mount({ ...CARD, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
-                rates: RATES, ratesMsg: '', rows: mkRows(), total: 2600, missing: 0 });
+                rates: RATES, ratesMsg: '', rows: mkRows(), total: 2600, missing: 0, approvedCount: 0, approvedTotal: 0 });
   eq('with a card, every code on it is suggested',
      await page.$$eval('datalist#kb-panel-codes option', o => o.map(x => x.value)),
      ['DP030', 'DP035']);
@@ -390,7 +421,7 @@ const VIEW = html.slice(A, B);
   // ── a rate card that could not be read ────────────────────────────────
   await mount({ ...CARD, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'], rates: [],
                 ratesMsg: 'The CGHS rate card could not be read, so no codes or rates can be filled in. Try reloading the patient.',
-                rows: mkRows(), total: 0, missing: 0 });
+                rows: mkRows(), total: 0, missing: 0, approvedCount: 0, approvedTotal: 0 });
   ok('a rate card that failed to load is reported',
      /could not be read/.test(await page.textContent('#root')));
   eq('but the sheet can still be printed',
