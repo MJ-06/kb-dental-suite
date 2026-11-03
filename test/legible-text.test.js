@@ -51,12 +51,13 @@ ok("and plenty of it reached 14",
 // page is empty)" — so its own stylesheet was enlarged and nothing else was.
 // The counts moved by exactly the two rules that changed in it.
 //
-// 8.5pt went 29 -> 31 when the CGHS endorsement was added: its two signature
-// lines are set at the same size as every other document's, which is the
-// point of pinning this. A count that moves for any other reason is a sheet
-// whose type was changed by accident.
-ok("the other printed documents keep their 8.5pt", count(/font-size:8\.5pt/g) === 31);
-ok("and their 10pt", count(/font-size:10pt/g) === 44);
+// 8.5pt went 29 -> 31 when the CGHS endorsement was added, then 31 -> 30
+// when that sheet lost its beneficiary signature: it prints on the
+// prescription pad now, and only the doctor signs it. 10pt went 44 -> 45
+// with the pad sheet's own table cells. A count that moves for any other
+// reason is a sheet whose type was changed by accident.
+ok("the other printed documents keep their 8.5pt", count(/font-size:8\.5pt/g) === 30);
+ok("and their 10pt", count(/font-size:10pt/g) === 45);
 ok("and their 11pt", count(/font-size:11pt/g) === 14);
 
 const clcss = src.slice(src.indexOf("const CL_PCSS = `"), src.indexOf("`;", src.indexOf("const CL_PCSS = `")));

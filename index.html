@@ -181,7 +181,7 @@ const KB_BACKEND_BUILD_REQUIRED = "2026-11-02b";
 //
 // It moves with every change to this file. Same shape as the backend's: a
 // date, and a letter when there is more than one in a day.
-const KB_APP_BUILD = "2026-11-03h";
+const KB_APP_BUILD = "2026-11-03j";
 
 // Three answers, not two. A build string is a plain date, so comparing
 // them as text compares them as dates.
@@ -5365,7 +5365,13 @@ function TreatmentPlan({
   // before the panel fields existed has none recorded, and refusing to show
   // the sheet at all left nothing on screen -- no teeth, no Print -- which
   // read as the whole document being broken.
-  const [endPanel, setEndPanel] = useState("");
+  // Whatever was typed on the endorsement itself: the panel, the card
+  // holder, the card ID. A clinic that has the card in front of it should be
+  // able to enter it at that moment rather than leaving the sheet, and have
+  // it kept on the patient afterwards.
+  const [panelEdits, setPanelEdits] = useState({});
+  const [panelSaving, setPanelSaving] = useState(false);
+  const [panelSaved, setPanelSaved] = useState(false);
   // What the register holds for this patient, when getPatient is too old to
   // hand it over itself. Null until looked up, {} when the lookup found
   // nothing, so a missing panel is never confused with one not asked for.
@@ -5500,12 +5506,42 @@ function TreatmentPlan({
   const panelOf = (p) => String((p && (p.panel || p.Panel)) || "").trim();
   // The patient as the endorsement sees them: whatever getPatient gave,
   // topped up from the register for the fields an older backend leaves out.
-  const panelPat = (pat && panelOf(pat)) ? pat
-                 : (pat && panelFallback) ? { ...pat, ...panelFallback }
-                 : pat;
-  const recordedPanel = panelOf(panelPat);
-  const patPanel = String(endPanel || recordedPanel || "").trim();
-  useEffect(() => { setEndPanel(""); setEndActive(null); setPanelFallback(null); }, [pat && pat.uhid]);
+  // What the patient record holds, topped up from the register for the
+  // fields an older backend leaves out, then by anything typed here.
+  const panelOnRecord = pat ? { ...pat, ...(panelFallback || {}) } : null;
+  const panelPat = pat ? { ...panelOnRecord, ...panelEdits } : null;
+  const recordedPanel = panelOf(panelOnRecord);
+  const patPanel = panelOf(panelPat);
+  const panelCard = String((panelPat && (panelPat.cardId || panelPat["Card ID"])) || "");
+  const panelHolder = String((panelPat && (panelPat.panelCategory || panelPat["Panel Category"] || panelPat.panelCat)) || "");
+  // A detail typed here is only worth typing if it stays, so it is written
+  // back to the patient's registration. saveRegistration updates the row
+  // where the patient already lives and skips every blank field, so this
+  // touches the three panel columns and nothing else. "mobile" is left out
+  // deliberately: sent as an empty string it would match a Pending row whose
+  // mobile cell is blank, and delete it.
+  const savePanelDetails = async () => {
+    if (!pat || !pat.uhid) return;
+    setPanelSaving(true); setPanelSaved(false);
+    try {
+      const res = await api("saveRegistration", {
+        uhid: pat.uhid, patientType: "Panel",
+        panel: patPanel, panelCategory: panelHolder, cardId: panelCard
+      });
+      if (res && res.success) {
+        setPanelSaved(true);
+        setTimeout(() => setPanelSaved(false), 2500);
+      } else {
+        alert("Could not save the panel details: " + ((res && res.error) || "unknown error"));
+      }
+    } catch (e) {
+      alert("Could not save the panel details: " + (e && e.message ? e.message : e));
+    }
+    setPanelSaving(false);
+  };
+  useEffect(() => {
+    setPanelEdits({}); setEndActive(null); setPanelFallback(null); setPanelSaved(false);
+  }, [pat && pat.uhid]);
   useEffect(() => {
     // Only on this document, only for a patient whose record did not carry a
     // panel, and only once: the register is every patient in the clinic.
@@ -5685,14 +5721,28 @@ function TreatmentPlan({
   // Rows are addressed by their position, not by r.id: ids come back inside
   // a saved plan and the counter that makes new ones starts again at every
   // reload, so two rows on one plan can share an id.
-  // Choosing a code also names the row when it has no name yet, so a line
-  // started here reads as a treatment on every document, not as a blank.
+  // The two boxes fill each other in. A code on the card names the
+  // treatment; a treatment the card carries finds its code. Whichever way
+  // round the clinic works -- reading codes off a CGHS card, or writing what
+  // was actually advised -- the other box follows.
   const setCode = (at, code) => {
     const card = rateByCode(code);
     setTpRows(prev => prev.map((r, i) => i !== at ? r : {
       ...r, cghsCode: code,
-      procedure: String(r.procedure || "").trim() || (card ? String(card.procedure || "") : "")
+      // A name already typed is only replaced when the code actually names
+      // one: picking a code should not wipe what somebody wrote.
+      procedure: card ? String(card.procedure || "") : r.procedure
     }));
+    setSaved(false);
+  };
+  // Only when exactly one rate on the card carries that name. A name the
+  // card holds twice would have to be guessed at, and a wrong code is a
+  // rejected claim -- so it is left for the code box to settle.
+  const setProcedure = (at, name) => {
+    const found = autoCode(name);
+    setTpRows(prev => prev.map((r, i) => i !== at ? r : (
+      found ? { ...r, procedure: name, cghsCode: found } : { ...r, procedure: name }
+    )));
     setSaved(false);
   };
   // The endorsement does not depend on Document 1 being filled in first. A
@@ -5781,61 +5831,88 @@ function TreatmentPlan({
     }).join("")).join("");
     return pW(pH(window.LOGO_B64, "KBDC/FORMS/ES-01") + `<div class="dtitle">Estimated Cost Sheet</div><div style="display:grid;grid-template-columns:1fr auto auto;gap:8pt;margin-bottom:8pt"><div class="fl"><div class="lbl">Patient Name</div><div class="val" style="font-size:12pt;font-weight:700">${pat ? pat.name : "—"}</div></div><div class="fl"><div class="lbl">UHID</div><div class="val" style="font-weight:700">${pat ? pat.uhid : "—"}</div></div><div class="fl"><div class="lbl">Date</div><div class="val">${TODAY}</div></div></div><div class="note">Consultation charges inclusive if treatment starts within 15 days. This estimate is valid for 3 months.</div>` + toothG(selRows) + `<table><thead><tr><th style="width:14%">Phase</th><th style="width:10%">Tooth</th><th>Procedure</th><th style="width:8%;text-align:right">Qty</th><th style="width:16%;text-align:right">Amount</th></tr></thead><tbody>${phRows}</tbody></table><div class="tots"><div class="tr"><span>Subtotal</span><span>₹${sub.toLocaleString("en-IN")}</span></div>${membership && mAmt ? `<div class="tr" style="color:#059669"><span>Membership Plan Amount</span><span>₹${mAmt.toLocaleString("en-IN")}</span></div>` : ""}` + `${membership && disc ? `<div class="tr" style="color:#059669"><span>Membership Discount (${memberDisc}%)</span><span>− ₹${disc.toLocaleString("en-IN")}</span></div>` : ""}` + `${ccCharges && cc ? `<div class="tr" style="color:#D97706"><span>Credit Card Charges (2%)</span><span>+ ₹${cc.toLocaleString("en-IN")}</span></div>` : ""}<div class="tr trg"><span>Total Estimated Cost</span><span>₹${total.toLocaleString("en-IN")}</span></div></div><div style="margin-top:14pt;padding:8pt 10pt;background:#fffbf0;border:0.5pt solid #D97706;border-radius:4pt;font-size:9pt;color:#444444">[Payment terms and conditions to be added]</div><div class="sigrow"><div><div class="lbl">Patient / Guardian Signature &amp; Name</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">${pat ? pat.name : ""}</div></div><div><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">${signatureLine(TODAY)}</div></div></div>`, "KBDC/FORMS/ES-01");
   }
-  // Document 3. What the beneficiary carries to their Wellness Centre: the
-  // proposed work priced at the PANEL's rates under the PANEL's codes, the
-  // card details the Centre checks it against, and a block for the CMO to
-  // endorse. Nothing here is the clinic's own fee -- that is Document 2.
+  // Document 3, printed on the clinic's own prescription pad.
+  //
+  // The pad is pre-printed stationery: the letterhead, the banner and the
+  // doctors' roster are already on the paper, so the sheet must NOT draw its
+  // own -- it has to start below and to the right of what is printed there.
+  // Those measurements belong to the pad, not to this document, so they come
+  // from Master -> CLINIC -> Prescription Pad, exactly as the prescription
+  // takes them, and change when the pad is reprinted.
+  //
+  // What is on it is the clinic's list: code, treatment advised, tooth
+  // number, units, and the doctor's signature. No total -- the Wellness
+  // Centre prices the claim from the codes against its own card -- no
+  // beneficiary signature, and nothing beneath it.
   function buildEndHTML() {
     const esc = (v) => String(v === undefined || v === null ? "" : v)
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const money = (n) => "₹" + Number(n || 0).toLocaleString("en-IN");
+    const C = (typeof window !== "undefined" && window.CLINIC) || {};
+    const mm = (v, dflt) => (String(v == null || v === "" ? dflt : v).trim()) + "mm";
+    const top = mm(C.padTop, "44"), right = mm(C.padRight, "15"),
+          bottom = mm(C.padBottom, "15"), left = mm(C.padLeft, "52");
+    // Some printers take the pad the other way round, so the pre-printed
+    // banner lands where the printer thinks the bottom is. The reserved
+    // space swaps to match and the page is turned, the same way the
+    // prescription handles it -- one setting for both, or the two sheets
+    // would come out of the same pad differently.
+    const flip = !!C.padFlip;
+    const margins = flip ? [bottom, left, top, right].join(" ")
+                         : [top, right, bottom, left].join(" ");
+    const flipCss = flip ? "body{transform:rotate(180deg);transform-origin:50% 50%;}" : "";
     const panel = patPanel || "Panel";
     const field = (label, value) =>
       `<div class="fl"><div class="lbl">${esc(label)}</div><div class="val">${esc(value) || "&nbsp;"}</div></div>`;
-    // Column order is the clinic's, matching the form the Wellness Centre
-    // reads: code first, then what was advised, then the tooth and the
-    // units. The rate per line is not printed -- the Centre prices the
-    // claim from the code against its own card -- only the total asked for.
-    const trs = endRows.map(x => `<tr><td style="text-align:center;font-weight:700">${esc(x.code) || "—"}</td>` +
-      `<td>${esc((x.card && x.card.procedure) || x.r.procedure)}</td>` +
-      `<td style="text-align:center;font-weight:700">${esc(x.r.tooth) || "—"}</td>` +
-      `<td style="text-align:center">${x.qty}</td></tr>`).join("");
+    const trs = endRows.map(x => `<tr><td class="c b">${esc(x.code) || "—"}</td>` +
+      `<td>${esc(x.r.procedure || (x.card && x.card.procedure))}</td>` +
+      `<td class="c b">${esc(x.r.tooth) || "—"}</td>` +
+      `<td class="c">${x.qty}</td></tr>`).join("");
     const body = endRows.length
-      ? `<table><thead><tr><th style="width:13%">Code</th><th>Treatment Advised</th>` +
-        `<th style="width:16%;text-align:center">Tooth Number</th>` +
-        `<th style="width:14%;text-align:center">No. of Units</th></tr></thead><tbody>${trs}</tbody></table>` +
-        `<div class="tots"><div class="tr trg"><span>Total as per ${esc(panel)} rates</span><span>${money(endTotal)}</span></div></div>`
-      : `<div style="text-align:center;padding:16pt;color:#5a5a5a;border:0.5pt dashed #ddd;border-radius:4pt">No procedures selected on the treatment plan</div>`;
-    return pW(pH(window.LOGO_B64, "KBDC/FORMS/EN-01") +
+      ? `<table><thead><tr><th style="width:15%">Code</th><th>Treatment Advised</th>` +
+        `<th style="width:18%" class="c">Tooth Number</th>` +
+        `<th style="width:14%" class="c">No. of Units</th></tr></thead><tbody>${trs}</tbody></table>`
+      : `<div class="empty">No treatment entered</div>`;
+    return `<!DOCTYPE html><html><head><meta charset="UTF-8"/><style>` +
+      `@page{size:A4 portrait;margin:${margins};}` +
+      `*{box-sizing:border-box;margin:0;padding:0;}${flipCss}` +
+      `body{font-family:'Segoe UI',Arial,sans-serif;font-size:10.5pt;color:#111;background:#fff;}` +
+      `.dtitle{text-align:center;font-size:12.5pt;font-weight:800;color:#0078B4;` +
+      `text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8pt;}` +
+      `.g3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:5pt 8pt;margin-bottom:6pt;}` +
+      `.g4{display:grid;grid-template-columns:2fr 0.8fr 1.2fr 1.2fr;gap:5pt 8pt;margin-bottom:6pt;}` +
+      `.fl{margin-bottom:4pt;}` +
+      `.lbl{font-size:7pt;font-weight:700;color:#383838;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:1pt;}` +
+      `.val{font-size:10.5pt;border-bottom:0.5pt solid #ccc;padding-bottom:1pt;min-height:14pt;}` +
+      `.note{font-size:8pt;color:#2e2e2e;font-style:italic;margin:6pt 0;padding:4pt 8pt;` +
+      `background:#f8f8f8;border-left:2pt solid #0078B4;}` +
+      `.sec{background:#f0f6fb;border-left:3pt solid #0078B4;padding:3pt 7pt;font-size:8pt;font-weight:800;` +
+      `text-transform:uppercase;letter-spacing:0.06em;color:#0078B4;margin:8pt 0 5pt;}` +
+      `table{width:100%;border-collapse:collapse;}` +
+      `th{background:#f0f6fb;color:#0078B4;padding:4pt 6pt;font-size:8pt;font-weight:700;text-align:left;` +
+      `border-bottom:1pt solid #0078B4;}` +
+      `td{padding:4pt 6pt;border-bottom:0.5pt solid #eee;font-size:10pt;vertical-align:middle;}` +
+      `.c{text-align:center;} .b{font-weight:700;}` +
+      `.empty{text-align:center;padding:16pt;color:#5a5a5a;border:0.5pt dashed #ddd;border-radius:4pt;}` +
+      `.sig{margin-top:22pt;width:60%;}` +
+      `.sigbox{border-bottom:0.5pt solid #bbb;height:34pt;margin-bottom:3pt;}` +
+      `</style></head><body>` +
       `<div class="dtitle">Request for Endorsement — ${esc(panel)}</div>` +
-      `<div class="g3" style="margin-bottom:8pt">` +
-        field("Beneficiary Name", pat ? pat.name : "") +
-        field("UHID", pat ? pat.uhid : "") +
+      `<div class="g4">` +
+        field("Beneficiary Name", panelPat ? panelPat.name : "") +
+        field("Age", panelPat ? calcAge(panelPat.dob || panelPat.DOB || panelPat["Date of Birth"]) : "") +
+        field("UHID", panelPat ? panelPat.uhid : "") +
         field("Date", TODAY) +
-      `</div><div class="g3" style="margin-bottom:8pt">` +
+      `</div><div class="g3">` +
         field("Panel", panel) +
         field("Card ID", panelPat ? (panelPat.cardId || panelPat["Card ID"] || "") : "") +
         field("Card Holder", panelPat ? (panelPat.panelCategory || panelPat["Panel Category"] || panelPat.panelCat || "") : "") +
       `</div>` +
-      `<div class="note">The following treatment is proposed for the above beneficiary and is submitted for endorsement. ` +
-      `Rates are as per the ${esc(panel)} schedule of charges in force.</div>` +
+      `<div class="note">The following treatment is proposed for the above beneficiary and is submitted ` +
+      `for endorsement. Rates are as per the ${esc(panel)} schedule of charges in force.</div>` +
       `<div class="sec">Proposed Treatment</div>` + body +
-      `<div class="sigrow"><div><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div>` +
+      `<div class="sig"><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div>` +
       `<div style="font-size:8.5pt;color:#2e2e2e">${signatureLine(TODAY)}</div></div>` +
-      `<div><div class="lbl">Beneficiary Signature</div><div class="sigbox"></div>` +
-      `<div style="font-size:8.5pt;color:#2e2e2e">${esc(pat ? pat.name : "")}</div></div></div>` +
-      // The half the Wellness Centre fills in. Left deliberately empty: this
-      // sheet goes out unendorsed and comes back endorsed.
-      `<div style="margin-top:14pt;border:0.5pt solid #7C3AED;border-radius:4pt;padding:9pt 11pt">` +
-      `<div style="font-size:9pt;font-weight:700;color:#7C3AED;text-transform:uppercase;letter-spacing:.04em;margin-bottom:7pt">For use by the Wellness Centre / Competent Authority</div>` +
-      `<div class="g3" style="margin-bottom:8pt">` +
-        `<div class="fl"><div class="lbl">Endorsement / Permission No.</div><div class="val">&nbsp;</div></div>` +
-        `<div class="fl"><div class="lbl">Date of Endorsement</div><div class="val">&nbsp;</div></div>` +
-        `<div class="fl"><div class="lbl">Wellness Centre</div><div class="val">&nbsp;</div></div>` +
-      `</div><div style="font-size:9pt;color:#444444;margin-bottom:6pt">Procedures not endorsed, if any:</div>` +
-      `<div style="border-bottom:0.5pt solid #bbb;height:13pt;margin-bottom:9pt"></div>` +
-      `<div style="width:58%"><div class="lbl">Signature &amp; Stamp of CMO i/c</div><div class="sigbox"></div></div></div>`,
-      "KBDC/FORMS/EN-01");
+      `</body></html>`;
   }
   const docHTML = which => which === "estimate" ? buildEstHTML()
                         : which === "endorsement" ? buildEndHTML()
@@ -6570,9 +6647,15 @@ function TreatmentPlan({
     }
   }, "\uD83D\uDDA8 Print Estimate"))), view === "endorsement" && React.createElement(EndorsementView, {
     pat: panelPat, panel: patPanel, recordedPanel: recordedPanel, panels: endPanels,
-    onPanel: setEndPanel, rates: panelRates, ratesMsg: ratesMsg,
+    card: panelCard, holder: panelHolder,
+    onPanel: (v) => setPanelEdits(e => ({ ...e, panel: v })),
+    onCard: (v) => setPanelEdits(e => ({ ...e, cardId: v })),
+    onHolder: (v) => setPanelEdits(e => ({ ...e, panelCategory: v })),
+    onSavePanel: savePanelDetails, panelSaving: panelSaving, panelSaved: panelSaved,
+    rates: panelRates, ratesMsg: ratesMsg,
     rows: endRows, total: endTotal, missing: endMissing, setCode: setCode,
-    setRowField: setRowField, active: endActive, setActive: setEndActive,
+    setRowField: setRowField, setProcedure: setProcedure,
+    active: endActive, setActive: setEndActive,
     onTooth: endClickTooth, onAdd: addEndRow, onRemove: removeEndRow,
     onSave: saveTP, saving: saving, saved: saved,
     onPreview: () => doPreview("endorsement"), onPrint: () => doPrint("endorsement")
@@ -6590,8 +6673,10 @@ function TreatmentPlan({
 // matched to one here -- automatically where the card holds exactly one
 // procedure of that name, and by hand where it does not. A wrong code is a
 // rejected claim, so nothing is guessed.
-function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, rates, ratesMsg,
-                           rows, total, missing, setCode, setRowField, active, setActive,
+function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, card, holder,
+                           onCard, onHolder, onSavePanel, panelSaving, panelSaved,
+                           rates, ratesMsg,
+                           rows, total, missing, setCode, setRowField, setProcedure, active, setActive,
                            onTooth, onAdd, onRemove, onSave, saving, saved, onPreview, onPrint }) {
   const money = (n) => "₹" + Number(n || 0).toLocaleString("en-IN");
   const note = (text, tone) => React.createElement("div", { style:{
@@ -6624,6 +6709,10 @@ function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, rates, ra
     return out;
   })();
 
+  const field = (label, control) => React.createElement("div", null,
+    React.createElement("div", { style:{ fontSize:12, fontWeight:700, color:"#444444",
+      textTransform:"uppercase", letterSpacing:".04em", marginBottom:3 } }, label),
+    control);
   const activeRow = rows.find(x => x.at === active) || null;
   const addBtn = (wide) => React.createElement("button", { onClick:onAdd,
     style:{ padding: wide ? "9px 20px" : "7px 14px", fontSize:13.5, fontWeight:700,
@@ -6633,16 +6722,33 @@ function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, rates, ra
   return React.createElement("div", null,
     // Who this is for, and against whose card. One line, always the same
     // line, whether or not the registration happens to carry a panel.
-    React.createElement("div", { style:{ display:"flex", gap:12, flexWrap:"wrap", alignItems:"center", marginBottom:10 } },
-      React.createElement("div", { style:{ fontSize:15, fontWeight:700 } }, "Endorsement"),
-      React.createElement("select", {
+    React.createElement("div", { style:{ display:"flex", gap:10, flexWrap:"wrap", alignItems:"flex-end", marginBottom:12 } },
+      field("Panel", React.createElement("select", {
         value: panel, onChange: e => onPanel(e.target.value),
-        style:{ ...inp, width:"auto", minWidth:160, borderColor: panel ? BORDER : "#f59e0b" } },
-        React.createElement("option", { value:"" }, "— which panel? —"),
-        panelChoices.map(n => React.createElement("option", { key:n, value:n }, n))),
-      React.createElement("div", { style:{ fontSize:13, color:"#444444" } },
-        "Card ID: " + (pat.cardId || pat["Card ID"] || "not recorded") +
-        "   ·   " + (pat.panelCategory || pat["Panel Category"] || pat.panelCat || "card holder not recorded")),
+        style:{ ...inp, width:150, borderColor: panel ? BORDER : "#f59e0b" } },
+        React.createElement("option", { value:"" }, "\u2014 choose \u2014"),
+        panelChoices.map(n => React.createElement("option", { key:n, value:n }, n)))),
+      field("Card Holder", React.createElement("select", {
+        value: holder, onChange: e => onHolder(e.target.value), style:{ ...inp, width:130 } },
+        React.createElement("option", { value:"" }, "\u2014 choose \u2014"),
+        ["Serving", "Pensioner"].map(c => React.createElement("option", { key:c, value:c }, c)))),
+      // Typed here when the card is in front of you, rather than going back
+      // to the registration for it. It is saved onto the patient, so it is
+      // entered once.
+      field("Card ID / Beneficiary ID", React.createElement("input", {
+        value: card, placeholder: "As printed on the card",
+        onChange: e => onCard(e.target.value),
+        style:{ ...inp, width:210 } })),
+      React.createElement("button", {
+        onClick: onSavePanel, disabled: panelSaving || !panel,
+        title: panel ? "Keep these on the patient's registration"
+                     : "Choose the panel first",
+        style:{ padding:"8px 14px", fontSize:13, fontWeight:700, borderRadius:7,
+          border:`1px solid ${panel ? "#059669" : BORDER}`,
+          cursor: panelSaving || !panel ? "not-allowed" : "pointer",
+          background: panelSaved ? "#059669" : "#fff",
+          color: panelSaved ? "#fff" : (panel ? "#059669" : "#5a5a5a") } },
+        panelSaving ? "Saving\u2026" : panelSaved ? "\u2713 Saved to patient" : "Save to patient"),
       React.createElement("div", { style:{ marginLeft:"auto" } }, addBtn())),
 
     // One notice at a time, and only when it changes what to do next.
@@ -6653,9 +6759,26 @@ function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, rates, ra
       : missing ? note(missing + " of " + rows.length + " treatment(s) have no code yet. Type the code, or pick one from the rate card \u2014 a line with no code cannot be claimed.", "warn")
       : null,
 
+    // Above the table, where Document 1 keeps its own chart, so the two
+    // screens read the same way round. It is always here, lines or not.
+    React.createElement("div", { style:{ marginBottom:14 } },
+      React.createElement("div", { style:{ fontSize:13, fontWeight:700, marginBottom:6 } },
+        activeRow
+          ? "Teeth for " + ((activeRow.r.procedure || (activeRow.card && activeRow.card.procedure)) || "this line")
+          : rows.length ? "Click a line above, then click its teeth"
+                        : "Add a treatment above, then click its teeth"),
+      React.createElement(ToothChart, {
+        rows: activeRow ? [{ tooth: activeRow.r.tooth }] : [],
+        hint: activeRow
+          ? "Blue = on this line · Click a tooth to add it, click it again to take it off"
+          : "No line chosen yet — the teeth go on the line you click",
+        onClick: (t) => { if (activeRow) onTooth(t); } })),
     React.createElement("datalist", { id:"kb-panel-codes" },
       rates.map(o => React.createElement("option", { key:o.code, value:o.code },
         o.procedure + (o.rate ? "  (" + money(o.rate) + ")" : "")))),
+    React.createElement("datalist", { id:"kb-panel-treatments" },
+      rates.map(o => React.createElement("option", { key:o.code + "|" + o.procedure, value:o.procedure },
+        o.code + (o.rate ? "  (" + money(o.rate) + ")" : "")))),
     React.createElement("div", { style:{ background:"#fff", border:`1px solid ${BORDER}`, borderRadius:8, overflow:"hidden" } },
       React.createElement("table", { style:{ width:"100%", borderCollapse:"collapse" } },
         React.createElement("thead", null, React.createElement("tr", { style:{ background:BGS } },
@@ -6688,14 +6811,13 @@ function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, rates, ra
                             borderColor: x.code ? BORDER : "#f59e0b" } })),
                 React.createElement("td", { style:cell },
                   React.createElement("input", {
-                    value: (x.card && x.card.procedure) || x.r.procedure || "",
+                    value: x.r.procedure || (x.card && x.card.procedure) || "",
+                    list: "kb-panel-treatments",
                     placeholder: "Treatment advised",
-                    onChange: e => setRowField(x.at, "procedure", e.target.value),
+                    onChange: e => setProcedure(x.at, e.target.value),
                     onFocus: () => setActive(x.at),
-                    readOnly: !!x.card,
-                    title: x.card ? "Taken from the rate card for " + x.code : undefined,
-                    style:{ ...inp, width:"100%", boxSizing:"border-box",
-                            background: x.card ? BGS : "#fff" } })),
+                    title: "Type the treatment and its code fills in, or pick the code and this does",
+                    style:{ ...inp, width:"100%", boxSizing:"border-box" } })),
                 React.createElement("td", { style:{ ...cell, width:118 } },
                   React.createElement("input", {
                     value: x.r.tooth || "",
@@ -6736,21 +6858,7 @@ function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, rates, ra
       React.createElement("span", { style:{ color:"#444444" } }, "Total" + (panel ? " as per " + panel + " rates" : "")),
       React.createElement("span", { style:{ fontWeight:700, fontSize:17 } }, money(total))) : null,
 
-    // The grid is always here, whether or not there are lines yet: it is
-    // where a tooth gets picked, and it going missing is what made this
-    // screen look unfinished.
-    React.createElement("div", { style:{ marginTop:14 } },
-      React.createElement("div", { style:{ fontSize:13, fontWeight:700, marginBottom:6 } },
-        activeRow
-          ? "Teeth for " + (((activeRow.card && activeRow.card.procedure) || activeRow.r.procedure) || "this line")
-          : rows.length ? "Click a line above, then click its teeth"
-                        : "Add a treatment above, then click its teeth"),
-      React.createElement(ToothChart, {
-        rows: activeRow ? [{ tooth: activeRow.r.tooth }] : [],
-        hint: activeRow
-          ? "Blue = on this line · Click a tooth to add it, click it again to take it off"
-          : "No line chosen yet — the teeth go on the line you click",
-        onClick: (t) => { if (activeRow) onTooth(t); } })),
+
 
     React.createElement("div", { style:{ display:"flex", gap:8, marginTop:14, paddingTop:12,
       borderTop:`1px solid ${BORDER}`, flexWrap:"wrap", alignItems:"center" } },
