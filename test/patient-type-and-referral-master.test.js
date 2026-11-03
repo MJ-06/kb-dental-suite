@@ -128,6 +128,7 @@ ok('the shared screen was found', A > 0 && B > A, `${A}..${B}`);
     await page.addScriptTag({ content: fs.readFileSync(path.join(REPO, f), 'utf8') });
   await page.addScriptTag({ content: `
     const T = "#0078B4", BORDER = "#e5e5e0", BGS = "#f5f5f0";
+    const MASTER_LIST_WIDTH = ${(/const MASTER_LIST_WIDTH = (\d+);/.exec(html) || [])[1]};
     const inp = { padding:"8px", border:"1px solid #e5e5e0", borderRadius:6, fontSize:13, fontFamily:"inherit" };
     window.__added = []; window.__removed = [];
   ` });
