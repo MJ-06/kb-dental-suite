@@ -160,7 +160,7 @@ const KB_BACKEND_IS_APPS_SCRIPT = /script\.google\.com/.test(SCRIPT_URL);
 // So the app asks, and says so in the sidebar when the answer is too old.
 // Raise this whenever the page starts depending on something new in
 // Code.gs, and bump BACKEND_BUILD there to match.
-const KB_BACKEND_BUILD_REQUIRED = "2026-11-02b";
+const KB_BACKEND_BUILD_REQUIRED = "2026-11-03";
 // WHICH APP THIS IS.
 //
 // There was no way to tell. The sidebar said which BACKEND was answering
@@ -174,7 +174,7 @@ const KB_BACKEND_BUILD_REQUIRED = "2026-11-02b";
 //
 // It moves with every change to this file. Same shape as the backend's: a
 // date, and a letter when there is more than one in a day.
-const KB_APP_BUILD = "2026-11-03f";
+const KB_APP_BUILD = "2026-11-03g";
 
 // Three answers, not two. A build string is a plain date, so comparing
 // them as text compares them as dates.
@@ -2046,6 +2046,17 @@ function Registration({
             referredBy:        p.referredBy        || "",
             referredByType:    p.referredByType    || ""
           }));
+          // Opening an existing patient used to forget the panel entirely:
+          // the type buttons came up unset, the panel box empty and the card
+          // ID blank, however carefully they had been saved. Typing the card
+          // ID back in then saved nothing at all, because the payload only
+          // carries panel details when the type says "panel".
+          const isPanel = String(p.patientType || "").trim().toLowerCase() === "panel";
+          if (p.patientType) setPatientType(isPanel ? "panel" : "normal");
+          if (isPanel) {
+            setPanel(p.panel || "");
+            setQ(prev => ({ ...prev, panelCat: p.panelCategory || "", cardId: p.cardId || "" }));
+          }
           if (p.conditions && p.conditions.length) {
             setM(prev => ({
               ...prev,
@@ -5475,7 +5486,7 @@ function TreatmentPlan({
   };
   // The registration writes the panel into "Panel"; a patient loaded from
   // somewhere else may carry it lower-cased, so both are read.
-  const panelOf = (p) => String((p && (p.Panel || p.panel)) || "").trim();
+  const panelOf = (p) => String((p && (p.panel || p.Panel)) || "").trim();
   const recordedPanel = panelOf(pat);
   const patPanel = String(endPanel || recordedPanel || "").trim();
   useEffect(() => { setEndPanel(""); setEndActive(null); }, [pat && pat.uhid]);
@@ -5641,8 +5652,30 @@ function TreatmentPlan({
   // Rows are addressed by their position, not by r.id: ids come back inside
   // a saved plan and the counter that makes new ones starts again at every
   // reload, so two rows on one plan can share an id.
+  // Choosing a code also names the row when it has no name yet, so a line
+  // started here reads as a treatment on every document, not as a blank.
   const setCode = (at, code) => {
-    setTpRows(prev => prev.map((r, i) => i === at ? { ...r, cghsCode: code } : r));
+    const card = rateByCode(code);
+    setTpRows(prev => prev.map((r, i) => i !== at ? r : {
+      ...r, cghsCode: code,
+      procedure: String(r.procedure || "").trim() || (card ? String(card.procedure || "") : "")
+    }));
+    setSaved(false);
+  };
+  // The endorsement does not depend on Document 1 being filled in first. A
+  // line can be started here -- pick the code, click the teeth -- which is
+  // the whole job when a panel patient walks in and the plan is the claim.
+  const addEndRow = () => {
+    setTpRows(prev => {
+      const next = [...prev, { ...mkRow("Phase 1"), selected: true, endAdded: true }];
+      setEndActive(next.length - 1);
+      return next;
+    });
+    setSaved(false);
+  };
+  const removeEndRow = (at) => {
+    setTpRows(prev => prev.filter((_, i) => i !== at));
+    setEndActive(null);
     setSaved(false);
   };
   const setRowField = (at, field, value) => {
@@ -5665,7 +5698,7 @@ function TreatmentPlan({
   };
   const endRows = tpRows
     .map((r, at) => ({ r, at }))
-    .filter(x => x.r.selected && x.r.procedure)
+    .filter(x => x.r.selected && (x.r.procedure || x.r.endAdded))
     .map(x => {
       const code = codeFor(x.r);
       const card = rateByCode(code);
@@ -5736,8 +5769,8 @@ function TreatmentPlan({
         field("Date", TODAY) +
       `</div><div class="g3" style="margin-bottom:8pt">` +
         field("Panel", panel) +
-        field("Card ID", pat ? (pat["Card ID"] || pat.cardId || "") : "") +
-        field("Card Holder", pat ? (pat["Panel Category"] || pat.panelCat || "") : "") +
+        field("Card ID", pat ? (pat.cardId || pat["Card ID"] || "") : "") +
+        field("Card Holder", pat ? (pat.panelCategory || pat["Panel Category"] || pat.panelCat || "") : "") +
       `</div>` +
       `<div class="note">The following treatment is proposed for the above beneficiary and is submitted for endorsement. ` +
       `Rates are as per the ${esc(panel)} schedule of charges in force.</div>` +
@@ -6495,7 +6528,7 @@ function TreatmentPlan({
     onPanel: setEndPanel, rates: panelRates, ratesMsg: ratesMsg,
     rows: endRows, total: endTotal, missing: endMissing, setCode: setCode,
     setRowField: setRowField, active: endActive, setActive: setEndActive,
-    onTooth: endClickTooth,
+    onTooth: endClickTooth, onAdd: addEndRow, onRemove: removeEndRow,
     onSave: saveTP, saving: saving, saved: saved,
     onPreview: () => doPreview("endorsement"), onPrint: () => doPrint("endorsement")
   }), preview && /*#__PURE__*/React.createElement(PreviewModal, {
@@ -6514,20 +6547,20 @@ function TreatmentPlan({
 // rejected claim, so nothing is guessed.
 function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, rates, ratesMsg,
                            rows, total, missing, setCode, setRowField, active, setActive,
-                           onTooth, onSave, saving, saved, onPreview, onPrint }) {
+                           onTooth, onAdd, onRemove, onSave, saving, saved, onPreview, onPrint }) {
   const money = (n) => "₹" + Number(n || 0).toLocaleString("en-IN");
   const note = (text, tone) => React.createElement("div", { style:{
-    fontSize:13, lineHeight:1.6, borderRadius:7, padding:"10px 13px", marginBottom:12,
+    fontSize:13, lineHeight:1.6, borderRadius:7, padding:"9px 12px", marginBottom:10,
     background: tone === "warn" ? "#fffbeb" : BGS,
     border: `1px solid ${tone === "warn" ? "#f59e0b" : BORDER}`,
     color: tone === "warn" ? "#92400e" : "#383838" } }, text);
 
   if (!pat) return React.createElement("div", null, note("Load a patient to build an endorsement."));
 
-  const cell = { padding:"7px 10px", fontSize:13.5 };
+  const cell = { padding:"6px 8px", fontSize:13.5 };
   const head = (label, extra) => React.createElement("th", { style:{
     textAlign: (extra && extra.align) || "left",
-    padding:"8px 10px", fontSize:12.5, fontWeight:700, color:"#444444" } }, label);
+    padding:"8px 8px", fontSize:12.5, fontWeight:700, color:"#444444" } }, label);
 
   // A select shows its first option when its value is not among them, which
   // would silently show the wrong code. Any code not on the card is added as
@@ -6538,9 +6571,6 @@ function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, rates, ra
     return extra.concat(rates);
   };
 
-  // The panel picker. It is always here, not only when the registration has
-  // one: a sheet cannot be written without knowing whose card it is read
-  // against, and the fix has to be reachable from this screen.
   const panelChoices = (() => {
     const out = [];
     (panels || []).forEach(n => { if (String(n || "").trim()) out.push(String(n).trim()); });
@@ -6550,94 +6580,109 @@ function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, rates, ra
   })();
 
   const activeRow = rows.find(x => x.at === active) || null;
+  const addBtn = (wide) => React.createElement("button", { onClick:onAdd,
+    style:{ padding: wide ? "9px 20px" : "7px 14px", fontSize:13.5, fontWeight:700,
+      border:`1px solid ${T}`, borderRadius:7, cursor:"pointer", background:"#fff", color:T } },
+    "+ Add a treatment");
 
   return React.createElement("div", null,
-    React.createElement("div", { style:{ display:"flex", gap:14, flexWrap:"wrap", alignItems:"center", marginBottom:12 } },
+    // Who this is for, and against whose card. One line, always the same
+    // line, whether or not the registration happens to carry a panel.
+    React.createElement("div", { style:{ display:"flex", gap:12, flexWrap:"wrap", alignItems:"center", marginBottom:10 } },
       React.createElement("div", { style:{ fontSize:15, fontWeight:700 } }, "Endorsement"),
       React.createElement("select", {
         value: panel, onChange: e => onPanel(e.target.value),
-        style:{ ...inp, width:"auto", minWidth:170, borderColor: panel ? BORDER : "#f59e0b" } },
+        style:{ ...inp, width:"auto", minWidth:160, borderColor: panel ? BORDER : "#f59e0b" } },
         React.createElement("option", { value:"" }, "— which panel? —"),
         panelChoices.map(n => React.createElement("option", { key:n, value:n }, n))),
       React.createElement("div", { style:{ fontSize:13, color:"#444444" } },
-        "Card ID: " + (pat["Card ID"] || pat.cardId || "—") +
-        "   ·   " + (pat["Panel Category"] || pat.panelCat || "Card holder not recorded"))),
+        "Card ID: " + (pat.cardId || pat["Card ID"] || "not recorded") +
+        "   ·   " + (pat.panelCategory || pat["Panel Category"] || pat.panelCat || "card holder not recorded")),
+      React.createElement("div", { style:{ marginLeft:"auto" } }, addBtn())),
 
-    !recordedPanel ? note(
-      (pat.name || "This patient") + " has no panel on their registration, so one is chosen above for this sheet. " +
-      "To keep it on the patient, set the panel, card holder and card ID on their registration.", "warn") : null,
-    !panel ? note("Choose the panel above and its rate card will load, with a code against every procedure.", "warn") : null,
-    ratesMsg ? note(ratesMsg, "warn") : null,
-    panel ? note("Rates are the " + panel + " rates from Master → Accounts → Panel Fee Schedule, not the clinic's own fees. " +
-      "The printed sheet shows Code, Treatment Advised, Tooth Number and No. of Units, then a blank block for the " +
-      "Wellness Centre to endorse and stamp.") : null,
+    // One notice at a time, and only when it changes what to do next.
+    !panel
+      ? note("Choose the panel above and its rate card loads, with a code to pick against every treatment." +
+             (recordedPanel ? "" : " This patient has none on their registration — set it there to keep it."), "warn")
+      : ratesMsg ? note(ratesMsg, "warn")
+      : missing ? note(missing + " of " + rows.length + " treatment(s) have no code yet. A line with no code prints with no rate and cannot be claimed.", "warn")
+      : null,
 
-    rows.length === 0
-      ? note("Nothing is ticked on Document 1, so there is nothing to endorse. Tick the procedures on the treatment plan first.")
-      : React.createElement(React.Fragment, null,
-          missing ? note(missing + " of " + rows.length + " procedure(s) have no code. " +
-            "Pick one for each — a procedure with no code prints with no rate and cannot be claimed.", "warn") : null,
-          React.createElement("div", { style:{ background:"#fff", border:`1px solid ${BORDER}`, borderRadius:8, overflow:"hidden" } },
-            React.createElement("table", { style:{ width:"100%", borderCollapse:"collapse" } },
-              React.createElement("thead", null, React.createElement("tr", { style:{ background:BGS } },
-                head("Code"), head("Treatment Advised"), head("Tooth Number"),
-                head("Units", { align:"center" }), head("Amount", { align:"right" }))),
-              React.createElement("tbody", null, rows.map(x =>
-                React.createElement("tr", {
-                  key: x.at,
-                  onClick: () => setActive(x.at),
-                  style:{ borderTop:`1px solid ${BORDER}`, cursor:"pointer",
-                          background: active === x.at ? "#eaf4fb" : "transparent" } },
-                  React.createElement("td", { style:{ ...cell, width:230 } },
-                    React.createElement("select", {
-                      value: x.code,
-                      onChange: e => setCode(x.at, e.target.value),
-                      style:{ ...inp, width:"100%", boxSizing:"border-box",
-                              borderColor: x.code ? BORDER : "#f59e0b" } },
-                      React.createElement("option", { value:"" },
-                        rates.length ? "— choose a code —" : "— no rate card —"),
-                      options(x.code).map(o => React.createElement("option", { key:o.code, value:o.code },
-                        o.code + "  —  " + o.procedure + (o.rate ? "  (" + money(o.rate) + ")" : ""))))),
-                  React.createElement("td", { style:cell }, (x.card && x.card.procedure) || x.r.procedure),
-                  React.createElement("td", { style:{ ...cell, width:120 } },
-                    React.createElement("input", {
-                      value: x.r.tooth || "",
-                      placeholder: "e.g. 16, 26",
-                      onChange: e => setRowField(x.at, "tooth", e.target.value),
-                      onFocus: () => setActive(x.at),
-                      style:{ ...inp, width:"100%", boxSizing:"border-box", textAlign:"center", fontWeight:700 } })),
-                  React.createElement("td", { style:{ ...cell, width:84 } },
-                    React.createElement("input", {
-                      value: x.r.qty === undefined || x.r.qty === null ? "" : x.r.qty,
-                      inputMode: "numeric",
-                      onChange: e => setRowField(x.at, "qty", e.target.value.replace(/[^0-9]/g, "")),
-                      onFocus: () => setActive(x.at),
-                      style:{ ...inp, width:"100%", boxSizing:"border-box", textAlign:"center" } })),
-                  React.createElement("td", { style:{ ...cell, textAlign:"right", fontWeight:700, width:110,
-                    color: x.card ? "#1a1a1a" : "#92400e" } }, x.card ? money(x.amt) : "no rate"))))))
-          ,
-          React.createElement("div", { style:{ display:"flex", justifyContent:"flex-end", gap:14, alignItems:"baseline",
-            marginTop:12, fontSize:15 } },
-            React.createElement("span", { style:{ color:"#444444" } }, "Total" + (panel ? " as per " + panel + " rates" : "")),
-            React.createElement("span", { style:{ fontWeight:700, fontSize:17 } }, money(total))),
+    React.createElement("div", { style:{ background:"#fff", border:`1px solid ${BORDER}`, borderRadius:8, overflow:"hidden" } },
+      React.createElement("table", { style:{ width:"100%", borderCollapse:"collapse" } },
+        React.createElement("thead", null, React.createElement("tr", { style:{ background:BGS } },
+          head("Code"), head("Treatment Advised"), head("Tooth Number"),
+          head("Units", { align:"center" }), head("Amount", { align:"right" }), head(""))),
+        React.createElement("tbody", null,
+          rows.length === 0
+            ? React.createElement("tr", null, React.createElement("td", { colSpan:6, style:{
+                padding:"18px 12px", textAlign:"center", color:"#444444", fontSize:13.5 } },
+                "Nothing on the endorsement yet. Add a treatment above, or tick procedures on Document 1 and they appear here."))
+            : rows.map(x =>
+              React.createElement("tr", {
+                key: x.at,
+                onClick: () => setActive(x.at),
+                style:{ borderTop:`1px solid ${BORDER}`, cursor:"pointer",
+                        background: active === x.at ? "#eaf4fb" : "transparent" } },
+                React.createElement("td", { style:{ ...cell, width:215 } },
+                  React.createElement("select", {
+                    value: x.code,
+                    onChange: e => setCode(x.at, e.target.value),
+                    style:{ ...inp, width:"100%", boxSizing:"border-box",
+                            borderColor: x.code ? BORDER : "#f59e0b" } },
+                    React.createElement("option", { value:"" },
+                      rates.length ? "— choose a code —" : "— no rate card —"),
+                    options(x.code).map(o => React.createElement("option", { key:o.code, value:o.code },
+                      o.code + "  —  " + o.procedure + (o.rate ? "  (" + money(o.rate) + ")" : ""))))),
+                React.createElement("td", { style:cell },
+                  (x.card && x.card.procedure) || x.r.procedure ||
+                    React.createElement("span", { style:{ color:"#5a5a5a" } }, "pick a code")),
+                React.createElement("td", { style:{ ...cell, width:118 } },
+                  React.createElement("input", {
+                    value: x.r.tooth || "",
+                    placeholder: "e.g. 16, 26",
+                    onChange: e => setRowField(x.at, "tooth", e.target.value),
+                    onFocus: () => setActive(x.at),
+                    style:{ ...inp, width:"100%", boxSizing:"border-box", textAlign:"center", fontWeight:700 } })),
+                React.createElement("td", { style:{ ...cell, width:76 } },
+                  React.createElement("input", {
+                    value: x.r.qty === undefined || x.r.qty === null ? "" : x.r.qty,
+                    inputMode: "numeric",
+                    onChange: e => setRowField(x.at, "qty", e.target.value.replace(/[^0-9]/g, "")),
+                    onFocus: () => setActive(x.at),
+                    style:{ ...inp, width:"100%", boxSizing:"border-box", textAlign:"center" } })),
+                React.createElement("td", { style:{ ...cell, textAlign:"right", fontWeight:700, width:100,
+                  color: x.card ? "#1a1a1a" : "#92400e" } }, x.card ? money(x.amt) : "no rate"),
+                React.createElement("td", { style:{ ...cell, width:34, textAlign:"center" } },
+                  React.createElement("button", {
+                    onClick: (e) => { e.stopPropagation(); onRemove(x.at); },
+                    title: "Remove this line",
+                    style:{ border:"none", background:"none", color:"#b91c1c", cursor:"pointer",
+                            fontSize:15, fontWeight:700, lineHeight:1 } }, "×"))))))),
 
-          // The grid, which is how a tooth gets picked rather than typed.
-          // It writes into the row highlighted above; clicking a tooth the
-          // row already carries takes it off again.
-          React.createElement("div", { style:{ marginTop:16 } },
-            React.createElement("div", { style:{ fontSize:13, fontWeight:700, marginBottom:6 } },
-              activeRow
-                ? "Teeth for " + (((activeRow.card && activeRow.card.procedure) || activeRow.r.procedure) || "this row")
-                : "Pick a row above, then click its teeth"),
-            React.createElement(ToothChart, {
-              rows: activeRow ? [{ tooth: activeRow.r.tooth }] : [],
-              hint: activeRow
-                ? "Blue = on this row \u00b7 Click a tooth to add it, click it again to take it off"
-                : "Click a row above first \u2014 the teeth go on the row you choose",
-              onClick: (t) => { if (activeRow) onTooth(t); } }))),
+    rows.length ? React.createElement("div", { style:{ display:"flex", justifyContent:"flex-end", gap:14,
+      alignItems:"baseline", marginTop:10, fontSize:15 } },
+      React.createElement("span", { style:{ color:"#444444" } }, "Total" + (panel ? " as per " + panel + " rates" : "")),
+      React.createElement("span", { style:{ fontWeight:700, fontSize:17 } }, money(total))) : null,
+
+    // The grid is always here, whether or not there are lines yet: it is
+    // where a tooth gets picked, and it going missing is what made this
+    // screen look unfinished.
+    React.createElement("div", { style:{ marginTop:14 } },
+      React.createElement("div", { style:{ fontSize:13, fontWeight:700, marginBottom:6 } },
+        activeRow
+          ? "Teeth for " + (((activeRow.card && activeRow.card.procedure) || activeRow.r.procedure) || "this line")
+          : rows.length ? "Click a line above, then click its teeth"
+                        : "Add a treatment above, then click its teeth"),
+      React.createElement(ToothChart, {
+        rows: activeRow ? [{ tooth: activeRow.r.tooth }] : [],
+        hint: activeRow
+          ? "Blue = on this line · Click a tooth to add it, click it again to take it off"
+          : "No line chosen yet — the teeth go on the line you click",
+        onClick: (t) => { if (activeRow) onTooth(t); } })),
 
     React.createElement("div", { style:{ display:"flex", gap:8, marginTop:14, paddingTop:12,
-      borderTop:`1px solid ${BORDER}`, flexWrap:"wrap" } },
+      borderTop:`1px solid ${BORDER}`, flexWrap:"wrap", alignItems:"center" } },
       React.createElement(SaveBtn, { onClick:onSave, saving:saving, saved:saved }),
       React.createElement("button", { onClick:onPreview, disabled:!rows.length,
         style:{ padding:"8px 16px", fontSize:14, border:`1px solid ${rows.length ? T : BORDER}`, borderRadius:7,
