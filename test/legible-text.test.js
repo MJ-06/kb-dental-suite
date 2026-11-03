@@ -50,7 +50,12 @@ ok("and plenty of it reached 14",
 // directly — "the font size should be readable (it is too small and a lot of
 // page is empty)" — so its own stylesheet was enlarged and nothing else was.
 // The counts moved by exactly the two rules that changed in it.
-ok("the other printed documents keep their 8.5pt", count(/font-size:8\.5pt/g) === 29);
+//
+// 8.5pt went 29 -> 31 when the CGHS endorsement was added: its two signature
+// lines are set at the same size as every other document's, which is the
+// point of pinning this. A count that moves for any other reason is a sheet
+// whose type was changed by accident.
+ok("the other printed documents keep their 8.5pt", count(/font-size:8\.5pt/g) === 31);
 ok("and their 10pt", count(/font-size:10pt/g) === 44);
 ok("and their 11pt", count(/font-size:11pt/g) === 14);
 
