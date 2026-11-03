@@ -181,7 +181,7 @@ const KB_BACKEND_BUILD_REQUIRED = "2026-11-02b";
 //
 // It moves with every change to this file. Same shape as the backend's: a
 // date, and a letter when there is more than one in a day.
-const KB_APP_BUILD = "2026-11-03j";
+const KB_APP_BUILD = "2026-11-03k";
 
 // Three answers, not two. A build string is a plain date, so comparing
 // them as text compares them as dates.
@@ -5798,6 +5798,11 @@ function TreatmentPlan({
     });
   const endTotal = endRows.reduce((t, x) => t + x.amt, 0);
   const endMissing = endRows.filter(x => !x.code).length;
+  // Everything downstream -- the prescription, and the bill -- works from
+  // these and only these. A procedure that was not endorsed cannot be
+  // claimed, so it must not reach either of them by accident.
+  const endApproved = endRows.filter(x => x.r.endApproved);
+  const endApprovedTotal = endApproved.reduce((t, x) => t + x.amt, 0);
 
   // A panel case is a direct endorsement: nothing is filled in on the Care
   // Plan and nothing belongs on the clinic's own plan or its estimate, which
@@ -6653,7 +6658,9 @@ function TreatmentPlan({
     onHolder: (v) => setPanelEdits(e => ({ ...e, panelCategory: v })),
     onSavePanel: savePanelDetails, panelSaving: panelSaving, panelSaved: panelSaved,
     rates: panelRates, ratesMsg: ratesMsg,
-    rows: endRows, total: endTotal, missing: endMissing, setCode: setCode,
+    rows: endRows, total: endTotal, missing: endMissing,
+    approvedCount: endApproved.length, approvedTotal: endApprovedTotal,
+    setCode: setCode,
     setRowField: setRowField, setProcedure: setProcedure,
     active: endActive, setActive: setEndActive,
     onTooth: endClickTooth, onAdd: addEndRow, onRemove: removeEndRow,
@@ -6676,7 +6683,8 @@ function TreatmentPlan({
 function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, card, holder,
                            onCard, onHolder, onSavePanel, panelSaving, panelSaved,
                            rates, ratesMsg,
-                           rows, total, missing, setCode, setRowField, setProcedure, active, setActive,
+                           rows, total, missing, approvedCount, approvedTotal,
+                           setCode, setRowField, setProcedure, active, setActive,
                            onTooth, onAdd, onRemove, onSave, saving, saved, onPreview, onPrint }) {
   const money = (n) => "₹" + Number(n || 0).toLocaleString("en-IN");
   const note = (text, tone) => React.createElement("div", { style:{
@@ -6782,12 +6790,13 @@ function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, card, hol
     React.createElement("div", { style:{ background:"#fff", border:`1px solid ${BORDER}`, borderRadius:8, overflow:"hidden" } },
       React.createElement("table", { style:{ width:"100%", borderCollapse:"collapse" } },
         React.createElement("thead", null, React.createElement("tr", { style:{ background:BGS } },
+          head("Endorsed", { align:"center" }),
           head("Code"), head("Treatment Advised"), head("Tooth Number"),
           head("Units", { align:"center" }), head("Rate", { align:"right" }),
           head("Amount", { align:"right" }), head(""))),
         React.createElement("tbody", null,
           rows.length === 0
-            ? React.createElement("tr", null, React.createElement("td", { colSpan:7, style:{
+            ? React.createElement("tr", null, React.createElement("td", { colSpan:8, style:{
                 padding:"18px 12px", textAlign:"center", color:"#444444", fontSize:13.5 } },
                 "Nothing on the endorsement yet. Add a treatment above, or tick procedures on Document 1 and they appear here."))
             : rows.map(x =>
@@ -6795,11 +6804,22 @@ function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, card, hol
                 key: x.at,
                 onClick: () => setActive(x.at),
                 style:{ borderTop:`1px solid ${BORDER}`, cursor:"pointer",
-                        background: active === x.at ? "#eaf4fb" : "transparent" } },
+                        background: active === x.at ? "#eaf4fb"
+                                  : x.r.endApproved ? "#f0fdf6" : "transparent" } },
                 // Typed, with the rate card as suggestions. A dropdown of an
                 // empty card is a dead end; a box with a datalist is the
                 // same convenience when the card is there and still works
                 // when it is not.
+                // Ticked when the Wellness Centre endorses that line. It is
+                // not on the printed sheet: that sheet IS the request, and a
+                // request that ticks its own answers is not one.
+                React.createElement("td", { style:{ ...cell, width:76, textAlign:"center" } },
+                  React.createElement("input", {
+                    type: "checkbox",
+                    checked: !!x.r.endApproved,
+                    onChange: e => setRowField(x.at, "endApproved", e.target.checked),
+                    title: "Tick when this line comes back endorsed",
+                    style:{ width:17, height:17, cursor:"pointer", accentColor:"#059669" } })),
                 React.createElement("td", { style:{ ...cell, width:132 } },
                   React.createElement("input", {
                     value: x.code,
@@ -6853,8 +6873,12 @@ function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, card, hol
                     style:{ border:"none", background:"none", color:"#b91c1c", cursor:"pointer",
                             fontSize:15, fontWeight:700, lineHeight:1 } }, "×"))))))),
 
-    rows.length ? React.createElement("div", { style:{ display:"flex", justifyContent:"flex-end", gap:14,
-      alignItems:"baseline", marginTop:10, fontSize:15 } },
+    rows.length ? React.createElement("div", { style:{ display:"flex", justifyContent:"flex-end",
+      gap:20, alignItems:"baseline", marginTop:10, fontSize:15, flexWrap:"wrap" } },
+      React.createElement("span", { style:{ color:"#444444" } },
+        approvedCount + " of " + rows.length + " endorsed"),
+      approvedCount ? React.createElement("span", { style:{ color:"#065f46", fontWeight:700 } },
+        "Endorsed: " + money(approvedTotal)) : null,
       React.createElement("span", { style:{ color:"#444444" } }, "Total" + (panel ? " as per " + panel + " rates" : "")),
       React.createElement("span", { style:{ fontWeight:700, fontSize:17 } }, money(total))) : null,
 
