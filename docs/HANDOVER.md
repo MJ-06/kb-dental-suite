@@ -1,5 +1,17 @@
 # Handover for the next tool (31 Oct 2026)
 
+## Launch, transfer and tier planning — 3 November2026
+
+Read `LAUNCH-REVIEW-AND-TIERS.md` for the prioritized review list, three distinct
+data-transfer paths, open launch gates and proposed organization subscription model.
+`NEXT-CHAT-HANDOVER.md` is a copyable agent handover prompt. HANDOVER is a document,
+not an executable backup/import script. Earlier migration plans predate the current
+organization architecture and must not be treated as certified cutover instructions.
+Tier names, prices/allowances and add-ons remain proposals; entitlements/billing are
+not implemented. Enforce future tiers on the server as well as tabs, independently
+of staff permissions and clinic grants. No live transfer or production launch was
+performed as part of this planning update.
+
 ## Clinical review fixes and API/data guide — 3 November2026
 
 Read `SCREEN-API-DATA-GUIDE.md` for screen actions, PostgreSQL tables, file storage,
