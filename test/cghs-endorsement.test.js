@@ -54,6 +54,12 @@ const VIEW = html.slice(A, B);
       return React.createElement("button", { onClick, aria-label: "save" }, saved ? "Saved" : "Save");
     }
   `.replace('aria-label: "save"', '"aria-label": "save"') });
+  // The tooth grid is the app's own, not a stand-in: the complaint was
+  // that it was missing, so the real one has to be on this screen.
+  await page.addScriptTag({ content:
+    html.slice(html.indexOf('const UPPER_T = ['), html.indexOf('\n', html.indexOf('const LOWER_T = ['))) });
+  await page.addScriptTag({ content:
+    html.slice(html.indexOf('function ToothChart({'), html.indexOf('function ClinicHeader()')) });
   await page.addScriptTag({ content: VIEW });
 
   // The real matching lives in the component that owns the plan, so it is
@@ -97,94 +103,170 @@ const VIEW = html.slice(A, B);
      m.clearedByHand, '');
 
   // ── the screen ────────────────────────────────────────────────────────
+  // What was reported: "in endorsement selection why is the tooth grid gone
+  // from where i will select the tooth number, where is the print tab, I
+  // feel the system is incomplete and practically non-workable."
+  //
+  // Both came from one decision: the screen refused to draw at all unless
+  // the patient's registration carried a panel, and a patient registered
+  // before those fields existed carries none. That left a single line of
+  // text — no table, no teeth, no Print. So the case that matters most
+  // here is the patient with NO panel on record.
   const mount = (props) => page.evaluate((p) => {
-    window.__set = [];
+    window.__set = []; window.__field = []; window.__tooth = []; window.__panel = [];
     const e = React.createElement;
     const root = window.__root || (window.__root = ReactDOM.createRoot(document.getElementById('root')));
-    root.render(e(EndorsementView, Object.assign({
-      setCode: (at, code) => window.__set.push([at, code]),
-      onSave(){}, onPreview(){}, onPrint(){}, saving: false, saved: false
-    }, p)));
+    // A fresh key each time: rendering the same component into the same
+    // root keeps its state, so without this every later case would still be
+    // holding the rows of the one before it.
+    window.__n = (window.__n || 0) + 1;
+    root.render(e(window.Harness, Object.assign({ key: window.__n }, p)));
   }, props);
+
+  // A harness that holds the row state, so an edit can be seen to land.
+  await page.addScriptTag({ content: `
+    window.Harness = function (props) {
+      const [rows, setRows] = React.useState(props.rows);
+      const [active, setActive] = React.useState(null);
+      const edit = (at, f, v) => setRows(rs => rs.map(x => x.at === at ? { ...x, r: { ...x.r, [f]: v } } : x));
+      return React.createElement(EndorsementView, Object.assign({}, props, {
+        rows: rows, active: active, setActive: setActive,
+        setCode: (at, code) => window.__set.push([at, code]),
+        onPanel: (p) => window.__panel.push(p),
+        setRowField: (at, f, v) => { window.__field.push([at, f, v]); edit(at, f, v); },
+        onTooth: (t) => {
+          window.__tooth.push(t);
+          setRows(rs => rs.map(x => {
+            if (x.at !== active) return x;
+            const have = String(x.r.tooth || "").split(",").map(s => s.trim()).filter(Boolean);
+            const w = String(t);
+            const next = have.indexOf(w) >= 0 ? have.filter(s => s !== w) : have.concat(w);
+            return { ...x, r: { ...x.r, tooth: next.join(", ") } };
+          }));
+        },
+        onSave(){}, onPreview(){}, onPrint(){}, saving: false, saved: false }));
+    };
+  ` });
 
   const RATES = [
     { code: 'DP030', procedure: 'RCT Single Rooted', rate: '1000' },
     { code: 'DP035', procedure: 'Crown - Metal', rate: '800' }
   ];
-
-  // A patient with no panel has nothing to endorse, and saying so is the
-  // whole job of that state: an empty table would read as broken.
-  await mount({ pat: { name: 'Asha Rao', uhid: 'KB1' }, panel: '', rates: [], ratesMsg: '',
-                rows: [], total: 0, missing: 0 });
-  const noPanel = await page.textContent('#root');
-  ok('a patient with no panel is told why there is nothing here',
-     /not recorded against a panel/.test(noPanel), noPanel.slice(0, 90));
-  ok('and is told where the panel is set', /registration/.test(noPanel));
-
-  // Nothing ticked on Document 1.
-  await mount({ pat: { name: 'Asha Rao', uhid: 'KB1', 'Card ID': 'C-77', 'Panel Category': 'Pensioner' },
-                panel: 'CGHS', rates: RATES, ratesMsg: '', rows: [], total: 0, missing: 0 });
-  ok('an empty plan says to tick the procedures first',
-     /Tick the procedures on the treatment plan/.test(await page.textContent('#root')));
-
-  // The real thing: two priced rows and one with no code yet.
-  const rows = [
+  const PAT = { name: 'Asha Rao', uhid: 'KB1', 'Card ID': 'C-77', 'Panel Category': 'Pensioner' };
+  const mkRows = () => ([
     { at: 0, r: { tooth: '16', procedure: 'RCT Single Rooted', qty: 1 }, code: 'DP030',
       card: RATES[0], rate: 1000, qty: 1, amt: 1000 },
-    { at: 1, r: { tooth: '26', procedure: 'Crown - Metal', qty: 2 }, code: 'DP035',
-      card: RATES[1], rate: 800, qty: 2, amt: 1600 },
-    { at: 2, r: { tooth: '36', procedure: 'Something the card does not list', qty: 1 }, code: '',
-      card: null, rate: 0, qty: 1, amt: 0 }
-  ];
-  await mount({ pat: { name: 'Asha Rao', uhid: 'KB1', 'Card ID': 'C-77', 'Panel Category': 'Pensioner' },
-                panel: 'CGHS', rates: RATES, ratesMsg: '', rows, total: 2600, missing: 1 });
+    { at: 1, r: { tooth: '', procedure: 'Crown - Metal', qty: 2 }, code: 'DP035',
+      card: RATES[1], rate: 800, qty: 2, amt: 1600 }
+  ]);
 
+  // ── the patient with no panel on record ───────────────────────────────
+  await mount({ pat: PAT, panel: '', recordedPanel: '', panels: ['CGHS', 'DGEHS'],
+                rates: [], ratesMsg: '', rows: mkRows(), total: 2600, missing: 0 });
+  const noPanel = await page.textContent('#root');
+  eq('a patient with no panel still gets the sheet, not a dead end',
+     (await page.$$('tbody tr')).length, 2);
+  eq('the tooth grid is there even then', (await page.$$('button[title^="#"]')).length, 32);
+  eq('and Print is there and usable',
+     await page.$$eval('button', b => b.filter(x => /Print Endorsement/.test(x.textContent)).map(x => x.disabled)),
+     [false]);
+  ok('it says the panel is missing and can be chosen here',
+     /no panel on their registration/.test(noPanel), noPanel.slice(0, 200));
+
+  // The picker must offer the panels master, so the fix is on this screen.
+  eq('the panel picker offers every panel the clinic has',
+     await page.$eval('#root select', s => Array.from(s.options).map(o => o.value)), ['', 'CGHS', 'DGEHS']);
+  await page.selectOption('#root select', 'CGHS');
+  eq('choosing one is handed up', await page.evaluate(() => window.__panel), ['CGHS']);
+
+  // A panel recorded on the patient but missing from the master must still
+  // be offered, or it would vanish from its own sheet.
+  await mount({ pat: PAT, panel: 'BSES', recordedPanel: 'BSES', panels: ['CGHS'],
+                rates: [], ratesMsg: '', rows: mkRows(), total: 0, missing: 0 });
+  eq('a panel not in the master is still offered',
+     await page.$eval('#root select', s => Array.from(s.options).map(o => o.value)), ['', 'BSES', 'CGHS']);
+  eq('and is the one selected', await page.$eval('#root select', s => s.value), 'BSES');
+
+  // ── the working screen ────────────────────────────────────────────────
+  await mount({ pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
+                rates: RATES, ratesMsg: '', rows: mkRows(), total: 2600, missing: 0 });
   const text = await page.textContent('#root');
   ok('the card details the Wellness Centre checks are on screen',
-     /C-77/.test(text) && /Pensioner/.test(text), text.slice(0, 160));
-  ok('it says the rates are the panel\'s, not the clinic\'s',
-     /not the clinic's own fees/.test(text));
-  ok('a row with no code is called out rather than printing quietly',
-     /1 of 3 procedure\(s\) have no CGHS code/.test(text), text.slice(0, 400));
-  const amounts = await page.$$eval('tbody tr td:last-child', t => t.map(x => x.textContent));
+     /C-77/.test(text) && /Pensioner/.test(text), text.slice(0, 200));
+  ok("it says the rates are the panel's, not the clinic's", /not the clinic's own fees/.test(text));
+  eq('the columns are in the printed order, with the amount alongside',
+     await page.$$eval('thead th', t => t.map(x => x.textContent)),
+     ['Code', 'Treatment Advised', 'Tooth Number', 'Units', 'Amount']);
   eq('each row is priced at the panel rate times its quantity',
-     amounts, ['₹1,000', '₹1,600', 'no rate']);
-  ok('and the total is the panel total', /₹2,600/.test(text), text.slice(-200));
+     await page.$$eval('tbody tr td:last-child', t => t.map(x => x.textContent)),
+     ['₹1,000', '₹1,600']);
 
-  // The picker must show the code the row actually holds.
-  const selected = await page.$$eval('tbody tr select', s => s.map(x => x.value));
-  eq('every picker shows the row\'s own code', selected, ['DP030', 'DP035', '']);
-  const firstOpts = await page.$$eval('tbody tr:nth-child(1) select option', o => o.map(x => x.value));
-  eq('the picker offers the blank and the whole card', firstOpts, ['', 'DP030', 'DP035']);
+  // ── the tooth grid ────────────────────────────────────────────────────
+  ok('the grid starts by saying it needs a row',
+     /Pick a row above, then click its teeth/.test(await page.textContent('#root')));
+  // The grid is shared with Document 1, where clicking fills the next empty
+  // row. Here it toggles teeth on one chosen row, so it must not keep
+  // promising the other thing.
+  ok('and the grid does not repeat Document 1\'s promise',
+     !/fill next empty row/.test(await page.textContent('#root')),
+     await page.textContent('#root'));
+  // Clicking a tooth with no row chosen must do nothing rather than guess:
+  // a tooth on the wrong line of a claim is worse than one not yet set.
+  await page.click('button[title="#26"]');
+  eq('a tooth clicked with no row chosen is ignored',
+     await page.evaluate(() => window.__tooth), []);
 
-  // A code that is no longer on the saved card must still show as itself,
-  // not silently fall back to whatever option happens to come first.
-  await mount({ pat: { name: 'Asha Rao', uhid: 'KB1' }, panel: 'CGHS', rates: RATES, ratesMsg: '',
+  await page.click('tbody tr:nth-child(2) td:nth-child(2)');
+  ok('choosing a row says which procedure the teeth are for',
+     /Teeth for Crown - Metal/.test(await page.textContent('#root')));
+  ok('and says what clicking a tooth will do',
+     /click it again to take it off/.test(await page.textContent('#root')));
+  await page.click('button[title="#26"]');
+  await page.click('button[title="#16"]');
+  eq('clicking teeth puts them on that row',
+     await page.$eval('tbody tr:nth-child(2) input', i => i.value), '26, 16');
+  await page.click('button[title="#26"]');
+  eq('and clicking one again takes it off',
+     await page.$eval('tbody tr:nth-child(2) input', i => i.value), '16');
+  eq("the first row's tooth was never touched",
+     await page.$eval('tbody tr:nth-child(1) input', i => i.value), '16');
+
+  // ── typing instead of clicking ────────────────────────────────────────
+  await page.fill('tbody tr:nth-child(1) input', '16, 26');
+  eq('a tooth can be typed as well as clicked',
+     (await page.evaluate(() => window.__field)).slice(-1), [[0, 'tooth', '16, 26']]);
+  await page.fill('tbody tr:nth-child(1) td:nth-child(4) input', '3');
+  eq('and the number of units is editable here',
+     (await page.evaluate(() => window.__field)).slice(-1), [[0, 'qty', '3']]);
+  await page.fill('tbody tr:nth-child(1) td:nth-child(4) input', '2x');
+  eq('units take digits only',
+     await page.$eval('tbody tr:nth-child(1) td:nth-child(4) input', i => i.value), '2');
+
+  // ── nothing ticked on Document 1 ──────────────────────────────────────
+  await mount({ pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
+                rates: RATES, ratesMsg: '', rows: [], total: 0, missing: 0 });
+  ok('an empty plan says to tick the procedures first',
+     /Tick the procedures on the treatment plan/.test(await page.textContent('#root')));
+  eq('and Print is off, because there would be nothing on the sheet',
+     await page.$$eval('button', b => b.filter(x => /Print|Preview/.test(x.textContent)).map(x => x.disabled)),
+     [true, true]);
+
+  // ── a code that is no longer on the saved card ────────────────────────
+  await mount({ pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'], rates: RATES, ratesMsg: '',
     rows: [{ at: 0, r: { tooth: '16', procedure: 'Old procedure', qty: 1 }, code: 'DP999',
              card: null, rate: 0, qty: 1, amt: 0 }], total: 0, missing: 0 });
   eq('a code no longer on the card still shows as itself',
      await page.$eval('tbody tr select', s => s.value), 'DP999');
 
-  // Choosing a code reaches the plan, addressed by position.
-  await mount({ pat: { name: 'Asha Rao', uhid: 'KB1' }, panel: 'CGHS', rates: RATES, ratesMsg: '',
-                rows, total: 2600, missing: 1 });
-  await page.selectOption('tbody tr:nth-child(3) select', 'DP035');
-  eq('choosing a code hands the plan the row position and the code',
-     await page.evaluate(() => window.__set), [[2, 'DP035']]);
-
-  // Printing an endorsement with no procedures on it is not useful.
-  await mount({ pat: { name: 'Asha Rao', uhid: 'KB1' }, panel: 'CGHS', rates: RATES, ratesMsg: '',
-                rows: [], total: 0, missing: 0 });
-  const offWhenEmpty = await page.$$eval('button', b => b.filter(x => /Print|Preview/.test(x.textContent)).map(x => x.disabled));
-  eq('Print and Preview are off while there is nothing to endorse', offWhenEmpty, [true, true]);
-
-  // A rate card that could not be read must say so: a sheet where every
-  // rate is blank is worse than no sheet.
-  await mount({ pat: { name: 'Asha Rao', uhid: 'KB1' }, panel: 'CGHS', rates: [],
+  // ── a rate card that could not be read ────────────────────────────────
+  await mount({ pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'], rates: [],
                 ratesMsg: 'The CGHS rate card could not be read, so no codes or rates can be filled in. Try reloading the patient.',
-                rows: [], total: 0, missing: 0 });
+                rows: mkRows(), total: 0, missing: 0 });
   ok('a rate card that failed to load is reported',
      /could not be read/.test(await page.textContent('#root')));
+  eq('but the sheet can still be printed',
+     await page.$$eval('button', b => b.filter(x => /Print Endorsement/.test(x.textContent)).map(x => x.disabled)),
+     [false]);
 
   // ── the printed sheet ─────────────────────────────────────────────────
   // "The column sequence required for print should be: Code, Treatment
