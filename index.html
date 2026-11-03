@@ -174,7 +174,7 @@ const KB_BACKEND_BUILD_REQUIRED = "2026-11-02b";
 //
 // It moves with every change to this file. Same shape as the backend's: a
 // date, and a letter when there is more than one in a day.
-const KB_APP_BUILD = "2026-11-03a";
+const KB_APP_BUILD = "2026-11-03b";
 
 // Three answers, not two. A build string is a plain date, so comparing
 // them as text compares them as dates.
@@ -26660,35 +26660,72 @@ function WorkingDaysEditor({ weekOff, holidays, onSave }) {
 
 // Name + Default Dosage/Frequency list editor (Medicines master, used by the
 // Prescription form's searchable medicine dropdown to autofill dosage/frequency).
-function MedicineListEditor({ items, onAdd, onRemove }) {
+function MedicineListEditor({ items, onAdd, onRemove, onEdit }) {
   const [name, setName] = React.useState("");
   const [dosage, setDosage] = React.useState("");
   const [frequency, setFrequency] = React.useState("");
   const [search, setSearch] = React.useState("");
+  // Until now a medicine could only be removed and typed again: a dosage
+  // saved as "500 mg" instead of "500mg" meant deleting the row and re-adding
+  // it, which is why this screen now edits in place like the other masters.
+  const [editAt, setEditAt] = React.useState(null);
+  const [draft, setDraft] = React.useState({ name:"", dosage:"", frequency:"" });
+  // A sheet cell can arrive as a number — a dosage of 500 would — and .trim()
+  // on a number throws inside the click handler, leaving Save doing nothing.
+  const txt = (v) => (v === undefined || v === null) ? "" : String(v);
   const add = () => { const v = name.trim(); if (!v) return; onAdd({ name:v, dosage, frequency }); setName(""); setDosage(""); setFrequency(""); };
-  const visibleIdx = items.map((it,i)=>i).filter(i => !search.trim() || items[i].name.toLowerCase().includes(search.trim().toLowerCase()));
-  return React.createElement("div", null,
-    React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1.5fr 1fr 1fr auto", gap:8, marginBottom:10 } },
-      React.createElement("input", { style:inp, value:name, placeholder:"Medicine name", onChange:e=>setName(e.target.value), onKeyDown:e=>e.key==="Enter"&&add() }),
-      React.createElement("input", { style:inp, value:dosage, placeholder:"Default dosage (e.g. 500mg)", onChange:e=>setDosage(e.target.value), onKeyDown:e=>e.key==="Enter"&&add() }),
-      React.createElement("input", { style:inp, value:frequency, placeholder:"Default frequency (e.g. 1-0-1)", onChange:e=>setFrequency(e.target.value), onKeyDown:e=>e.key==="Enter"&&add() }),
-      React.createElement("button", { onClick:add, style:{ padding:"0 18px", fontSize:13, border:"none", borderRadius:7, cursor:"pointer", background:T, color:"#fff", fontWeight:700 } }, "+ Add")
+  const startEdit = (i, it) => { setEditAt(i); setDraft({ name:txt(it.name), dosage:txt(it.dosage), frequency:txt(it.frequency) }); };
+  const saveEdit = (i) => {
+    const v = txt(draft.name).trim();
+    if (!v) return;
+    onEdit(i, { name:v, dosage:txt(draft.dosage).trim(), frequency:txt(draft.frequency).trim() });
+    setEditAt(null);
+  };
+  const btn = (bg, col, bd) => ({ padding:"5px 12px", fontSize:12.5, fontFamily:"inherit",
+    cursor:"pointer", borderRadius:6, background:bg, color:col, border:bd, fontWeight:700 });
+  const visibleIdx = items.map((it,i)=>i).filter(i => !search.trim() || txt(items[i].name).toLowerCase().includes(search.trim().toLowerCase()));
+  return React.createElement("div", { style:{ maxWidth:MASTER_LIST_WIDTH } },
+    React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr auto", gap:10, marginBottom:10 } },
+      React.createElement("input", { style:{ ...inp, gridColumn:"1 / -1" }, value:name, placeholder:"Medicine name", onChange:e=>setName(e.target.value), onKeyDown:e=>e.key==="Enter"&&add() }),
+      React.createElement("input", { style:inp, value:dosage, placeholder:"Dosage (e.g. 500mg)", onChange:e=>setDosage(e.target.value), onKeyDown:e=>e.key==="Enter"&&add() }),
+      React.createElement("input", { style:inp, value:frequency, placeholder:"Frequency (e.g. 1-0-1)", onChange:e=>setFrequency(e.target.value), onKeyDown:e=>e.key==="Enter"&&add() }),
+      React.createElement("button", { onClick:add, style:{ padding:"0 22px", fontSize:13, border:"none", borderRadius:7, cursor:"pointer", background:T, color:"#fff", fontWeight:700 } }, "Add")
     ),
-    React.createElement("input", { style:{...inp, marginBottom:14, width:280}, value:search, placeholder:"🔍 Search medicine name...", onChange:e=>setSearch(e.target.value) }),
+    React.createElement("input", { style:{...inp, marginBottom:14, width:"100%", boxSizing:"border-box"}, value:search, placeholder:"\u{1F50D} Search medicine name...", onChange:e=>setSearch(e.target.value) }),
     visibleIdx.length===0
       ? React.createElement("div", { style:{ background:BGS, borderRadius:8, padding:24, textAlign:"center", color:"#5a5a5a", fontSize:14, border:`1px dashed ${BORDER}` } }, items.length===0 ? "No medicines yet." : "No medicines match this search.")
       : React.createElement("div", { style:{ background:"#fff", border:`1px solid ${BORDER}`, borderRadius:8, overflow:"hidden" } },
           React.createElement("table", { style:{ width:"100%", borderCollapse:"collapse", fontSize:13.5 } },
             React.createElement("thead", null, React.createElement("tr", { style:{ background:BGS } },
-              ["Medicine","Default Dosage","Default Frequency",""].map(h=>React.createElement("th", { key:h, style:{ textAlign:"left", padding:"8px 12px" } }, h))
+              ["Medicine","Dosage","Frequency",""].map(h=>React.createElement("th", { key:h, style:{ textAlign:"left", padding:"8px 12px" } }, h))
             )),
-            React.createElement("tbody", null, visibleIdx.map(i => { const it = items[i]; return React.createElement("tr", { key:i, style:{ borderTop:`1px solid ${BORDER}` } },
-              React.createElement("td", { style:{ padding:"7px 12px", fontWeight:600 } }, it.name),
-              React.createElement("td", { style:{ padding:"7px 12px" } }, it.dosage||"—"),
-              React.createElement("td", { style:{ padding:"7px 12px" } }, it.frequency||"—"),
-              React.createElement("td", { style:{ textAlign:"center" } },
-                React.createElement("button", { onClick:()=>onRemove(i), style:{ border:"none", background:"none", color:"#e24b4a", cursor:"pointer", fontSize:12.5, fontWeight:700 } }, "Remove"))
-            ); }))
+            React.createElement("tbody", null, visibleIdx.map(i => { const it = items[i]; return editAt===i
+              ? React.createElement("tr", { key:i, style:{ borderTop:`1px solid ${BORDER}`, background:"#f5f9ff" } },
+                  React.createElement("td", { style:{ padding:"7px 12px" }, colSpan:3 },
+                    React.createElement("input", { style:{...inp, fontSize:13, width:"100%", boxSizing:"border-box", marginBottom:6}, value:txt(draft.name), autoFocus:true,
+                      placeholder:"Medicine name",
+                      onChange:e=>setDraft({ ...draft, name:e.target.value }) }),
+                    React.createElement("div", { style:{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:6 } },
+                      React.createElement("input", { style:{...inp, fontSize:13, width:"100%", boxSizing:"border-box"}, value:txt(draft.dosage),
+                        placeholder:"Dosage", onChange:e=>setDraft({ ...draft, dosage:e.target.value }) }),
+                      React.createElement("input", { style:{...inp, fontSize:13, width:"100%", boxSizing:"border-box"}, value:txt(draft.frequency),
+                        placeholder:"Frequency", onChange:e=>setDraft({ ...draft, frequency:e.target.value }) }))),
+                  React.createElement("td", { style:{ textAlign:"center", whiteSpace:"nowrap", padding:"7px 12px", verticalAlign:"top" } },
+                    React.createElement("button", { onClick:()=>saveEdit(i), disabled:!txt(draft.name).trim(),
+                      style:{ ...btn(txt(draft.name).trim()?"#059669":"#9ca3af", "#fff", "none"), marginBottom:6, display:"block", width:"100%" } }, "Save"),
+                    React.createElement("button", { onClick:()=>setEditAt(null),
+                      style:{ ...btn("transparent", "#2e2e2e", `1px solid ${BORDER}`), display:"block", width:"100%" } }, "Cancel")))
+              : React.createElement("tr", { key:i, style:{ borderTop:`1px solid ${BORDER}` } },
+                  React.createElement("td", { style:{ padding:"7px 12px", fontWeight:600 } }, txt(it.name)),
+                  React.createElement("td", { style:{ padding:"7px 12px" } }, txt(it.dosage) || "—"),
+                  React.createElement("td", { style:{ padding:"7px 12px" } }, txt(it.frequency) || "—"),
+                  React.createElement("td", { style:{ textAlign:"center", whiteSpace:"nowrap", padding:"7px 12px" } },
+                    React.createElement("button", { onClick:()=>startEdit(i, it),
+                      style:{ ...btn("#fff", "#0f6fc5", "1px solid #0f6fc5"), marginRight:6 } }, "Edit"),
+                    React.createElement("button", {
+                      onClick:()=>{ if (window.confirm("Remove " + (txt(it.name) || "this medicine") + "?")) onRemove(i); },
+                      style:btn("#fff", "#b91c1c", "1px solid #e5b4b4") }, "Remove")));
+            }))
           )
         )
   );
@@ -28474,7 +28511,8 @@ function Master() {
     medicines: () => React.createElement(MedicineListEditor, {
       items:medicines,
       onAdd:(item)=>saveMedicines([...medicines, item]),
-      onRemove:(i)=>saveMedicines(medicines.filter((_,idx)=>idx!==i))
+      onRemove:(i)=>saveMedicines(medicines.filter((_,idx)=>idx!==i)),
+      onEdit:(i,v)=>saveMedicines(medicines.map((x,idx)=>idx===i?v:x))
     }),
     medDosages: () => React.createElement(SimpleListEditor, {
       items:medDosages, placeholder:"New dosage (e.g. 500mg)...",
