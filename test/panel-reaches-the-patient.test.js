@@ -81,8 +81,12 @@ ok('which is what lets a re-save keep them',
 // ── 4. the endorsement reads it ─────────────────────────────────────────
 ok('the endorsement reads the panel getPatient now returns',
    /const panelOf = \(p\) => String\(\(p && \(p\.panel \|\| p\.Panel\)\) \|\| ""\)\.trim\(\);/.test(html));
+// The card ID is a box on the endorsement now, not a line of text: it is
+// typed there when the register has none, and saved back onto the patient.
 ok('the screen reads the card ID getPatient now returns',
-   /"Card ID: " \+ \(pat\.cardId \|\| pat\["Card ID"\]/.test(html));
+   /const panelCard = String\(\(panelPat && \(panelPat\.cardId \|\| panelPat\["Card ID"\]\)\) \|\| ""\);/.test(html));
+ok('and writes it back to the registration',
+   /api\("saveRegistration", \{[\s\S]{0,160}?cardId: panelCard/.test(html));
 // The sheet prints from the topped-up patient, so that an older backend --
 // one that does not return the panel from getPatient yet -- still produces a
 // correct sheet from what the register holds.

@@ -57,7 +57,12 @@ ok('and it reaches the sheet without Document 1',
 ok('the code is typed, with the rate card as suggestions',
    /list: "kb-panel-codes"/.test(html) && /React\.createElement\("datalist", \{ id:"kb-panel-codes" \}/.test(html));
 ok('the treatment is typed when no card names it',
-   /onChange: e => setRowField\(x\.at, "procedure", e\.target\.value\)/.test(html));
+   /onChange: e => setProcedure\(x\.at, e\.target\.value\)/.test(html));
+// And either box fills the other: a code on the card names the treatment, a
+// treatment the card names once finds its code.
+ok('the two boxes fill each other in',
+   /procedure: card \? String\(card\.procedure \|\| ""\) : r\.procedure/.test(html) &&
+   /const found = autoCode\(name\);/.test(html));
 ok('the rate is typed when no card carries it',
    /onChange: e => setRowField\(x\.at, "cghsRate", e\.target\.value\.replace\(\/\[\^0-9\.\]\/g, ""\)\)/.test(html));
 ok('a typed rate prices the line just like a looked-up one',

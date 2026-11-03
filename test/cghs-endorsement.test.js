@@ -33,8 +33,11 @@ ok('the chosen code is carried on the plan row, so it is saved with the plan',
    /i !== at \? r : \{\s*\.\.\.r, cghsCode: code,/.test(html));
 // A line started on the endorsement has no name until a code is picked, so
 // picking one names it -- otherwise it would print as a blank treatment.
-ok('picking a code names a line that has no name yet',
-   /procedure: String\(r\.procedure \|\| ""\)\.trim\(\) \|\| \(card \? String\(card\.procedure \|\| ""\) : ""\)/.test(html));
+ok('picking a code on the card names the line',
+   /procedure: card \? String\(card\.procedure \|\| ""\) : r\.procedure/.test(html));
+ok('and typing a treatment the card names once finds its code',
+   /const found = autoCode\(name\);/.test(html) &&
+   /found \? \{ \.\.\.r, procedure: name, cghsCode: found \} : \{ \.\.\.r, procedure: name \}/.test(html));
 ok('a line can be started on the endorsement itself',
    /selected: true, endAdded: true/.test(html));
 ok('and such a line reaches the sheet without Document 1',
@@ -126,6 +129,7 @@ const VIEW = html.slice(A, B);
   const mountNow = (props) => page.evaluate((p) => {
     window.__set = []; window.__field = []; window.__tooth = []; window.__panel = [];
     window.__added = 0; window.__removed = [];
+    window.__card = []; window.__holder = []; window.__savedPanel = 0; window.__proc = [];
     const e = React.createElement;
     const root = window.__root || (window.__root = ReactDOM.createRoot(document.getElementById('root')));
     // A fresh key each time: rendering the same component into the same
@@ -156,6 +160,11 @@ const VIEW = html.slice(A, B);
             return { ...x, r: { ...x.r, tooth: next.join(", ") } };
           }));
         },
+        onCard: (v) => window.__card.push(v),
+        onHolder: (v) => window.__holder.push(v),
+        onSavePanel: () => { window.__savedPanel++; },
+        setProcedure: (at, v) => { window.__proc.push([at, v]);
+          setRows(rs => rs.map(x => x.at === at ? { ...x, r: { ...x.r, procedure: v } } : x)); },
         onAdd: () => { window.__added++; },
         onRemove: (at) => { window.__removed.push(at); },
         onSave(){}, onPreview(){}, onPrint(){}, saving: false, saved: false }));
@@ -166,7 +175,10 @@ const VIEW = html.slice(A, B);
     { code: 'DP030', procedure: 'RCT Single Rooted', rate: '1000' },
     { code: 'DP035', procedure: 'Crown - Metal', rate: '800' }
   ];
-  const PAT = { name: 'Asha Rao', uhid: 'KB1', 'Card ID': 'C-77', 'Panel Category': 'Pensioner' };
+  const PAT = { name: 'Asha Rao', uhid: 'KB1', cardId: 'C-77', panelCategory: 'Pensioner' };
+  // The card details now come in as their own props, because they are typed
+  // on this screen rather than only read from the record.
+  const CARD = { card: 'C-77', holder: 'Pensioner', panelSaving: false, panelSaved: false };
   const mkRows = () => ([
     { at: 0, r: { tooth: '16', procedure: 'RCT Single Rooted', qty: 1 }, code: 'DP030',
       card: RATES[0], rate: 1000, qty: 1, priced: true, amt: 1000 },
@@ -175,7 +187,7 @@ const VIEW = html.slice(A, B);
   ]);
 
   // ── the patient with no panel on record ───────────────────────────────
-  await mount({ pat: PAT, panel: '', recordedPanel: '', panels: ['CGHS', 'DGEHS'],
+  await mount({ ...CARD, pat: PAT, panel: '', recordedPanel: '', panels: ['CGHS', 'DGEHS'],
                 rates: [], ratesMsg: '', rows: mkRows(), total: 2600, missing: 0 });
   const noPanel = await page.textContent('#root');
   eq('a patient with no panel still gets the sheet, not a dead end',
@@ -195,30 +207,41 @@ const VIEW = html.slice(A, B);
 
   // A panel recorded on the patient but missing from the master must still
   // be offered, or it would vanish from its own sheet.
-  await mount({ pat: PAT, panel: 'BSES', recordedPanel: 'BSES', panels: ['CGHS'],
+  await mount({ ...CARD, pat: PAT, panel: 'BSES', recordedPanel: 'BSES', panels: ['CGHS'],
                 rates: [], ratesMsg: '', rows: mkRows(), total: 0, missing: 0 });
   eq('a panel not in the master is still offered',
      await page.$eval('#root select', s => Array.from(s.options).map(o => o.value)), ['', 'BSES', 'CGHS']);
   eq('and is the one selected', await page.$eval('#root select', s => s.value), 'BSES');
 
   // ── the working screen ────────────────────────────────────────────────
-  await mount({ pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
+  await mount({ ...CARD, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
                 rates: RATES, ratesMsg: '', rows: mkRows(), total: 2600, missing: 0 });
   const text = await page.textContent('#root');
-  ok('the card details the Wellness Centre checks are on screen',
-     /C-77/.test(text) && /Pensioner/.test(text), text.slice(0, 200));
+  eq('the card details are boxes you can type into, not a line of text',
+     await page.$$eval('#root > div > div:first-child input, #root > div > div:first-child select',
+       f => f.map(x => [x.tagName.toLowerCase(), x.value])),
+     [['select', 'CGHS'], ['select', 'Pensioner'], ['input', 'C-77']]);
+  // The point of typing them here is that they stay: a card entered at the
+  // chair and lost at the next refresh is worse than one never entered.
+  await page.fill('#root > div > div:first-child input', 'C-99');
+  eq('a card ID typed here is handed up', (await page.evaluate(() => window.__card)).slice(-1), ['C-99']);
+  await page.selectOption('#root > div > div:first-child select >> nth=1', 'Serving');
+  eq('and so is the card holder', await page.evaluate(() => window.__holder), ['Serving']);
+  await page.click('text=Save to patient');
+  eq('and they are saved onto the patient', await page.evaluate(() => window.__savedPanel), 1);
   eq('the columns are in the printed order, with the rate and amount alongside',
      await page.$$eval('thead th', t => t.map(x => x.textContent)),
      ['Code', 'Treatment Advised', 'Tooth Number', 'Units', 'Rate', 'Amount', '']);
   eq('each row is priced at the panel rate times its quantity',
      await page.$$eval('tbody tr td:nth-child(6)', t => t.map(x => x.textContent)),
      ['₹1,000', '₹1,600']);
-  // A code on the card fills the treatment and the rate in and holds them:
-  // the card is the claim, and a rate edited over it would be a wrong one.
-  eq('a code on the card fills the treatment and rate, and holds them',
+  // The RATE is held: the card is the claim and a rate edited over it would
+  // be a wrong one. The treatment is not, because typing it is one of the
+  // two ways round a line gets filled in.
+  eq('a code on the card fills the treatment and rate, and holds the rate',
      await page.$$eval('tbody tr:nth-child(1) input', i =>
        i.map(x => [x.value, x.readOnly])),
-     [['DP030', false], ['RCT Single Rooted', true], ['16', false], ['1', false], ['1000', true]]);
+     [['DP030', false], ['RCT Single Rooted', false], ['16', false], ['1', false], ['1000', true]]);
   // Nothing shouts at you once the screen is in order: a notice that is
   // always there stops being read.
   ok('with a panel, a rate card and every code picked, there is no notice at all',
@@ -226,9 +249,45 @@ const VIEW = html.slice(A, B);
        await page.$$eval('#root > div', d => d.map(x => x.textContent).slice(1, 2).join(''))),
      text.slice(0, 200));
 
+  // ── the two boxes fill each other in ──────────────────────────────────
+  // "Is it possible to enter the treatment and accordingly the code comes —
+  //  I mean either ways it should work."
+  await mount({ ...CARD, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
+                rates: RATES, ratesMsg: '', rows: mkRows(), total: 2600, missing: 0 });
+  eq('the treatment box suggests every treatment on the card',
+     await page.$$eval('datalist#kb-panel-treatments option', o => o.map(x => x.value)),
+     ['RCT Single Rooted', 'Crown - Metal']);
+  await page.fill('tbody tr:nth-child(1) td:nth-child(2) input', 'Crown - Metal');
+  eq('typing a treatment reaches the plan, which finds its code',
+     (await page.evaluate(() => window.__proc)).slice(-1), [[0, 'Crown - Metal']]);
+  ok('the treatment box is never locked, so either box can be the first one',
+     await page.$eval('tbody tr:nth-child(1) td:nth-child(2) input', i => i.readOnly) === false);
+  // The source that does the matching, run directly: a name the card carries
+  // once finds its code, a name it carries twice is left alone.
+  const two = await page.evaluate(() => {
+    const { autoCode } = window.__match([
+      { code: 'DP030', procedure: 'RCT Single Rooted', rate: '1000' },
+      { code: 'DP040', procedure: 'Scaling', rate: '300' },
+      { code: 'DP041', procedure: 'Scaling', rate: '400' }
+    ]);
+    return [autoCode('RCT Single Rooted'), autoCode('Scaling')];
+  });
+  eq('a treatment the card names once finds its code; one it names twice does not',
+     two, ['DP030', '']);
+
   // ── the tooth grid ────────────────────────────────────────────────────
+  await mount({ ...CARD, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
+                rates: RATES, ratesMsg: '', rows: mkRows(), total: 2600, missing: 0 });
   ok('the grid starts by saying it needs a row',
      /Click a line above, then click its teeth/.test(await page.textContent('#root')));
+  // Above the table, the way Document 1 is laid out.
+  ok('the grid sits above the table, as it does on the treatment plan',
+     await page.evaluate(() => {
+       const grid = document.querySelector('button[title="#18"]');
+       const table = document.querySelector('table');
+       return !!(grid && table) &&
+         (grid.compareDocumentPosition(table) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+     }));
   // The grid is shared with Document 1, where clicking fills the next empty
   // row. Here it toggles teeth on one chosen row, so it must not keep
   // promising the other thing.
@@ -274,7 +333,7 @@ const VIEW = html.slice(A, B);
   // The case that caused the report: Document 1 is empty for this patient,
   // so the endorsement used to show nothing at all. It must still be a
   // working screen -- a grid, a way to add a line, and a say in what to do.
-  await mount({ pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
+  await mount({ ...CARD, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
                 rates: RATES, ratesMsg: '', rows: [], total: 0, missing: 0 });
   const empty = await page.textContent('#root');
   ok('an empty plan still draws the sheet and says how to fill it',
@@ -294,7 +353,7 @@ const VIEW = html.slice(A, B);
   // The clinic that has not pasted its CGHS card in yet, or a code the card
   // does not carry. This is the state the screen used to dead-end in, with
   // a dropdown reading "no rate card" and no way past it.
-  await mount({ pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'], rates: [], ratesMsg: '',
+  await mount({ ...CARD, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'], rates: [], ratesMsg: '',
     rows: [{ at: 0, r: { tooth: '16', procedure: 'Composite Restoration', qty: 2, cghsRate: '450' },
              code: 'DP114', card: null, rate: 450, qty: 2, priced: true, amt: 900 }],
     total: 900, missing: 0 });
@@ -316,20 +375,20 @@ const VIEW = html.slice(A, B);
      await page.$$eval('datalist#kb-panel-codes option', o => o.length), 0);
 
   // ── a line with no rate at all ────────────────────────────────────────
-  await mount({ pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'], rates: [], ratesMsg: '',
+  await mount({ ...CARD, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'], rates: [], ratesMsg: '',
     rows: [{ at: 0, r: { tooth: '16', procedure: 'Something', qty: 1 }, code: 'DP900',
              card: null, rate: 0, qty: 1, priced: false, amt: 0 }], total: 0, missing: 0 });
   eq('a line with no rate shows a dash rather than a wrong zero',
      await page.$eval('tbody tr:nth-child(1) td:nth-child(6)', t => t.textContent), '\u2014');
 
-  await mount({ pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
+  await mount({ ...CARD, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
                 rates: RATES, ratesMsg: '', rows: mkRows(), total: 2600, missing: 0 });
   eq('with a card, every code on it is suggested',
      await page.$$eval('datalist#kb-panel-codes option', o => o.map(x => x.value)),
      ['DP030', 'DP035']);
 
   // ── a rate card that could not be read ────────────────────────────────
-  await mount({ pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'], rates: [],
+  await mount({ ...CARD, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'], rates: [],
                 ratesMsg: 'The CGHS rate card could not be read, so no codes or rates can be filled in. Try reloading the patient.',
                 rows: mkRows(), total: 0, missing: 0 });
   ok('a rate card that failed to load is reported',
@@ -348,15 +407,20 @@ const VIEW = html.slice(A, B);
     const p2 = await browser.newPage();
     await p2.setContent('<div></div>');
     await p2.addScriptTag({ content: pick('const PCSS = ', 'function toothG(rows) {') });
+    // The age is worked out from the date of birth, not stored, so the real
+    // helper has to be here or the sheet would quietly print a blank.
+    await p2.addScriptTag({ content: pick('function calcAge(dob, today) {', 'function togArr(') });
     await p2.addScriptTag({ content: `
       window.LOGO_B64 = "";
       const TODAY = "03-11-2026";
       const signatureLine = d => "Dr. A | Date: " + d;
+      window.CLINIC = { padTop:"44", padRight:"15", padBottom:"15", padLeft:"52", padFlip:false };
       const patPanel = "CGHS";
       const pat = { name:"Asha Rao", uhid:"KB1" };
       // What the endorsement actually prints from: the patient topped up
       // with the panel details, wherever they were found.
-      const panelPat = { name:"Asha Rao", uhid:"KB1", cardId:"C-77", panelCategory:"Pensioner" };
+      const panelPat = { name:"Asha Rao", uhid:"KB1", cardId:"C-77", panelCategory:"Pensioner",
+                         dob:"05/07/1968" };
       const endRows = [
         { r:{ tooth:"16", procedure:"RCT Single Rooted", qty:1 }, code:"DP030",
           card:{ code:"DP030", procedure:"Root Canal Treatment - Single Rooted", rate:"1000" },
@@ -376,20 +440,41 @@ const VIEW = html.slice(A, B);
       text: document.body.textContent
     }));
     await p2.close();
-    return got;
+    return { ...got, html: out };
   })();
 
   eq('the printed columns are in the order the clinic asked for',
      doc.heads, ['Code', 'Treatment Advised', 'Tooth Number', 'No. of Units']);
+  // What was advised wins over the card's own wording: the card names the
+  // code, the clinic names the treatment.
   eq('and a row reads in that same order',
-     doc.rows[0], ['DP030', 'Root Canal Treatment - Single Rooted', '16', '1']);
+     doc.rows[0], ['DP030', 'RCT Single Rooted', '16', '1']);
   eq('a row with no code still prints, with the plan\'s own wording',
      doc.rows[1], ['\u2014', 'Composite Restoration', '36', '3']);
   ok('the beneficiary\'s card details are on the sheet',
      /C-77/.test(doc.text) && /Pensioner/.test(doc.text));
-  ok('the Wellness Centre has a block to endorse in',
-     /Endorsement \/ Permission No\./.test(doc.text) && /CMO/.test(doc.text));
-  ok('the total asked for is still stated', /\u20b91,000/.test(doc.text), doc.text.slice(-200));
+  // What the clinic asked to be taken OFF the sheet. It prints on the
+  // prescription pad, which is short, and the Wellness Centre prices the
+  // claim from the codes against its own card.
+  ok('no total is printed', !/Total/i.test(doc.text), doc.text.slice(-250));
+  ok('no beneficiary signature', !/Beneficiary Signature/i.test(doc.text));
+  ok('and nothing about the competent authority',
+     !/Wellness Centre \/ Competent Authority/i.test(doc.text) &&
+     !/Endorsement \/ Permission No/i.test(doc.text) && !/CMO/.test(doc.text));
+  ok('the doctor still signs it', /Signature of the Doctor/i.test(doc.text));
+  // Worked out from the date of birth the register already holds, so it
+  // cannot go stale the way a typed-in age would.
+  ok('the beneficiary\'s age is on the sheet',
+     /Age\s*58(?!\d)/i.test(doc.text), doc.text.slice(0, 220));
+
+  // It prints onto pre-printed stationery, so it must not draw a letterhead
+  // of its own, and it must keep clear of what is already on the paper.
+  ok('it draws no letterhead over the pad\'s own',
+     !/C\. ?A\. ?R\. ?E\. ?S/.test(doc.html) && !/DILSHAD GARDEN/i.test(doc.html),
+     doc.html.slice(0, 200));
+  ok('it reserves the pad margins the prescription uses',
+     /@page\{size:A4 portrait;margin:44mm 15mm 15mm 52mm;\}/.test(doc.html),
+     (/@page[^}]*\}/.exec(doc.html) || [])[0]);
 
   ok('nothing threw', errors.length === 0, errors.join(' // '));
   await browser.close();

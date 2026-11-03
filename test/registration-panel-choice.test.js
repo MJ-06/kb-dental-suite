@@ -66,13 +66,24 @@ ok('a normal registration sends none of it, so its row is unchanged',
 // been about. There is one.
 eq('there is one registration save path, not a panel copy of it',
   (html.match(/const quickRegister = async/g) || []).length, 1);
-// There are two saves: the quick one at the counter and the full iPad form.
-// Both must carry the panel marking — a full form that dropped it would save a
+// Three saves now: the quick one at the counter, the full iPad form, and the
+// endorsement writing the panel details back onto the patient. EVERY one of
+// them has to carry the panel marking — a save that dropped it would record a
 // panel patient as an ordinary one and put the row in the wrong book.
-eq('there are exactly two saveRegistration calls',
-  (html.match(/api\("saveRegistration", \{/g) || []).length, 2);
-eq('and both carry the panel marking',
+eq('there are exactly three saveRegistration calls',
+  (html.match(/api\("saveRegistration", \{/g) || []).length, 3);
+// The two registration paths carry it from whichever the front desk chose.
+eq('both registration paths carry the panel marking',
   (html.match(/\.\.\.\(patientType === "panel" \? \{/g) || []).length, 2);
+// The third is only ever reached from the endorsement, which is a panel
+// document by definition, so it says so outright.
+ok('and the endorsement\'s save marks the patient as panel',
+  /api\("saveRegistration", \{\s*uhid: pat\.uhid, patientType: "Panel",/.test(html));
+// It must not send a mobile: apiDirect turns a missing value into "", and
+// removePending deletes the Pending row whose mobile cell matches — an empty
+// one would match a blank cell and delete somebody else's pending patient.
+ok('and it sends no mobile, which would match a blank Pending row',
+  !/api\("saveRegistration", \{\s*uhid: pat\.uhid, patientType: "Panel",[^}]*mobile/.test(html));
 
 // --- the panel list is the clinic's own, not the developer's --------------
 ok('the panel list is loaded from the backend',
