@@ -33,7 +33,15 @@ const backend = (/var BACKEND_BUILD = "([^"]+)";/.exec(gs) || [])[1];
 const required = (/const KB_BACKEND_BUILD_REQUIRED = "([^"]+)";/.exec(html) || [])[1];
 ok('Code.gs says which build it is', !!backend, backend);
 ok('and the app says which it needs', !!required, required);
-eq('they agree', backend, required);
+// These used to have to be equal. They do not: the app asks for the OLDEST
+// backend it can actually work against, which is not always the newest one
+// in the repo. getPatient returning the panel is worth deploying and the
+// endorsement does not need it -- it reads the panel from getAllPatients
+// instead -- so demanding it would put a red "backend out of date" across a
+// screen that works. What must never happen is the app asking for a build
+// that does not exist yet, because nothing could ever satisfy it.
+ok('the app never asks for a build Code.gs does not have', required <= backend,
+   `app wants ${required}, Code.gs is ${backend}`);
 // The whole point of the marker is that it moves when Code.gs does. A
 // backend that still claims a build from before the last few changes cannot
 // warn anybody about anything.

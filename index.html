@@ -160,7 +160,14 @@ const KB_BACKEND_IS_APPS_SCRIPT = /script\.google\.com/.test(SCRIPT_URL);
 // So the app asks, and says so in the sidebar when the answer is too old.
 // Raise this whenever the page starts depending on something new in
 // Code.gs, and bump BACKEND_BUILD there to match.
-const KB_BACKEND_BUILD_REQUIRED = "2026-11-03";
+// Back to 2026-11-02b on purpose. getPatient was taught to return the panel
+// and that is still worth redeploying for, but the endorsement no longer
+// NEEDS it: the panel is read from getAllPatients, which has been deployed
+// for a long time. A red "backend out of date" for something that is merely
+// nicer is the boy who cried wolf, and it sat across a working screen for an
+// afternoon. This goes up again the next time the app genuinely cannot work
+// without a new Code.gs.
+const KB_BACKEND_BUILD_REQUIRED = "2026-11-02b";
 // WHICH APP THIS IS.
 //
 // There was no way to tell. The sidebar said which BACKEND was answering
@@ -174,7 +181,7 @@ const KB_BACKEND_BUILD_REQUIRED = "2026-11-03";
 //
 // It moves with every change to this file. Same shape as the backend's: a
 // date, and a letter when there is more than one in a day.
-const KB_APP_BUILD = "2026-11-03g";
+const KB_APP_BUILD = "2026-11-03h";
 
 // Three answers, not two. A build string is a plain date, so comparing
 // them as text compares them as dates.
@@ -5359,6 +5366,10 @@ function TreatmentPlan({
   // the sheet at all left nothing on screen -- no teeth, no Print -- which
   // read as the whole document being broken.
   const [endPanel, setEndPanel] = useState("");
+  // What the register holds for this patient, when getPatient is too old to
+  // hand it over itself. Null until looked up, {} when the lookup found
+  // nothing, so a missing panel is never confused with one not asked for.
+  const [panelFallback, setPanelFallback] = useState(null);
   const [endPanels, setEndPanels] = useState([]);
   // The row the tooth grid writes into. Clicking a tooth with no row chosen
   // would otherwise have to guess, and guessing puts a tooth on the wrong
@@ -5487,9 +5498,31 @@ function TreatmentPlan({
   // The registration writes the panel into "Panel"; a patient loaded from
   // somewhere else may carry it lower-cased, so both are read.
   const panelOf = (p) => String((p && (p.panel || p.Panel)) || "").trim();
-  const recordedPanel = panelOf(pat);
+  // The patient as the endorsement sees them: whatever getPatient gave,
+  // topped up from the register for the fields an older backend leaves out.
+  const panelPat = (pat && panelOf(pat)) ? pat
+                 : (pat && panelFallback) ? { ...pat, ...panelFallback }
+                 : pat;
+  const recordedPanel = panelOf(panelPat);
   const patPanel = String(endPanel || recordedPanel || "").trim();
-  useEffect(() => { setEndPanel(""); setEndActive(null); }, [pat && pat.uhid]);
+  useEffect(() => { setEndPanel(""); setEndActive(null); setPanelFallback(null); }, [pat && pat.uhid]);
+  useEffect(() => {
+    // Only on this document, only for a patient whose record did not carry a
+    // panel, and only once: the register is every patient in the clinic.
+    if (view !== "endorsement" || !pat || !pat.uhid) return;
+    if (panelOf(pat) || panelFallback) return;
+    let dropped = false;
+    api("getAllPatients").then(res => {
+      if (dropped) return;
+      const want = String(pat.uhid || "").trim().toUpperCase();
+      const hit = (res && res.success && res.patients || [])
+        .find(x => String(x.uhid || "").trim().toUpperCase() === want);
+      setPanelFallback(hit
+        ? { panel: hit.panel || "", panelCategory: hit.panelCategory || "", cardId: hit.cardId || "" }
+        : {});
+    }).catch(() => { if (!dropped) setPanelFallback({}); });
+    return () => { dropped = true; };
+  }, [view, pat && pat.uhid, panelFallback]);
   useEffect(() => {
     if (!patPanel) { setPanelRates([]); setRatesMsg(""); return; }
     let dropped = false;
@@ -5555,7 +5588,7 @@ function TreatmentPlan({
     }
     setSaving(true);
     setSaved(false);
-    const selRows = tpRows.filter(r => r.selected && r.procedure);
+    const selRows = tpRows.filter(r => r.selected && r.procedure && !r.endAdded);
     const sub = selRows.reduce((s, r) => s + (r.price && r.qty ? Number(r.price) * Number(r.qty) : 0), 0);
     const disc = membership && memberDisc ? Math.round(sub * Number(memberDisc) / 100) : 0;
     const afterDisc = sub - disc;
@@ -5702,14 +5735,26 @@ function TreatmentPlan({
     .map(x => {
       const code = codeFor(x.r);
       const card = rateByCode(code);
-      const rate = card && !isNaN(Number(card.rate)) ? Number(card.rate) : 0;
+      // The rate card is a convenience, not a requirement. A clinic that has
+      // not pasted its card in yet -- or a code the card does not carry --
+      // still has to be able to send a sheet, so a rate typed by hand counts
+      // exactly as much as one looked up.
+      const typed = Number(String(x.r.cghsRate == null ? "" : x.r.cghsRate).trim());
+      const rate = card && !isNaN(Number(card.rate)) ? Number(card.rate)
+                 : (!isNaN(typed) && String(x.r.cghsRate || "").trim() !== "") ? typed
+                 : 0;
       const qty = Number(x.r.qty) || 1;
-      return { ...x, code, card, rate, amt: rate * qty, qty };
+      return { ...x, code, card, rate, priced: !!card || rate > 0, amt: rate * qty, qty };
     });
   const endTotal = endRows.reduce((t, x) => t + x.amt, 0);
   const endMissing = endRows.filter(x => !x.code).length;
 
-  const selRows = tpRows.filter(r => r.selected && r.procedure);
+  // A panel case is a direct endorsement: nothing is filled in on the Care
+  // Plan and nothing belongs on the clinic's own plan or its estimate, which
+  // are priced at the clinic's fees and are not what a panel is sent. So the
+  // treatment plan's two documents see only their own rows.
+  const planRows = tpRows.filter(r => !r.endAdded);
+  const selRows = planRows.filter(r => r.selected && r.procedure);
   const sub = selRows.reduce((s, r) => s + (r.price && r.qty ? Number(r.price) * Number(r.qty) : 0), 0);
   const disc = membership && memberDisc ? Math.round(sub * Number(memberDisc) / 100) : 0;
   const afterDisc = sub - disc;
@@ -5718,7 +5763,7 @@ function TreatmentPlan({
   const mAmt = membership && membershipAmt ? Number(membershipAmt) : 0;
   function buildPlanHTML() {
     const phBlock = phase => {
-      const pr = tpRows.filter(r => r.phase === phase && r.procedure);
+      const pr = planRows.filter(r => r.phase === phase && r.procedure);
       if (!pr.length) return "";
       const pc = PHASE_COL[phase] || T;
       const trs = pr.map(r => {
@@ -5727,7 +5772,7 @@ function TreatmentPlan({
       }).join("");
       return `<div style="margin-bottom:6pt"><div class="ph" style="background:${pc}">${phase} — ${PHASE_DESC[phase]}</div><table><thead><tr><th style="width:6%">&nbsp;</th><th style="width:10%">Tooth</th><th>Procedure</th><th style="width:14%;text-align:right">Unit Price</th><th style="width:6%;text-align:right">Qty</th><th style="width:14%;text-align:right">Amount</th></tr></thead><tbody>${trs}</tbody></table></div>`;
     };
-    return pW(pH(window.LOGO_B64, "KBDC/FORMS/TP-01") + `<div class="dtitle">Treatment Plan</div><div style="display:grid;grid-template-columns:1fr auto auto;gap:8pt;margin-bottom:8pt"><div class="fl"><div class="lbl">Patient Name</div><div class="val" style="font-size:12pt;font-weight:700">${pat ? pat.name : "—"}</div></div><div class="fl"><div class="lbl">UHID</div><div class="val" style="font-weight:700">${pat ? pat.uhid : "—"}</div></div><div class="fl"><div class="lbl">Date</div><div class="val">${TODAY}</div></div></div><div class="note">Consultation charges inclusive if treatment starts within 15 days. Multiple options shown — patient to select preferred option.</div>` + toothG(tpRows) + PHASES.map(phBlock).join("") + `<div class="sigrow"><div><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">${signatureLine(TODAY)}</div></div><div><div class="lbl">Patient / Guardian Acknowledgement</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">${pat ? pat.name : ""}</div></div></div>`, "KBDC/FORMS/TP-01");
+    return pW(pH(window.LOGO_B64, "KBDC/FORMS/TP-01") + `<div class="dtitle">Treatment Plan</div><div style="display:grid;grid-template-columns:1fr auto auto;gap:8pt;margin-bottom:8pt"><div class="fl"><div class="lbl">Patient Name</div><div class="val" style="font-size:12pt;font-weight:700">${pat ? pat.name : "—"}</div></div><div class="fl"><div class="lbl">UHID</div><div class="val" style="font-weight:700">${pat ? pat.uhid : "—"}</div></div><div class="fl"><div class="lbl">Date</div><div class="val">${TODAY}</div></div></div><div class="note">Consultation charges inclusive if treatment starts within 15 days. Multiple options shown — patient to select preferred option.</div>` + toothG(planRows) + PHASES.map(phBlock).join("") + `<div class="sigrow"><div><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">${signatureLine(TODAY)}</div></div><div><div class="lbl">Patient / Guardian Acknowledgement</div><div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">${pat ? pat.name : ""}</div></div></div>`, "KBDC/FORMS/TP-01");
   }
   function buildEstHTML() {
     const phRows = PHASES.map(phase => selRows.filter(r => r.phase === phase).map(r => {
@@ -5769,8 +5814,8 @@ function TreatmentPlan({
         field("Date", TODAY) +
       `</div><div class="g3" style="margin-bottom:8pt">` +
         field("Panel", panel) +
-        field("Card ID", pat ? (pat.cardId || pat["Card ID"] || "") : "") +
-        field("Card Holder", pat ? (pat.panelCategory || pat["Panel Category"] || pat.panelCat || "") : "") +
+        field("Card ID", panelPat ? (panelPat.cardId || panelPat["Card ID"] || "") : "") +
+        field("Card Holder", panelPat ? (panelPat.panelCategory || panelPat["Panel Category"] || panelPat.panelCat || "") : "") +
       `</div>` +
       `<div class="note">The following treatment is proposed for the above beneficiary and is submitted for endorsement. ` +
       `Rates are as per the ${esc(panel)} schedule of charges in force.</div>` +
@@ -6064,7 +6109,7 @@ function TreatmentPlan({
       fontWeight: 700
     }
   }, "\uD83D\uDDA8 Print Treatment Plan"))), /*#__PURE__*/React.createElement(ToothChart, {
-    rows: tpRows,
+    rows: planRows,
     onClick: clickTooth
   }), /*#__PURE__*/React.createElement("div", {
     style: {
@@ -6090,14 +6135,14 @@ function TreatmentPlan({
       borderRadius: "0 0 6px 6px",
       overflow: "hidden"
     }
-  }, tpRows.length === 0 ? /*#__PURE__*/React.createElement("div", {
+  }, planRows.length === 0 ? /*#__PURE__*/React.createElement("div", {
     style: {
       textAlign: "center",
       padding: "24px",
       color: "#5a5a5a",
       fontSize: 14
     }
-  }, "Load a patient to begin.") : tpRows.map(r => /*#__PURE__*/React.createElement(RowItem, {
+  }, "Load a patient to begin.") : planRows.map(r => /*#__PURE__*/React.createElement(RowItem, {
     key: r.id,
     row: r
   }))), pat && /*#__PURE__*/React.createElement("div", {
@@ -6177,7 +6222,7 @@ function TreatmentPlan({
       color: "#2e2e2e",
       marginTop: 3
     }
-  }, pat.name)))), seedMsg && /*#__PURE__*/React.createElement("div", {
+  }, pat.name)))), seedMsg && view !== "endorsement" && /*#__PURE__*/React.createElement("div", {
     style: {
       background: seedMsg.ok ? "#f0fdf6" : "#fff8ed",
       border: `1px solid ${seedMsg.ok ? "#059669" : "#f59e0b"}`,
@@ -6524,7 +6569,7 @@ function TreatmentPlan({
       fontWeight: 700
     }
   }, "\uD83D\uDDA8 Print Estimate"))), view === "endorsement" && React.createElement(EndorsementView, {
-    pat: pat, panel: patPanel, recordedPanel: recordedPanel, panels: endPanels,
+    pat: panelPat, panel: patPanel, recordedPanel: recordedPanel, panels: endPanels,
     onPanel: setEndPanel, rates: panelRates, ratesMsg: ratesMsg,
     rows: endRows, total: endTotal, missing: endMissing, setCode: setCode,
     setRowField: setRowField, active: endActive, setActive: setEndActive,
@@ -6605,17 +6650,21 @@ function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, rates, ra
       ? note("Choose the panel above and its rate card loads, with a code to pick against every treatment." +
              (recordedPanel ? "" : " This patient has none on their registration — set it there to keep it."), "warn")
       : ratesMsg ? note(ratesMsg, "warn")
-      : missing ? note(missing + " of " + rows.length + " treatment(s) have no code yet. A line with no code prints with no rate and cannot be claimed.", "warn")
+      : missing ? note(missing + " of " + rows.length + " treatment(s) have no code yet. Type the code, or pick one from the rate card \u2014 a line with no code cannot be claimed.", "warn")
       : null,
 
+    React.createElement("datalist", { id:"kb-panel-codes" },
+      rates.map(o => React.createElement("option", { key:o.code, value:o.code },
+        o.procedure + (o.rate ? "  (" + money(o.rate) + ")" : "")))),
     React.createElement("div", { style:{ background:"#fff", border:`1px solid ${BORDER}`, borderRadius:8, overflow:"hidden" } },
       React.createElement("table", { style:{ width:"100%", borderCollapse:"collapse" } },
         React.createElement("thead", null, React.createElement("tr", { style:{ background:BGS } },
           head("Code"), head("Treatment Advised"), head("Tooth Number"),
-          head("Units", { align:"center" }), head("Amount", { align:"right" }), head(""))),
+          head("Units", { align:"center" }), head("Rate", { align:"right" }),
+          head("Amount", { align:"right" }), head(""))),
         React.createElement("tbody", null,
           rows.length === 0
-            ? React.createElement("tr", null, React.createElement("td", { colSpan:6, style:{
+            ? React.createElement("tr", null, React.createElement("td", { colSpan:7, style:{
                 padding:"18px 12px", textAlign:"center", color:"#444444", fontSize:13.5 } },
                 "Nothing on the endorsement yet. Add a treatment above, or tick procedures on Document 1 and they appear here."))
             : rows.map(x =>
@@ -6624,19 +6673,29 @@ function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, rates, ra
                 onClick: () => setActive(x.at),
                 style:{ borderTop:`1px solid ${BORDER}`, cursor:"pointer",
                         background: active === x.at ? "#eaf4fb" : "transparent" } },
-                React.createElement("td", { style:{ ...cell, width:215 } },
-                  React.createElement("select", {
+                // Typed, with the rate card as suggestions. A dropdown of an
+                // empty card is a dead end; a box with a datalist is the
+                // same convenience when the card is there and still works
+                // when it is not.
+                React.createElement("td", { style:{ ...cell, width:132 } },
+                  React.createElement("input", {
                     value: x.code,
+                    list: "kb-panel-codes",
+                    placeholder: "e.g. DP030",
                     onChange: e => setCode(x.at, e.target.value),
-                    style:{ ...inp, width:"100%", boxSizing:"border-box",
-                            borderColor: x.code ? BORDER : "#f59e0b" } },
-                    React.createElement("option", { value:"" },
-                      rates.length ? "— choose a code —" : "— no rate card —"),
-                    options(x.code).map(o => React.createElement("option", { key:o.code, value:o.code },
-                      o.code + "  —  " + o.procedure + (o.rate ? "  (" + money(o.rate) + ")" : ""))))),
+                    onFocus: () => setActive(x.at),
+                    style:{ ...inp, width:"100%", boxSizing:"border-box", fontWeight:700,
+                            borderColor: x.code ? BORDER : "#f59e0b" } })),
                 React.createElement("td", { style:cell },
-                  (x.card && x.card.procedure) || x.r.procedure ||
-                    React.createElement("span", { style:{ color:"#5a5a5a" } }, "pick a code")),
+                  React.createElement("input", {
+                    value: (x.card && x.card.procedure) || x.r.procedure || "",
+                    placeholder: "Treatment advised",
+                    onChange: e => setRowField(x.at, "procedure", e.target.value),
+                    onFocus: () => setActive(x.at),
+                    readOnly: !!x.card,
+                    title: x.card ? "Taken from the rate card for " + x.code : undefined,
+                    style:{ ...inp, width:"100%", boxSizing:"border-box",
+                            background: x.card ? BGS : "#fff" } })),
                 React.createElement("td", { style:{ ...cell, width:118 } },
                   React.createElement("input", {
                     value: x.r.tooth || "",
@@ -6651,8 +6710,20 @@ function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, rates, ra
                     onChange: e => setRowField(x.at, "qty", e.target.value.replace(/[^0-9]/g, "")),
                     onFocus: () => setActive(x.at),
                     style:{ ...inp, width:"100%", boxSizing:"border-box", textAlign:"center" } })),
+                React.createElement("td", { style:{ ...cell, width:96 } },
+                  React.createElement("input", {
+                    value: x.card ? (x.card.rate == null ? "" : String(x.card.rate))
+                                  : (x.r.cghsRate == null ? "" : x.r.cghsRate),
+                    inputMode: "numeric",
+                    placeholder: "rate",
+                    onChange: e => setRowField(x.at, "cghsRate", e.target.value.replace(/[^0-9.]/g, "")),
+                    onFocus: () => setActive(x.at),
+                    readOnly: !!x.card,
+                    title: x.card ? "From the rate card for " + x.code : "Type the rate for this code",
+                    style:{ ...inp, width:"100%", boxSizing:"border-box", textAlign:"right",
+                            background: x.card ? BGS : "#fff" } })),
                 React.createElement("td", { style:{ ...cell, textAlign:"right", fontWeight:700, width:100,
-                  color: x.card ? "#1a1a1a" : "#92400e" } }, x.card ? money(x.amt) : "no rate"),
+                  color: x.priced ? "#1a1a1a" : "#92400e" } }, x.priced ? money(x.amt) : "\u2014"),
                 React.createElement("td", { style:{ ...cell, width:34, textAlign:"center" } },
                   React.createElement("button", {
                     onClick: (e) => { e.stopPropagation(); onRemove(x.at); },

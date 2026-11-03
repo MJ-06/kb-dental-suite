@@ -120,7 +120,10 @@ const VIEW = html.slice(A, B);
   // before those fields existed carries none. That left a single line of
   // text — no table, no teeth, no Print. So the case that matters most
   // here is the patient with NO panel on record.
-  const mount = (props) => page.evaluate((p) => {
+  // $eval waits for its selector; $$eval does not, so a mount has to settle
+  // before anything reads the DOM or a case silently measures the last one.
+  const mount = async (props) => { await mountNow(props); await page.waitForTimeout(120); };
+  const mountNow = (props) => page.evaluate((p) => {
     window.__set = []; window.__field = []; window.__tooth = []; window.__panel = [];
     window.__added = 0; window.__removed = [];
     const e = React.createElement;
@@ -166,9 +169,9 @@ const VIEW = html.slice(A, B);
   const PAT = { name: 'Asha Rao', uhid: 'KB1', 'Card ID': 'C-77', 'Panel Category': 'Pensioner' };
   const mkRows = () => ([
     { at: 0, r: { tooth: '16', procedure: 'RCT Single Rooted', qty: 1 }, code: 'DP030',
-      card: RATES[0], rate: 1000, qty: 1, amt: 1000 },
+      card: RATES[0], rate: 1000, qty: 1, priced: true, amt: 1000 },
     { at: 1, r: { tooth: '', procedure: 'Crown - Metal', qty: 2 }, code: 'DP035',
-      card: RATES[1], rate: 800, qty: 2, amt: 1600 }
+      card: RATES[1], rate: 800, qty: 2, priced: true, amt: 1600 }
   ]);
 
   // ── the patient with no panel on record ───────────────────────────────
@@ -204,12 +207,18 @@ const VIEW = html.slice(A, B);
   const text = await page.textContent('#root');
   ok('the card details the Wellness Centre checks are on screen',
      /C-77/.test(text) && /Pensioner/.test(text), text.slice(0, 200));
-  eq('the columns are in the printed order, with the amount alongside',
+  eq('the columns are in the printed order, with the rate and amount alongside',
      await page.$$eval('thead th', t => t.map(x => x.textContent)),
-     ['Code', 'Treatment Advised', 'Tooth Number', 'Units', 'Amount', '']);
+     ['Code', 'Treatment Advised', 'Tooth Number', 'Units', 'Rate', 'Amount', '']);
   eq('each row is priced at the panel rate times its quantity',
-     await page.$$eval('tbody tr td:nth-child(5)', t => t.map(x => x.textContent)),
+     await page.$$eval('tbody tr td:nth-child(6)', t => t.map(x => x.textContent)),
      ['₹1,000', '₹1,600']);
+  // A code on the card fills the treatment and the rate in and holds them:
+  // the card is the claim, and a rate edited over it would be a wrong one.
+  eq('a code on the card fills the treatment and rate, and holds them',
+     await page.$$eval('tbody tr:nth-child(1) input', i =>
+       i.map(x => [x.value, x.readOnly])),
+     [['DP030', false], ['RCT Single Rooted', true], ['16', false], ['1', false], ['1000', true]]);
   // Nothing shouts at you once the screen is in order: a notice that is
   // always there stops being read.
   ok('with a panel, a rate card and every code picked, there is no notice at all',
@@ -243,15 +252,15 @@ const VIEW = html.slice(A, B);
   await page.click('button[title="#26"]');
   await page.click('button[title="#16"]');
   eq('clicking teeth puts them on that row',
-     await page.$eval('tbody tr:nth-child(2) input', i => i.value), '26, 16');
+     await page.$eval('tbody tr:nth-child(2) td:nth-child(3) input', i => i.value), '26, 16');
   await page.click('button[title="#26"]');
   eq('and clicking one again takes it off',
-     await page.$eval('tbody tr:nth-child(2) input', i => i.value), '16');
+     await page.$eval('tbody tr:nth-child(2) td:nth-child(3) input', i => i.value), '16');
   eq("the first row's tooth was never touched",
-     await page.$eval('tbody tr:nth-child(1) input', i => i.value), '16');
+     await page.$eval('tbody tr:nth-child(1) td:nth-child(3) input', i => i.value), '16');
 
   // ── typing instead of clicking ────────────────────────────────────────
-  await page.fill('tbody tr:nth-child(1) input', '16, 26');
+  await page.fill('tbody tr:nth-child(1) td:nth-child(3) input', '16, 26');
   eq('a tooth can be typed as well as clicked',
      (await page.evaluate(() => window.__field)).slice(-1), [[0, 'tooth', '16, 26']]);
   await page.fill('tbody tr:nth-child(1) td:nth-child(4) input', '3');
@@ -281,12 +290,43 @@ const VIEW = html.slice(A, B);
      await page.$$eval('button', b => b.filter(x => /Print|Preview/.test(x.textContent)).map(x => x.disabled)),
      [true, true]);
 
-  // ── a code that is no longer on the saved card ────────────────────────
-  await mount({ pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'], rates: RATES, ratesMsg: '',
-    rows: [{ at: 0, r: { tooth: '16', procedure: 'Old procedure', qty: 1 }, code: 'DP999',
-             card: null, rate: 0, qty: 1, amt: 0 }], total: 0, missing: 0 });
-  eq('a code no longer on the card still shows as itself',
-     await page.$eval('tbody tr select', s => s.value), 'DP999');
+  // ── no rate card at all ───────────────────────────────────────────────
+  // The clinic that has not pasted its CGHS card in yet, or a code the card
+  // does not carry. This is the state the screen used to dead-end in, with
+  // a dropdown reading "no rate card" and no way past it.
+  await mount({ pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'], rates: [], ratesMsg: '',
+    rows: [{ at: 0, r: { tooth: '16', procedure: 'Composite Restoration', qty: 2, cghsRate: '450' },
+             code: 'DP114', card: null, rate: 450, qty: 2, priced: true, amt: 900 }],
+    total: 900, missing: 0 });
+  eq('with no rate card, the code, treatment and rate are all typed',
+     await page.$$eval('tbody tr:nth-child(1) input', i => i.map(x => [x.value, x.readOnly])),
+     [['DP114', false], ['Composite Restoration', false], ['16', false], ['2', false], ['450', false]]);
+  eq('and the line is priced from what was typed',
+     await page.$eval('tbody tr:nth-child(1) td:nth-child(6)', t => t.textContent), '₹900');
+  await page.fill('tbody tr:nth-child(1) td:nth-child(5) input', '500');
+  eq('typing a rate reaches the plan',
+     (await page.evaluate(() => window.__field)).slice(-1), [[0, 'cghsRate', '500']]);
+  await page.fill('tbody tr:nth-child(1) td:nth-child(5) input', '12a.5');
+  eq('a rate takes digits and a point, nothing else',
+     await page.$eval('tbody tr:nth-child(1) td:nth-child(5) input', i => i.value), '12.5');
+  await page.fill('tbody tr:nth-child(1) td:nth-child(1) input', 'DP999');
+  eq('and the code is typed straight in, with no dropdown to get stuck in',
+     (await page.evaluate(() => window.__set)).slice(-1), [[0, 'DP999']]);
+  eq('the rate card is offered as suggestions, not as the only way',
+     await page.$$eval('datalist#kb-panel-codes option', o => o.length), 0);
+
+  // ── a line with no rate at all ────────────────────────────────────────
+  await mount({ pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'], rates: [], ratesMsg: '',
+    rows: [{ at: 0, r: { tooth: '16', procedure: 'Something', qty: 1 }, code: 'DP900',
+             card: null, rate: 0, qty: 1, priced: false, amt: 0 }], total: 0, missing: 0 });
+  eq('a line with no rate shows a dash rather than a wrong zero',
+     await page.$eval('tbody tr:nth-child(1) td:nth-child(6)', t => t.textContent), '\u2014');
+
+  await mount({ pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'],
+                rates: RATES, ratesMsg: '', rows: mkRows(), total: 2600, missing: 0 });
+  eq('with a card, every code on it is suggested',
+     await page.$$eval('datalist#kb-panel-codes option', o => o.map(x => x.value)),
+     ['DP030', 'DP035']);
 
   // ── a rate card that could not be read ────────────────────────────────
   await mount({ pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS', panels: ['CGHS'], rates: [],
@@ -313,7 +353,10 @@ const VIEW = html.slice(A, B);
       const TODAY = "03-11-2026";
       const signatureLine = d => "Dr. A | Date: " + d;
       const patPanel = "CGHS";
-      const pat = { name:"Asha Rao", uhid:"KB1", "Card ID":"C-77", "Panel Category":"Pensioner" };
+      const pat = { name:"Asha Rao", uhid:"KB1" };
+      // What the endorsement actually prints from: the patient topped up
+      // with the panel details, wherever they were found.
+      const panelPat = { name:"Asha Rao", uhid:"KB1", cardId:"C-77", panelCategory:"Pensioner" };
       const endRows = [
         { r:{ tooth:"16", procedure:"RCT Single Rooted", qty:1 }, code:"DP030",
           card:{ code:"DP030", procedure:"Root Canal Treatment - Single Rooted", rate:"1000" },
