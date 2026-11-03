@@ -1,5 +1,27 @@
 # Handover for the next tool (31 Oct 2026)
 
+## Viveyk UI merge — 3 November2026
+
+Fetched and merged `origin/claude/kb-dental-sheet-structure-mlfjr0` at5f2af9a
+(previous integrated UI eac924d). Automatic merge retained local clinic switching,
+organization reports, dashboard/date fixes and passive clinical workflows. New UI
+work adds CGHS endorsement as Treatment Plan Document3, a standalone endorsement
+flow, panel/card propagation, editable medicine lists and bounded Master widths.
+There were no additional multi-clinic/report-specific changes in this upstream delta.
+The local `getPatient` adapter now returns patientType/panel/panelCategory/cardId
+to match the updated Apps Script contract; its missing-fields regression was
+reproduced before fixing. No schema migration or real-data transfer is needed.
+
+Root UI test runner is not green:163 suites reported1745 checks passed,20 failed,
+86 crashed, including missing root Playwright dependency and source-pattern errors.
+The panel-reaches-the-patient source check passed19/19. Do not report the upstream
+browser endorsement/layout suites as verified. Post-merge backend suite293/293
+across24 files, TypeScript check, inline-script parse and33 local synthetic demo
+smoke checks passed. Dedicated demo API was restarted for panel-field compatibility.
+Logs remain ignored at
+`api/.organization-demo-runtime/ui-merge-tests.log`; browser acceptance and triage
+of the root suite remain outstanding.
+
 ## Launch, transfer and tier planning — 3 November2026
 
 Read `LAUNCH-REVIEW-AND-TIERS.md` for the prioritized review list, three distinct

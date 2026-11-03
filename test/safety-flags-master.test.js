@@ -58,6 +58,7 @@ ok('the screen was found', A > 0 && B > A, `${A}..${B}`);
 const SRC = html.slice(A, B);
 const DEPS = `
   const T = "#0078B4", BORDER = "#e5e5e0", BGS = "#f5f5f0";
+  const MASTER_LIST_WIDTH = ${(/const MASTER_LIST_WIDTH = (\d+);/.exec(html) || [])[1]};
   const inp = { padding:"8px", border:"1px solid #e5e5e0", borderRadius:6, fontSize:13, fontFamily:"inherit" };
   window.__added = []; window.__removed = [];
 `;

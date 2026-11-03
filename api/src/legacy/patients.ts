@@ -219,6 +219,7 @@ export const patients: ActionTable = {
       organizationPatientId:x.organization_patient_id ?? undefined, safetyFlags:x.safety_flags ?? [], uhid: x.uhid, name: x.full_name, gender: x.gender ?? "", dob: dobOut(x.dob),
       mobile: x.mobile ?? "", mobile2: x.mobile_2 ?? "", whatsapp: x.whatsapp ?? "", email: x.email ?? "",
       bloodGroup: x.blood_group ?? "", occupation: x.occupation ?? "", maritalStatus: x.marital_status ?? "",
+      patientType:x.patient_type ?? "Normal", panel:x.panel ?? "", panelCategory:x.panel_category ?? "", cardId:x.card_id ?? "",
       address: x.address ?? "", emergencyName: x.emergency_name ?? "", emergencyRelation: x.emergency_relation ?? "",
       emergencyContact: x.emergency_contact ?? "", referredBy: x.referred_by ?? "",
       conditions: x.conditions ?? [], medicines: x.medicines ?? "", allergies: x.allergies ?? [],

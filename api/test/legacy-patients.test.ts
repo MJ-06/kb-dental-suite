@@ -69,6 +69,7 @@ describe("registration", () => {
     const admin = await execLogin(w, "alpha", "a-admin");
     await exec(w, admin, "savePanelsList", { panels: ["CGHS"] });
     const uhid = await quickRegister("Panel Person", { patientType: "Panel", panel: "CGHS", panelCategory: "Pensioner", cardId: "C-1" });
+    expect((await exec(w,desk,"getPatient",{uhid})).patient).toMatchObject({patientType:"Panel",panel:"CGHS",panelCategory:"Pensioner",cardId:"C-1"});
     const row = (await exec(w, desk, "getAllPatients")).patients.find((x: { uhid: string }) => x.uhid === uhid);
     expect(row).toMatchObject({ panel: "CGHS", panelCategory: "Pensioner", cardId: "C-1" });
     const { uhid: u2 } = await exec(w, desk, "getNextUHID");
