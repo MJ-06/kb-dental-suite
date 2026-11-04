@@ -181,7 +181,7 @@ const KB_BACKEND_BUILD_REQUIRED = "2026-11-02b";
 //
 // It moves with every change to this file. Same shape as the backend's: a
 // date, and a letter when there is more than one in a day.
-const KB_APP_BUILD = "2026-11-03m";
+const KB_APP_BUILD = "2026-11-04";
 
 // Three answers, not two. A build string is a plain date, so comparing
 // them as text compares them as dates.
@@ -6680,10 +6680,512 @@ function TreatmentPlan({
 // matched to one here -- automatically where the card holds exactly one
 // procedure of that name, and by hand where it does not. A wrong code is a
 // rejected claim, so nothing is guessed.
-function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, card, holder,
+// ════════════════════════════════════════════════════════
+// RECORDS — CGHS: endorsement, prescription, bill
+// ════════════════════════════════════════════════════════
+// A panel case runs in three stages and they happen days apart: the
+// endorsement goes out, it comes back with some lines endorsed and some
+// not, and only the endorsed ones may be prescribed and billed. The
+// Treatment Plan is where the request is WRITTEN. This is where the answer
+// is recorded and acted on, which is why the tick is here and not there.
+//
+// It keeps its own copy of the plan rather than reaching into the Treatment
+// Plan screen: the two are opened at different times by different people,
+// and a shared live state between them would mean whichever was open last
+// decided what was saved.
+function useEndorsementRecord(pat) {
+  const uhid = (pat && pat.uhid) || "";
+  const [rows, setRows] = React.useState([]);
+  // The plan's estimate is loaded and handed straight back on save. Saving
+  // replaces the whole plan, so not carrying it would wipe Document 2's
+  // prices from a screen that has nothing to do with them.
+  const [estimate, setEstimate] = React.useState(null);
+  const [loaded, setLoaded] = React.useState(false);
+  const [loadErr, setLoadErr] = React.useState("");
+  const [saving, setSaving] = React.useState(false);
+  const [saved, setSaved] = React.useState(false);
+  const [panelRates, setPanelRates] = React.useState([]);
+  const [ratesMsg, setRatesMsg] = React.useState("");
+  const [panelEdits, setPanelEdits] = React.useState({});
+  const [panelFallback, setPanelFallback] = React.useState(null);
+  const [panelSaving, setPanelSaving] = React.useState(false);
+  const [panelSaved, setPanelSaved] = React.useState(false);
+  const [panels, setPanels] = React.useState([]);
+  const [active, setActive] = React.useState(null);
+
+  React.useEffect(() => {
+    api("getPanelsList").then(r => { if (r && r.success) setPanels(r.panels || []); }).catch(() => {});
+  }, []);
+
+  React.useEffect(() => {
+    setRows([]); setEstimate(null); setLoaded(false); setLoadErr("");
+    setPanelEdits({}); setPanelFallback(null); setActive(null); setSaved(false);
+    if (!uhid) return;
+    let dropped = false;
+    api("getTreatmentPlan", { uhid }).then(res => {
+      if (dropped) return;
+      if (res && res.success) {
+        setRows(res.rows || []);
+        setEstimate(res.estimate || null);
+      } else {
+        setLoadErr("This patient's plan could not be read.");
+      }
+      setLoaded(true);
+    }).catch(() => { if (!dropped) { setLoadErr("This patient's plan could not be read."); setLoaded(true); } });
+    return () => { dropped = true; };
+  }, [uhid]);
+
+  const panelOf = (p) => String((p && (p.panel || p.Panel)) || "").trim();
+  const onRecord = pat ? { ...pat, ...(panelFallback || {}) } : null;
+  const panelPat = pat ? { ...onRecord, ...panelEdits } : null;
+  const recordedPanel = panelOf(onRecord);
+  const panel = panelOf(panelPat);
+  const card = String((panelPat && (panelPat.cardId || panelPat["Card ID"])) || "");
+  const holder = String((panelPat && (panelPat.panelCategory || panelPat["Panel Category"] || panelPat.panelCat)) || "");
+
+  // The panel comes from getAllPatients when the patient record does not
+  // carry one, so this works on a backend that predates getPatient
+  // returning it.
+  React.useEffect(() => {
+    if (!uhid || panelOf(pat) || panelFallback) return;
+    let dropped = false;
+    api("getAllPatients").then(res => {
+      if (dropped) return;
+      const want = uhid.trim().toUpperCase();
+      const hit = ((res && res.success && res.patients) || [])
+        .find(x => String(x.uhid || "").trim().toUpperCase() === want);
+      setPanelFallback(hit
+        ? { panel: hit.panel || "", panelCategory: hit.panelCategory || "", cardId: hit.cardId || "" }
+        : {});
+    }).catch(() => { if (!dropped) setPanelFallback({}); });
+    return () => { dropped = true; };
+  }, [uhid, panelFallback]);
+
+  React.useEffect(() => {
+    if (!panel) { setPanelRates([]); setRatesMsg(""); return; }
+    let dropped = false;
+    setRatesMsg("Reading the " + panel + " rate card…");
+    api("getPanelRates", { panel }).then(res => {
+      if (dropped) return;
+      if (res && res.success && res.rates) {
+        setPanelRates(res.rates);
+        setRatesMsg(res.rates.length ? "" :
+          "No rates are saved for " + panel + " yet — paste the card into Master → Accounts → Panel Fee Schedule.");
+      } else {
+        setPanelRates([]);
+        setRatesMsg("The " + panel + " rate card could not be read, so no codes or rates can be filled in.");
+      }
+    }).catch(() => { if (!dropped) { setPanelRates([]); setRatesMsg("The " + panel + " rate card could not be read."); } });
+    return () => { dropped = true; };
+  }, [panel]);
+
+  const normName = (v) => String(v || "").toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+  const rateByCode = (code) => {
+    const want = String(code || "").trim().toUpperCase();
+    if (!want) return null;
+    return panelRates.find(x => String(x.code || "").trim().toUpperCase() === want) || null;
+  };
+  const autoCode = (procedure) => {
+    const n = normName(procedure);
+    if (!n) return "";
+    const hits = panelRates.filter(x => normName(x.procedure) === n);
+    return hits.length === 1 ? String(hits[0].code || "").trim() : "";
+  };
+  const codeFor = (r) => (r && Object.prototype.hasOwnProperty.call(r, "cghsCode"))
+    ? String(r.cghsCode || "").trim()
+    : autoCode(r && r.procedure);
+
+  const touch = () => setSaved(false);
+  const setCode = (at, code) => {
+    const found = rateByCode(code);
+    setRows(prev => prev.map((r, i) => i !== at ? r : {
+      ...r, cghsCode: code,
+      procedure: found ? String(found.procedure || "") : r.procedure
+    }));
+    touch();
+  };
+  const setProcedure = (at, name) => {
+    const found = autoCode(name);
+    setRows(prev => prev.map((r, i) => i !== at ? r : (
+      found ? { ...r, procedure: name, cghsCode: found } : { ...r, procedure: name }
+    )));
+    touch();
+  };
+  const setRowField = (at, field, value) => {
+    setRows(prev => prev.map((r, i) => i === at ? { ...r, [field]: value } : r));
+    touch();
+  };
+  const onTooth = (t) => {
+    if (active === null || active === undefined) return;
+    setRows(prev => prev.map((r, i) => {
+      if (i !== active) return r;
+      const have = String(r.tooth || "").split(",").map(x => x.trim()).filter(Boolean);
+      const want = String(t);
+      const next = have.indexOf(want) >= 0 ? have.filter(x => x !== want) : have.concat(want);
+      return { ...r, tooth: next.join(", ") };
+    }));
+    touch();
+  };
+  const onAdd = () => {
+    setRows(prev => {
+      const next = [...prev, { ...mkRow("Phase 1"), selected: true, endAdded: true }];
+      setActive(next.length - 1);
+      return next;
+    });
+    touch();
+  };
+  const onRemove = (at) => { setRows(prev => prev.filter((_, i) => i !== at)); setActive(null); touch(); };
+
+  const endRows = rows
+    .map((r, at) => ({ r, at }))
+    .filter(x => x.r.selected && (x.r.procedure || x.r.endAdded))
+    .map(x => {
+      const code = codeFor(x.r);
+      const found = rateByCode(code);
+      const typed = Number(String(x.r.cghsRate == null ? "" : x.r.cghsRate).trim());
+      const rate = found && !isNaN(Number(found.rate)) ? Number(found.rate)
+                 : (!isNaN(typed) && String(x.r.cghsRate || "").trim() !== "") ? typed : 0;
+      const qty = Number(x.r.qty) || 1;
+      return { ...x, code, card: found, rate, priced: !!found || rate > 0, amt: rate * qty, qty };
+    });
+  const total = endRows.reduce((t, x) => t + x.amt, 0);
+  const missing = endRows.filter(x => !x.code).length;
+  const approved = endRows.filter(x => x.r.endApproved);
+  const approvedTotal = approved.reduce((t, x) => t + x.amt, 0);
+
+  // Saving replaces the whole plan, so it refuses on a plan that was never
+  // read: that would overwrite a treatment plan with nothing.
+  const save = async () => {
+    if (!uhid) return;
+    if (loadErr || !loaded) {
+      alert("This patient's plan could not be read, so saving now could overwrite it.\n\nReopen the patient and try again.");
+      return;
+    }
+    setSaving(true); setSaved(false);
+    const res = await api("saveTreatmentPlan", {
+      uhid, patientName: (pat && pat.name) || uhid, date: TODAY,
+      rows, estimate: estimate || {}
+    });
+    setSaving(false);
+    if (res && res.success) { setSaved(true); setTimeout(() => setSaved(false), 2500); }
+    else alert("Could not save: " + ((res && res.error) || "unknown error"));
+  };
+
+  const savePanelDetails = async () => {
+    if (!uhid) return;
+    setPanelSaving(true); setPanelSaved(false);
+    try {
+      const res = await api("saveRegistration", {
+        uhid, patientType: "Panel", panel, panelCategory: holder, cardId: card
+      });
+      if (res && res.success) { setPanelSaved(true); setTimeout(() => setPanelSaved(false), 2500); }
+      else alert("Could not save the panel details: " + ((res && res.error) || "unknown error"));
+    } catch (e) {
+      alert("Could not save the panel details: " + (e && e.message ? e.message : e));
+    }
+    setPanelSaving(false);
+  };
+
+  return {
+    loaded, loadErr, rows, endRows, approved, total, approvedTotal, missing,
+    panel, recordedPanel, panels, panelPat, card, holder, panelRates, ratesMsg,
+    active, setActive, setCode, setProcedure, setRowField, onTooth, onAdd, onRemove,
+    onPanel: (v) => setPanelEdits(e => ({ ...e, panel: v })),
+    onCard: (v) => setPanelEdits(e => ({ ...e, cardId: v })),
+    onHolder: (v) => setPanelEdits(e => ({ ...e, panelCategory: v })),
+    savePanelDetails, panelSaving, panelSaved,
+    save, saving, saved
+  };
+}
+
+const CGHS_STAGES = [
+  { id: "endorsement", label: "1 · Endorsement" },
+  { id: "prescription", label: "2 · Prescription" },
+  { id: "bill", label: "3 · Bill" }
+];
+
+function CghsRecords({ globalPat }) {
+  const [stage, setStage] = React.useState("endorsement");
+  const e = useEndorsementRecord(globalPat);
+
+  if (!globalPat || !globalPat.uhid) {
+    return React.createElement("div", { style:{ background:"#fff", border:`1px solid ${BORDER}`,
+      borderRadius:10, padding:28, textAlign:"center", color:"#444444", fontSize:14 } },
+      "No active patient. Use Patient Search to select one first.");
+  }
+
+  const tabs = React.createElement("div", { style:{ display:"flex", gap:4, background:BGS,
+    borderRadius:8, padding:4, marginBottom:16, width:"fit-content" } },
+    CGHS_STAGES.map(st => React.createElement("button", {
+      key: st.id, onClick: () => setStage(st.id),
+      style:{ padding:"8px 20px", fontSize:13.5, fontWeight: stage === st.id ? 700 : 400,
+        border:"none", borderRadius:6, cursor:"pointer",
+        background: stage === st.id ? T : "transparent",
+        color: stage === st.id ? "#fff" : "#666" } }, st.label)));
+
+  // Stages 2 and 3 work from the endorsed lines and nothing else. A
+  // procedure that was not endorsed cannot be prescribed and cannot be
+  // claimed, so it must not reach either of them.
+  const nothingEndorsed = React.createElement("div", { style:{ background:"#fffbeb",
+    border:"1px solid #f59e0b", borderRadius:8, padding:"12px 14px", fontSize:13.5,
+    color:"#92400e", lineHeight:1.6 } },
+    e.endRows.length
+      ? "Nothing on this endorsement is ticked yet. Tick what the Wellness Centre endorsed on stage 1, and it appears here."
+      : "There is no endorsement for this patient yet. Write it on stage 1, or on the Treatment Plan's Document 3.");
+
+  return React.createElement("div", null,
+    tabs,
+    stage === "endorsement" && React.createElement(EndorsementView, {
+      showApproved: true, showPrint: false,
+      pat: e.panelPat, panel: e.panel, recordedPanel: e.recordedPanel, panels: e.panels,
+      card: e.card, holder: e.holder,
+      onPanel: e.onPanel, onCard: e.onCard, onHolder: e.onHolder,
+      onSavePanel: e.savePanelDetails, panelSaving: e.panelSaving, panelSaved: e.panelSaved,
+      rates: e.panelRates, ratesMsg: e.ratesMsg,
+      rows: e.endRows, total: e.total, missing: e.missing,
+      approvedCount: e.approved.length, approvedTotal: e.approvedTotal,
+      setCode: e.setCode, setRowField: e.setRowField, setProcedure: e.setProcedure,
+      active: e.active, setActive: e.setActive, onTooth: e.onTooth,
+      onAdd: e.onAdd, onRemove: e.onRemove,
+      onSave: e.save, saving: e.saving, saved: e.saved,
+      onPreview: () => {}, onPrint: () => {}
+    }),
+    stage === "prescription" && (e.approved.length
+      ? React.createElement(CghsPrescription, { pat: globalPat, lines: e.approved })
+      : nothingEndorsed),
+    stage === "bill" && (e.approved.length
+      ? React.createElement(CghsBill, { pat: globalPat, panel: e.panel, card: e.card,
+          holder: e.holder, lines: e.approved })
+      : nothingEndorsed)
+  );
+}
+
+// The pad is pre-printed stationery, so both sheets below draw no
+// letterhead and keep clear of what is already on the paper. The
+// measurements belong to the pad and live in Master -> CLINIC.
+function cghsPadCss(margins) {
+  const m = margins || {};
+  const mm = (v, d) => (String(v == null || v === "" ? d : v).trim().replace(/mm$/, "")) + "mm";
+  const top = mm(m.top, "44"), right = mm(m.right, "15"),
+        bottom = mm(m.bottom, "15"), left = mm(m.left, "52");
+  const flip = !!m.flip;
+  const box = flip ? [bottom, left, top, right].join(" ") : [top, right, bottom, left].join(" ");
+  return `@page{size:A4 portrait;margin:${box};}` +
+    `*{box-sizing:border-box;margin:0;padding:0;}` +
+    (flip ? "body{transform:rotate(180deg);transform-origin:50% 50%;}" : "") +
+    `body{font-family:'Segoe UI',Arial,sans-serif;font-size:10.5pt;color:#111;background:#fff;}` +
+    `.dtitle{text-align:center;font-size:12.5pt;font-weight:800;color:#0078B4;` +
+    `text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8pt;}` +
+    `.g4{display:grid;grid-template-columns:2fr 0.8fr 1.2fr 1.2fr;gap:5pt 8pt;margin-bottom:6pt;}` +
+    `.g2{display:grid;grid-template-columns:1fr 1fr;gap:4pt 14pt;margin-bottom:8pt;}` +
+    `.fl{margin-bottom:4pt;}` +
+    `.lbl{font-size:7pt;font-weight:700;color:#383838;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:1pt;}` +
+    `.val{font-size:10.5pt;border-bottom:0.5pt solid #ccc;padding-bottom:1pt;min-height:14pt;}` +
+    `.kv{font-size:10.5pt;padding:1pt 0;}` +
+    `.kv b{display:inline-block;min-width:92pt;font-weight:700;}` +
+    `.sec{background:#f0f6fb;border-left:3pt solid #0078B4;padding:3pt 7pt;font-size:8pt;font-weight:800;` +
+    `text-transform:uppercase;letter-spacing:0.06em;color:#0078B4;margin:8pt 0 5pt;}` +
+    `table{width:100%;border-collapse:collapse;}` +
+    `th{background:#f0f6fb;color:#0078B4;padding:4pt 6pt;font-size:8pt;font-weight:700;text-align:left;` +
+    `border-bottom:1pt solid #0078B4;}` +
+    `td{padding:4pt 6pt;border-bottom:0.5pt solid #eee;font-size:10pt;vertical-align:middle;}` +
+    `.c{text-align:center;} .r{text-align:right;} .b{font-weight:700;}` +
+    `.tot{margin-top:8pt;border-top:1.5pt solid #0078B4;padding-top:6pt;display:flex;` +
+    `justify-content:space-between;font-size:12pt;font-weight:800;color:#0078B4;}` +
+    `.words{font-size:10pt;margin-top:4pt;font-style:italic;}` +
+    `.sig{margin-top:22pt;width:60%;}` +
+    `.sigrow{display:grid;grid-template-columns:1fr 1fr;gap:14pt;margin-top:22pt;}` +
+    `.sigbox{border-bottom:0.5pt solid #bbb;height:34pt;margin-bottom:3pt;}`;
+}
+function cghsEsc(v) {
+  return String(v === undefined || v === null ? "" : v)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
+function cghsPrint(html) {
+  const w = window.open("", "_blank");
+  w.document.write(html);
+  w.document.close();
+  setTimeout(() => w.print(), 600);
+}
+// The pad's measurements, read once per screen that prints on it.
+function usePadMargins() {
+  const [m, setM] = React.useState(null);
+  React.useEffect(() => {
+    api("getClinicProfile").then(res => {
+      if (res && res.success && res.profile) {
+        const p = res.profile;
+        setM({ top: (p.padTop || "44") + "mm", right: (p.padRight || "15") + "mm",
+               bottom: (p.padBottom || "15") + "mm", left: (p.padLeft || "52") + "mm",
+               flip: String(p.padFlip || "") === "yes" });
+      }
+    }).catch(() => {});
+  }, []);
+  return m;
+}
+// Rupees in words, Indian system: lakh and crore, not million. A bill that
+// spells eight thousand as "eight thousand one hundred eleven" is read by a
+// clerk against the figure, so the two must agree.
+function rupeesInWords(n) {
+  const num = Math.floor(Math.abs(Number(n) || 0));
+  if (num === 0) return "Rupees Zero Only.";
+  const ones = ["", "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight", "Nine",
+    "Ten", "Eleven", "Twelve", "Thirteen", "Fourteen", "Fifteen", "Sixteen", "Seventeen",
+    "Eighteen", "Nineteen"];
+  const tens = ["", "", "Twenty", "Thirty", "Forty", "Fifty", "Sixty", "Seventy", "Eighty", "Ninety"];
+  const two = (v) => v < 20 ? ones[v] : (tens[Math.floor(v / 10)] + (v % 10 ? " " + ones[v % 10] : ""));
+  const three = (v) => (v >= 100 ? ones[Math.floor(v / 100)] + " Hundred" + (v % 100 ? " " + two(v % 100) : "") : two(v));
+  const parts = [];
+  const crore = Math.floor(num / 10000000);
+  const lakh = Math.floor((num % 10000000) / 100000);
+  const thousand = Math.floor((num % 100000) / 1000);
+  const rest = num % 1000;
+  if (crore) parts.push(three(crore) + " Crore");
+  if (lakh) parts.push(three(lakh) + " Lakh");
+  if (thousand) parts.push(three(thousand) + " Thousand");
+  if (rest) parts.push(three(rest));
+  return "Rupees " + parts.join(" ") + " Only.";
+}
+
+// ── Stage 2: the prescription ───────────────────────────────────────────
+function CghsPrescription({ pat, lines }) {
+  const pad = usePadMargins();
+  // An endorsement comes back days after it went out, so the sheet is
+  // written for the day the patient is in the chair, not for the day
+  // somebody opened the screen.
+  const [date, setDate] = React.useState(() => toISODate(new Date()));
+  const build = () => {
+    const when = fmtDMY(date) || TODAY;
+    const trs = lines.map((x, i) => `<tr><td class="c">${i + 1}</td>` +
+      `<td class="c b">${cghsEsc(x.code) || "—"}</td>` +
+      `<td>${cghsEsc(x.r.procedure || (x.card && x.card.procedure))}</td>` +
+      `<td class="c b">${cghsEsc(x.r.tooth) || "—"}</td>` +
+      `<td class="c">${x.qty}</td></tr>`).join("");
+    return `<!DOCTYPE html><html><head><meta charset="UTF-8"/><style>${cghsPadCss(pad)}</style></head><body>` +
+      `<div class="dtitle">Prescription — Treatment Advised</div>` +
+      `<div class="g4">` +
+        `<div class="fl"><div class="lbl">Patient Name</div><div class="val">${cghsEsc(pat.name) || "&nbsp;"}</div></div>` +
+        `<div class="fl"><div class="lbl">Age</div><div class="val">${cghsEsc(calcAge(pat.dob || pat.DOB)) || "&nbsp;"}</div></div>` +
+        `<div class="fl"><div class="lbl">UHID</div><div class="val">${cghsEsc(pat.uhid) || "&nbsp;"}</div></div>` +
+        `<div class="fl"><div class="lbl">Date</div><div class="val">${cghsEsc(when)}</div></div>` +
+      `</div><div class="sec">Treatment Advised — Endorsed</div>` +
+      `<table><thead><tr><th style="width:8%" class="c">Sn</th><th style="width:15%">Code</th>` +
+      `<th>Treatment Advised</th><th style="width:16%" class="c">Tooth Number</th>` +
+      `<th style="width:12%" class="c">No. of Units</th></tr></thead><tbody>${trs}</tbody></table>` +
+      `<div class="sig"><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div>` +
+      `<div style="font-size:8.5pt;color:#2e2e2e">${signatureLine(when)}</div></div></body></html>`;
+  };
+  return React.createElement("div", null,
+    React.createElement("div", { style:{ display:"flex", gap:12, alignItems:"flex-end",
+      flexWrap:"wrap", marginBottom:14 } },
+      React.createElement("div", null,
+        React.createElement("div", { style:{ fontSize:12, fontWeight:700, color:"#444444",
+          textTransform:"uppercase", letterSpacing:".04em", marginBottom:3 } }, "Date on the prescription"),
+        React.createElement("input", { type:"date", value:date,
+          onChange: e => setDate(e.target.value), style:{ ...inp, width:170 } })),
+      React.createElement("button", { onClick: () => cghsPrint(build()),
+        style:{ padding:"9px 20px", fontSize:14, fontWeight:700, border:"none", borderRadius:7,
+          cursor:"pointer", background:T, color:"#fff" } }, "🖨 Print Prescription")),
+    React.createElement(CghsLines, { lines: lines, showAmount: false }));
+}
+
+// ── Stage 3: the bill ───────────────────────────────────────────────────
+function CghsBill({ pat, panel, card, holder, lines }) {
+  const pad = usePadMargins();
+  const [date, setDate] = React.useState(() => toISODate(new Date()));
+  // Typed for now. A number that can never be issued twice has to be handed
+  // out by the server, and until that is deployed a typed one is honest:
+  // the clinic knows which number it is issuing, the app does not pretend to.
+  const [billNo, setBillNo] = React.useState("");
+  const total = lines.reduce((t, x) => t + x.amt, 0);
+  const build = () => {
+    const when = fmtDMY(date) || TODAY;
+    const money = (v) => Number(v || 0).toLocaleString("en-IN");
+    const trs = lines.map((x, i) => `<tr><td class="c">${i + 1}</td>` +
+      `<td class="c b">${cghsEsc(x.r.tooth) || "—"}</td>` +
+      `<td class="c b">${cghsEsc(x.code) || "—"}</td>` +
+      `<td>${cghsEsc(x.r.procedure || (x.card && x.card.procedure))}</td>` +
+      `<td class="c">${x.qty}</td>` +
+      `<td class="r">${x.priced ? money(x.rate) : "—"}</td>` +
+      `<td class="r b">${x.priced ? money(x.amt) : "—"}</td></tr>`).join("");
+    const kv = (k, v) => `<div class="kv"><b>${cghsEsc(k)}</b>: ${cghsEsc(v) || "&nbsp;"}</div>`;
+    const age = calcAge(pat.dob || pat.DOB);
+    const gender = String(pat.gender || pat.Gender || "").trim();
+    return `<!DOCTYPE html><html><head><meta charset="UTF-8"/><style>${cghsPadCss(pad)}</style></head><body>` +
+      `<div class="dtitle">Bill</div>` +
+      `<div class="g2">` +
+        kv("Bill No.", billNo) + kv("Bill Date", when) +
+        kv("Patient", pat.name) + kv("Registration No", card) +
+        kv("Address", pat.address || pat.Address || "") +
+        kv("Age/Gender", (age || "") + (gender ? "/" + gender.charAt(0).toUpperCase() : "")) +
+        kv("Panel", panel) +
+        kv("Panel Category", [panel, holder].filter(Boolean).join(" ").toUpperCase()) +
+      `</div>` +
+      `<table><thead><tr><th style="width:6%" class="c">Sn</th>` +
+      `<th style="width:12%" class="c">Tooth No</th><th style="width:12%" class="c">Code</th>` +
+      `<th>Description</th><th style="width:7%" class="c">Unit</th>` +
+      `<th style="width:13%" class="r">Rate (In Rs.)</th>` +
+      `<th style="width:14%" class="r">Amount (In Rs.)</th></tr></thead><tbody>${trs}</tbody></table>` +
+      `<div class="tot"><span>Bill Amount</span><span>${money(total)}</span></div>` +
+      `<div class="words">${cghsEsc(rupeesInWords(total))}</div>` +
+      `<div class="sigrow"><div><div class="lbl">Patient Signature</div><div class="sigbox"></div></div>` +
+      `<div><div class="lbl">For ${cghsEsc((window.CLINIC && window.CLINIC.name) || "the clinic")}</div>` +
+      `<div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">Authorised Signatory</div></div></div>` +
+      `</body></html>`;
+  };
+  const fld = (label, control) => React.createElement("div", null,
+    React.createElement("div", { style:{ fontSize:12, fontWeight:700, color:"#444444",
+      textTransform:"uppercase", letterSpacing:".04em", marginBottom:3 } }, label), control);
+  return React.createElement("div", null,
+    React.createElement("div", { style:{ display:"flex", gap:12, alignItems:"flex-end",
+      flexWrap:"wrap", marginBottom:14 } },
+      fld("Bill No.", React.createElement("input", { value:billNo,
+        placeholder:"e.g. 2026110001", onChange: e => setBillNo(e.target.value),
+        style:{ ...inp, width:170 } })),
+      fld("Bill Date", React.createElement("input", { type:"date", value:date,
+        onChange: e => setDate(e.target.value), style:{ ...inp, width:170 } })),
+      React.createElement("button", { onClick: () => cghsPrint(build()), disabled: !billNo.trim(),
+        title: billNo.trim() ? "" : "A bill needs its number before it is printed",
+        style:{ padding:"9px 20px", fontSize:14, fontWeight:700, border:"none", borderRadius:7,
+          cursor: billNo.trim() ? "pointer" : "not-allowed",
+          background: billNo.trim() ? T : "#9ca3af", color:"#fff" } }, "🖨 Print Bill")),
+    React.createElement(CghsLines, { lines: lines, showAmount: true }),
+    React.createElement("div", { style:{ display:"flex", justifyContent:"flex-end", gap:14,
+      alignItems:"baseline", marginTop:12, fontSize:15 } },
+      React.createElement("span", { style:{ color:"#444444" } }, "Bill Amount"),
+      React.createElement("span", { style:{ fontWeight:700, fontSize:17 } },
+        "₹" + Number(total).toLocaleString("en-IN"))),
+    React.createElement("div", { style:{ textAlign:"right", fontSize:13, color:"#444444",
+      fontStyle:"italic", marginTop:2 } }, rupeesInWords(total)));
+}
+
+// What is going onto the sheet, shown before it is printed.
+function CghsLines({ lines, showAmount }) {
+  const cell = { padding:"7px 10px", fontSize:13.5 };
+  const th = (t, a) => React.createElement("th", { style:{ textAlign: a || "left",
+    padding:"8px 10px", fontSize:12.5, fontWeight:700, color:"#444444" } }, t);
+  return React.createElement("div", { style:{ background:"#fff", border:`1px solid ${BORDER}`,
+    borderRadius:8, overflow:"hidden" } },
+    React.createElement("table", { style:{ width:"100%", borderCollapse:"collapse" } },
+      React.createElement("thead", null, React.createElement("tr", { style:{ background:BGS } },
+        th("Code"), th("Treatment"), th("Tooth"), th("Units", "center"),
+        showAmount ? th("Rate", "right") : null,
+        showAmount ? th("Amount", "right") : null)),
+      React.createElement("tbody", null, lines.map(x =>
+        React.createElement("tr", { key:x.at, style:{ borderTop:`1px solid ${BORDER}` } },
+          React.createElement("td", { style:{ ...cell, fontWeight:700 } }, x.code || "—"),
+          React.createElement("td", { style:cell }, x.r.procedure || (x.card && x.card.procedure) || ""),
+          React.createElement("td", { style:{ ...cell, fontWeight:700 } }, x.r.tooth || "—"),
+          React.createElement("td", { style:{ ...cell, textAlign:"center" } }, x.qty),
+          showAmount ? React.createElement("td", { style:{ ...cell, textAlign:"right" } },
+            x.priced ? Number(x.rate).toLocaleString("en-IN") : "—") : null,
+          showAmount ? React.createElement("td", { style:{ ...cell, textAlign:"right", fontWeight:700 } },
+            x.priced ? Number(x.amt).toLocaleString("en-IN") : "—") : null)))));
+}
+
+function EndorsementView({ showApproved, pat, panel, recordedPanel, panels, onPanel, card, holder,
                            onCard, onHolder, onSavePanel, panelSaving, panelSaved,
                            rates, ratesMsg,
-                           rows, total, missing, approvedCount, approvedTotal,
+                           showPrint, rows, total, missing, approvedCount, approvedTotal,
                            setCode, setRowField, setProcedure, active, setActive,
                            onTooth, onAdd, onRemove, onSave, saving, saved, onPreview, onPrint }) {
   const money = (n) => "₹" + Number(n || 0).toLocaleString("en-IN");
@@ -6790,13 +7292,13 @@ function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, card, hol
     React.createElement("div", { style:{ background:"#fff", border:`1px solid ${BORDER}`, borderRadius:8, overflow:"hidden" } },
       React.createElement("table", { style:{ width:"100%", borderCollapse:"collapse" } },
         React.createElement("thead", null, React.createElement("tr", { style:{ background:BGS } },
-          head("Endorsed", { align:"center" }),
+          showApproved ? head("Endorsed", { align:"center" }) : null,
           head("Code"), head("Treatment Advised"), head("Tooth Number"),
           head("Units", { align:"center" }), head("Rate", { align:"right" }),
           head("Amount", { align:"right" }), head(""))),
         React.createElement("tbody", null,
           rows.length === 0
-            ? React.createElement("tr", null, React.createElement("td", { colSpan:8, style:{
+            ? React.createElement("tr", null, React.createElement("td", { colSpan: showApproved ? 8 : 7, style:{
                 padding:"18px 12px", textAlign:"center", color:"#444444", fontSize:13.5 } },
                 "Nothing on the endorsement yet. Add a treatment above, or tick procedures on Document 1 and they appear here."))
             : rows.map(x =>
@@ -6805,21 +7307,22 @@ function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, card, hol
                 onClick: () => setActive(x.at),
                 style:{ borderTop:`1px solid ${BORDER}`, cursor:"pointer",
                         background: active === x.at ? "#eaf4fb"
-                                  : x.r.endApproved ? "#f0fdf6" : "transparent" } },
+                                  : (showApproved && x.r.endApproved) ? "#f0fdf6" : "transparent" } },
                 // Typed, with the rate card as suggestions. A dropdown of an
                 // empty card is a dead end; a box with a datalist is the
                 // same convenience when the card is there and still works
                 // when it is not.
-                // Ticked when the Wellness Centre endorses that line. It is
-                // not on the printed sheet: that sheet IS the request, and a
-                // request that ticks its own answers is not one.
-                React.createElement("td", { style:{ ...cell, width:76, textAlign:"center" } },
+                // Ticked when the Wellness Centre endorses that line. Never
+                // on the printed sheet, and never while the request is still
+                // being written: a request that ticks its own answers is not
+                // one. It appears in Records, where the answer is recorded.
+                showApproved ? React.createElement("td", { style:{ ...cell, width:76, textAlign:"center" } },
                   React.createElement("input", {
                     type: "checkbox",
                     checked: !!x.r.endApproved,
                     onChange: e => setRowField(x.at, "endApproved", e.target.checked),
                     title: "Tick when this line comes back endorsed",
-                    style:{ width:17, height:17, cursor:"pointer", accentColor:"#059669" } })),
+                    style:{ width:17, height:17, cursor:"pointer", accentColor:"#059669" } })) : null,
                 React.createElement("td", { style:{ ...cell, width:132 } },
                   React.createElement("input", {
                     value: x.code,
@@ -6875,9 +7378,9 @@ function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, card, hol
 
     rows.length ? React.createElement("div", { style:{ display:"flex", justifyContent:"flex-end",
       gap:20, alignItems:"baseline", marginTop:10, fontSize:15, flexWrap:"wrap" } },
-      React.createElement("span", { style:{ color:"#444444" } },
-        approvedCount + " of " + rows.length + " endorsed"),
-      approvedCount ? React.createElement("span", { style:{ color:"#065f46", fontWeight:700 } },
+      showApproved ? React.createElement("span", { style:{ color:"#444444" } },
+        approvedCount + " of " + rows.length + " endorsed") : null,
+      (showApproved && approvedCount) ? React.createElement("span", { style:{ color:"#065f46", fontWeight:700 } },
         "Endorsed: " + money(approvedTotal)) : null,
       React.createElement("span", { style:{ color:"#444444" } }, "Total" + (panel ? " as per " + panel + " rates" : "")),
       React.createElement("span", { style:{ fontWeight:700, fontSize:17 } }, money(total))) : null,
@@ -6887,11 +7390,11 @@ function EndorsementView({ pat, panel, recordedPanel, panels, onPanel, card, hol
     React.createElement("div", { style:{ display:"flex", gap:8, marginTop:14, paddingTop:12,
       borderTop:`1px solid ${BORDER}`, flexWrap:"wrap", alignItems:"center" } },
       React.createElement(SaveBtn, { onClick:onSave, saving:saving, saved:saved }),
-      React.createElement("button", { onClick:onPreview, disabled:!rows.length,
+      showPrint === false ? null : React.createElement("button", { onClick:onPreview, disabled:!rows.length,
         style:{ padding:"8px 16px", fontSize:14, border:`1px solid ${rows.length ? T : BORDER}`, borderRadius:7,
           cursor: rows.length ? "pointer" : "not-allowed", color: rows.length ? T : "#5a5a5a",
           background:"#fff", fontWeight:600 } }, "\u{1F441} Preview Endorsement"),
-      React.createElement("button", { onClick:onPrint, disabled:!rows.length,
+      showPrint === false ? null : React.createElement("button", { onClick:onPrint, disabled:!rows.length,
         style:{ padding:"8px 20px", fontSize:14, border:"none", borderRadius:7,
           cursor: rows.length ? "pointer" : "not-allowed", color:"#fff",
           background: rows.length ? T : "#9ca3af", fontWeight:700 } }, "\u{1F5A8} Print Endorsement")));
@@ -29725,7 +30228,8 @@ function ClinicalRecords({ globalPat, setGlobalPat }) {
       React.createElement("span", { style:{ color:"#059669", fontSize:12, fontWeight:600 } }, "✓ Will auto-fill")
     ),
     React.createElement("div", { style:{ display:"flex", gap:4, background:BGS, borderRadius:8, padding:4, marginBottom:20, width:"fit-content" } },
-      [{id:"forms",label:"📋 Forms"},{id:"sheets",label:"📊 Sheets"}].map(s =>
+      [{id:"forms",label:"📋 Forms"},{id:"sheets",label:"📊 Sheets"},
+       {id:"cghs",label:"🏥 CGHS"}].map(s =>
         React.createElement("button", {
           key:s.id, onClick:()=>setSection(s.id),
           style:{ padding:"10px 28px", fontSize:14, fontWeight:section===s.id?700:400, border:"none",
@@ -29757,7 +30261,11 @@ function ClinicalRecords({ globalPat, setGlobalPat }) {
         ))
       )
     ),
-    section === "sheets" && React.createElement(ClinicalSheets, { key:(globalPat&&globalPat.uhid)||"x", globalPat:globalPat, setGlobalPat:setGlobalPat })
+    section === "sheets" && React.createElement(ClinicalSheets, { key:(globalPat&&globalPat.uhid)||"x", globalPat:globalPat, setGlobalPat:setGlobalPat }),
+    // The panel case, in the order it actually happens: the endorsement
+    // comes back and is ticked, and only what was ticked is prescribed and
+    // billed. The Treatment Plan writes the request; this records the answer.
+    section === "cghs" && React.createElement(CghsRecords, { key:(globalPat&&globalPat.uhid)||"x", globalPat:globalPat })
   );
 }
 
@@ -29775,28 +30283,6 @@ function Prescription({ globalPat }) {
   // and whichever answered last would decide what the pad looks like.
   const [padMargins, setPadMargins] = React.useState(null);
   const [clinicName, setClinicName] = React.useState(null);
-  // What came back endorsed on this patient's CGHS endorsement. A procedure
-  // that was not endorsed must not be prescribed, so only ticked lines are
-  // read -- this screen never shows the whole plan.
-  const [rxEnd, setRxEnd] = React.useState([]);
-  const [rxLoaded, setRxLoaded] = React.useState(false);
-  // The date is the clinic's to set: an endorsement comes back days after it
-  // went out, and the prescription is written for the day the patient is in
-  // the chair, not for the day somebody opened the screen.
-  const [rxDate, setRxDate] = React.useState(() => toISODate(new Date()));
-  React.useEffect(() => {
-    setRxEnd([]); setRxLoaded(false);
-    setRxDate(toISODate(new Date()));
-    if (!globalPat || !globalPat.uhid) return;
-    let dropped = false;
-    api("getTreatmentPlan", { uhid: globalPat.uhid }).then(res => {
-      if (dropped) return;
-      const rows = (res && res.success && res.rows) || [];
-      setRxEnd(rows.filter(r => r && r.selected && r.endApproved && (r.procedure || r.cghsCode)));
-      setRxLoaded(true);
-    }).catch(() => { if (!dropped) setRxLoaded(true); });
-    return () => { dropped = true; };
-  }, [globalPat && globalPat.uhid]);
 
   React.useEffect(() => {
     api("getClinicProfile").then(res => {
@@ -29927,65 +30413,6 @@ function Prescription({ globalPat }) {
   React.useEffect(() => { sendPadMarginsToForm(); }, [padMargins]);
   React.useEffect(() => { sendClinicNameToForm(); }, [clinicName]);
 
-  // Printed on the clinic's own pad, like the endorsement: the letterhead is
-  // already on the paper, so this draws none and keeps clear of it. The
-  // margins are the ones the form itself was given, so the two sheets come
-  // out of the same pad the same way.
-  const buildRxHTML = () => {
-    const esc = (v) => String(v === undefined || v === null ? "" : v)
-      .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-    const m = padMargins || { top:"44mm", right:"15mm", bottom:"15mm", left:"52mm", flip:false };
-    const margins = m.flip ? [m.bottom, m.left, m.top, m.right].join(" ")
-                           : [m.top, m.right, m.bottom, m.left].join(" ");
-    const flipCss = m.flip ? "body{transform:rotate(180deg);transform-origin:50% 50%;}" : "";
-    const when = fmtDMY(rxDate) || TODAY;
-    const trs = rxEnd.map((r, i) => `<tr><td class="c">${i + 1}</td>` +
-      `<td class="c b">${esc(r.cghsCode) || "\u2014"}</td>` +
-      `<td>${esc(r.procedure)}</td>` +
-      `<td class="c b">${esc(r.tooth) || "\u2014"}</td>` +
-      `<td class="c">${esc(r.qty) || 1}</td></tr>`).join("");
-    return `<!DOCTYPE html><html><head><meta charset="UTF-8"/><style>` +
-      `@page{size:A4 portrait;margin:${margins};}` +
-      `*{box-sizing:border-box;margin:0;padding:0;}${flipCss}` +
-      `body{font-family:'Segoe UI',Arial,sans-serif;font-size:10.5pt;color:#111;background:#fff;}` +
-      `.dtitle{text-align:center;font-size:12.5pt;font-weight:800;color:#0078B4;` +
-      `text-transform:uppercase;letter-spacing:0.06em;margin-bottom:8pt;}` +
-      `.g4{display:grid;grid-template-columns:2fr 0.8fr 1.2fr 1.2fr;gap:5pt 8pt;margin-bottom:6pt;}` +
-      `.fl{margin-bottom:4pt;}` +
-      `.lbl{font-size:7pt;font-weight:700;color:#383838;text-transform:uppercase;letter-spacing:0.04em;margin-bottom:1pt;}` +
-      `.val{font-size:10.5pt;border-bottom:0.5pt solid #ccc;padding-bottom:1pt;min-height:14pt;}` +
-      `.sec{background:#f0f6fb;border-left:3pt solid #0078B4;padding:3pt 7pt;font-size:8pt;font-weight:800;` +
-      `text-transform:uppercase;letter-spacing:0.06em;color:#0078B4;margin:8pt 0 5pt;}` +
-      `table{width:100%;border-collapse:collapse;}` +
-      `th{background:#f0f6fb;color:#0078B4;padding:4pt 6pt;font-size:8pt;font-weight:700;text-align:left;` +
-      `border-bottom:1pt solid #0078B4;}` +
-      `td{padding:4pt 6pt;border-bottom:0.5pt solid #eee;font-size:10pt;vertical-align:middle;}` +
-      `.c{text-align:center;} .b{font-weight:700;}` +
-      `.sig{margin-top:22pt;width:60%;}` +
-      `.sigbox{border-bottom:0.5pt solid #bbb;height:34pt;margin-bottom:3pt;}` +
-      `</style></head><body>` +
-      `<div class="dtitle">Prescription \u2014 Treatment Advised</div>` +
-      `<div class="g4">` +
-        `<div class="fl"><div class="lbl">Patient Name</div><div class="val">${esc(globalPat.name) || "&nbsp;"}</div></div>` +
-        `<div class="fl"><div class="lbl">Age</div><div class="val">${esc(calcAge(globalPat.dob || globalPat.DOB)) || "&nbsp;"}</div></div>` +
-        `<div class="fl"><div class="lbl">UHID</div><div class="val">${esc(globalPat.uhid) || "&nbsp;"}</div></div>` +
-        `<div class="fl"><div class="lbl">Date</div><div class="val">${esc(when)}</div></div>` +
-      `</div>` +
-      `<div class="sec">Treatment Advised \u2014 Endorsed</div>` +
-      `<table><thead><tr><th style="width:8%" class="c">Sn</th><th style="width:15%">Code</th>` +
-      `<th>Treatment Advised</th><th style="width:16%" class="c">Tooth Number</th>` +
-      `<th style="width:12%" class="c">No. of Units</th></tr></thead><tbody>${trs}</tbody></table>` +
-      `<div class="sig"><div class="lbl">Signature of the Doctor</div><div class="sigbox"></div>` +
-      `<div style="font-size:8.5pt;color:#2e2e2e">${signatureLine(when)}</div></div>` +
-      `</body></html>`;
-  };
-  const printRx = () => {
-    const w = window.open("", "_blank");
-    w.document.write(buildRxHTML());
-    w.document.close();
-    setTimeout(() => w.print(), 600);
-  };
-
   if (!globalPat || !globalPat.uhid) {
     return React.createElement("div", null,
       React.createElement(ClinicHeader, null),
@@ -29997,26 +30424,6 @@ function Prescription({ globalPat }) {
   return React.createElement("div", {
     style:{ display:"flex", flexDirection:"column", height:"100%", margin:"-28px -32px", overflow:"hidden" }
   },
-    // Only when this patient has something endorsed. A panel case is a small
-    // part of the day, and a bar that is always there -- usually saying
-    // nothing -- is a bar nobody reads.
-    rxEnd.length ? React.createElement("div", { style:{ display:"flex", gap:12, alignItems:"center",
-      flexWrap:"wrap", padding:"10px 32px", background:"#f0fdf6", borderBottom:`1px solid #059669` } },
-      React.createElement("div", { style:{ fontSize:13.5, fontWeight:700, color:"#065f46" } },
-        "\u2713 " + rxEnd.length + " endorsed treatment" + (rxEnd.length === 1 ? "" : "s") + " on the CGHS endorsement"),
-      React.createElement("div", { style:{ fontSize:13, color:"#2e2e2e" } },
-        rxEnd.map(r => String(r.procedure || r.cghsCode || "").trim())
-          .filter(Boolean).slice(0, 3).join(", ") + (rxEnd.length > 3 ? "\u2026" : "")),
-      React.createElement("div", { style:{ display:"flex", gap:8, alignItems:"center", marginLeft:"auto" } },
-        React.createElement("span", { style:{ fontSize:12, fontWeight:700, color:"#065f46",
-          textTransform:"uppercase", letterSpacing:".04em" } }, "Date"),
-        React.createElement("input", { type:"date", value:rxDate,
-          onChange: e => setRxDate(e.target.value),
-          style:{ ...inp, width:160 } }),
-        React.createElement("button", { onClick:printRx,
-          style:{ padding:"8px 18px", fontSize:13.5, fontWeight:700, border:"none", borderRadius:7,
-            cursor:"pointer", background:"#059669", color:"#fff" } },
-          "\uD83D\uDDA8 Print Treatment Advised"))) : null,
     React.createElement("iframe", {
       ref: iframeRef,
       src: getPrescriptionFormUrl(),
