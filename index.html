@@ -134,6 +134,21 @@ function fmtDMY(input) {
   } catch (e) { return String(input); }
 }
 const TODAY = fmtDMY(new Date());
+// Some work is not done on a tooth. Scaling is a full mouth, a flap is a
+// quadrant, a denture is an arch -- and a panel bills them that way, as one
+// unit for the region rather than as sixteen teeth. So a region goes into
+// the tooth box as itself, in the words the claim is read in, and prints
+// that way. The short label is for the button; the value is what a clerk
+// at the Wellness Centre reads.
+const TOOTH_REGIONS = [
+  { label: "Full Mouth",  value: "Full Mouth",  hint: "The whole mouth" },
+  { label: "Upper Arch",  value: "Upper Arch",  hint: "The whole upper arch" },
+  { label: "Lower Arch",  value: "Lower Arch",  hint: "The whole lower arch" },
+  { label: "Q1", value: "Quadrant 1", hint: "Quadrant 1 \u2014 upper right (18\u201311)" },
+  { label: "Q2", value: "Quadrant 2", hint: "Quadrant 2 \u2014 upper left (21\u201328)" },
+  { label: "Q3", value: "Quadrant 3", hint: "Quadrant 3 \u2014 lower left (31\u201338)" },
+  { label: "Q4", value: "Quadrant 4", hint: "Quadrant 4 \u2014 lower right (41\u201348)" }
+];
 const UPPER_T = [18, 17, 16, 15, 14, 13, 12, 11, 21, 22, 23, 24, 25, 26, 27, 28];
 const LOWER_T = [48, 47, 46, 45, 44, 43, 42, 41, 31, 32, 33, 34, 35, 36, 37, 38];
 
@@ -181,7 +196,7 @@ const KB_BACKEND_BUILD_REQUIRED = "2026-11-02b";
 //
 // It moves with every change to this file. Same shape as the backend's: a
 // date, and a letter when there is more than one in a day.
-const KB_APP_BUILD = "2026-11-04a";
+const KB_APP_BUILD = "2026-11-04b";
 
 // Three answers, not two. A build string is a plain date, so comparing
 // them as text compares them as dates.
@@ -1309,12 +1324,29 @@ function DOBInput({
 function ToothChart({
   rows,
   onClick,
+  // Given by whoever wants regions offered. Left out, the chart is exactly
+  // what it was, so a screen that only ever means single teeth is unchanged.
+  onRegion,
   // The caption under the grid. The treatment plan fills the next empty row
   // from it; the endorsement toggles teeth on one chosen row. Same grid,
   // different promise, so the promise is the caller's to make.
   hint
 }) {
-  const used = new Set(rows.map(r => parseInt(r.tooth)).filter(Boolean));
+  // One row can carry several teeth -- a crown on 16 and 26 is one code and
+  // two units -- so the whole box is read, not just the number it starts
+  // with. parseInt("16, 26") is 16, which lit one of them and left the
+  // other looking unselected on the chart that had just set it.
+  const used = new Set();
+  rows.forEach(r => String(r.tooth || "").split(",").forEach(part => {
+    const n = parseInt(part, 10);
+    if (n) used.add(n);
+  }));
+  // A region is matched whole: "Quadrant 1" is not a tooth, and parseInt
+  // would have turned it into one.
+  const regionOn = [];
+  rows.forEach(r => String(r.tooth || "").split(",").map(x => x.trim()).forEach(part => {
+    if (part && regionOn.indexOf(part) < 0 && TOOTH_REGIONS.some(x => x.value === part)) regionOn.push(part);
+  }));
   const btn = t => /*#__PURE__*/React.createElement("button", {
     key: t,
     onClick: () => onClick(t),
@@ -1417,7 +1449,23 @@ function ToothChart({
       marginTop: 4,
       fontStyle: "italic"
     }
-  }, hint || "Blue = tooth in plan \xB7 Click any tooth to fill next empty row"));
+  }, hint || "Blue = tooth in plan \xB7 Click any tooth to fill next empty row"),
+    // Under the teeth, not among them: these are a different kind of answer
+    // to "where", and mixing them into the grid would make them look like
+    // more teeth.
+    onRegion ? /*#__PURE__*/React.createElement("div", {
+      style: { display: "flex", gap: 6, flexWrap: "wrap", justifyContent: "center",
+        marginTop: 8, paddingTop: 8, borderTop: `1px solid ${BORDER}` }
+    }, TOOTH_REGIONS.map(function (r) {
+      var on = regionOn.indexOf(r.value) >= 0;
+      return /*#__PURE__*/React.createElement("button", {
+        key: r.value, onClick: function () { onRegion(r.value); }, title: r.hint,
+        style: { padding: "5px 12px", fontSize: 12.5, fontWeight: on ? 700 : 600,
+          borderRadius: 14, cursor: "pointer",
+          border: `1px solid ${on ? T : BORDER}`,
+          background: on ? T : "#fff", color: on ? "#fff" : "#444444" }
+      }, r.label);
+    })) : null);
 }
 function ClinicHeader() {
   return /*#__PURE__*/React.createElement("div", {
@@ -4283,6 +4331,13 @@ function CarePlan({
       [k]: v
     } : r)
   }));
+  // A region answers the same question a tooth does -- where -- so it goes
+  // in the same box, and fills the next empty row the same way.
+  const clickRegion = v => setP4(prev => {
+    const idx = prev.rows.findIndex(r => !r.tooth);
+    if (idx >= 0) return { ...prev, rows: prev.rows.map((r, i) => i === idx ? { ...r, tooth: v } : r) };
+    return { ...prev, rows: [...prev.rows, { ...emptyRow(), tooth: v }] };
+  });
   const clickTooth = t => {
     setP4(prev => {
       const idx = prev.rows.findIndex(r => !r.tooth);
@@ -5180,7 +5235,8 @@ function CarePlan({
     t: "Dental Chart \u2014 Click a tooth to add to treatment plan"
   }), /*#__PURE__*/React.createElement(ToothChart, {
     rows: p4.rows,
-    onClick: clickTooth
+    onClick: clickTooth,
+    onRegion: clickRegion
   }), /*#__PURE__*/React.createElement(Sec, {
     t: "Treatment Plan"
   }), /*#__PURE__*/React.createElement("div", {
@@ -5651,6 +5707,11 @@ function TreatmentPlan({
       setTimeout(() => setSaved(false), 3000);
     } else alert("Save error: " + (res.error || "Unknown"));
   };
+  const clickRegion = v => setTpRows(prev => {
+    const idx = prev.findIndex(r => !r.tooth && !r.endAdded);
+    if (idx >= 0) return prev.map((r, i) => i === idx ? { ...r, tooth: v } : r);
+    return [...prev, { ...mkRow("Phase 1"), tooth: v }];
+  });
   const clickTooth = t => setTpRows(prev => {
     const idx = prev.findIndex(r => !r.tooth);
     if (idx >= 0) return prev.map((r, i) => i === idx ? {
@@ -5777,6 +5838,13 @@ function TreatmentPlan({
       const next = have.indexOf(want) >= 0 ? have.filter(x => x !== want) : have.concat(want);
       return { ...r, tooth: next.join(", ") };
     }));
+    setSaved(false);
+  };
+  const endClickRegion = (v) => {
+    const at = endActive;
+    if (at === null || at === undefined) return;
+    setTpRows(prev => prev.map((r, i) =>
+      i !== at ? r : { ...r, tooth: String(r.tooth || "").trim() === v ? "" : v }));
     setSaved(false);
   };
   const endRows = tpRows
@@ -6192,7 +6260,8 @@ function TreatmentPlan({
     }
   }, "\uD83D\uDDA8 Print Treatment Plan"))), /*#__PURE__*/React.createElement(ToothChart, {
     rows: planRows,
-    onClick: clickTooth
+    onClick: clickTooth,
+    onRegion: clickRegion
   }), /*#__PURE__*/React.createElement("div", {
     style: {
       display: "grid",
@@ -6663,7 +6732,8 @@ function TreatmentPlan({
     setCode: setCode,
     setRowField: setRowField, setProcedure: setProcedure,
     active: endActive, setActive: setEndActive,
-    onTooth: endClickTooth, onAdd: addEndRow, onRemove: removeEndRow,
+    onTooth: endClickTooth, onRegion: endClickRegion,
+    onAdd: addEndRow, onRemove: removeEndRow,
     onSave: saveTP, saving: saving, saved: saved,
     onPreview: () => doPreview("endorsement"), onPrint: () => doPrint("endorsement")
   }), preview && /*#__PURE__*/React.createElement(PreviewModal, {
@@ -6826,6 +6896,12 @@ function useEndorsementRecord(pat) {
     }));
     touch();
   };
+  const onRegion = (v) => {
+    if (active === null || active === undefined) return;
+    setRows(prev => prev.map((r, i) =>
+      i !== active ? r : { ...r, tooth: String(r.tooth || "").trim() === v ? "" : v }));
+    touch();
+  };
   const onAdd = () => {
     setRows(prev => {
       const next = [...prev, { ...mkRow("Phase 1"), selected: true, endAdded: true }];
@@ -6889,7 +6965,7 @@ function useEndorsementRecord(pat) {
   return {
     loaded, loadErr, rows, endRows, approved, total, approvedTotal, missing,
     panel, recordedPanel, panels, panelPat, card, holder, panelRates, ratesMsg,
-    active, setActive, setCode, setProcedure, setRowField, onTooth, onAdd, onRemove,
+    active, setActive, setCode, setProcedure, setRowField, onTooth, onRegion, onAdd, onRemove,
     onPanel: (v) => setPanelEdits(e => ({ ...e, panel: v })),
     onCard: (v) => setPanelEdits(e => ({ ...e, cardId: v })),
     onHolder: (v) => setPanelEdits(e => ({ ...e, panelCategory: v })),
@@ -6945,7 +7021,7 @@ function CghsRecords({ globalPat }) {
       rows: e.endRows, total: e.total, missing: e.missing,
       approvedCount: e.approved.length, approvedTotal: e.approvedTotal,
       setCode: e.setCode, setRowField: e.setRowField, setProcedure: e.setProcedure,
-      active: e.active, setActive: e.setActive, onTooth: e.onTooth,
+      active: e.active, setActive: e.setActive, onTooth: e.onTooth, onRegion: e.onRegion,
       onAdd: e.onAdd, onRemove: e.onRemove,
       onSave: e.save, saving: e.saving, saved: e.saved,
       onPreview: () => {}, onPrint: () => {}
@@ -7228,7 +7304,8 @@ function EndorsementView({ showApproved, pat, panel, recordedPanel, panels, onPa
                            rates, ratesMsg,
                            showPrint, rows, total, missing, approvedCount, approvedTotal,
                            setCode, setRowField, setProcedure, active, setActive,
-                           onTooth, onAdd, onRemove, onSave, saving, saved, onPreview, onPrint }) {
+                           onTooth, onRegion, onAdd, onRemove, onSave, saving, saved,
+                           onPreview, onPrint }) {
   const money = (n) => "₹" + Number(n || 0).toLocaleString("en-IN");
   const note = (text, tone) => React.createElement("div", { style:{
     fontSize:13, lineHeight:1.6, borderRadius:7, padding:"9px 12px", marginBottom:10,
@@ -7323,7 +7400,8 @@ function EndorsementView({ showApproved, pat, panel, recordedPanel, panels, onPa
         hint: activeRow
           ? "Blue = on this line · Click a tooth to add it, click it again to take it off"
           : "No line chosen yet — the teeth go on the line you click",
-        onClick: (t) => { if (activeRow) onTooth(t); } })),
+        onClick: (t) => { if (activeRow) onTooth(t); },
+        onRegion: (v) => { if (activeRow) onRegion(v); } })),
     React.createElement("datalist", { id:"kb-panel-codes" },
       rates.map(o => React.createElement("option", { key:o.code, value:o.code },
         o.procedure + (o.rate ? "  (" + money(o.rate) + ")" : "")))),

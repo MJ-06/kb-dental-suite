@@ -68,7 +68,7 @@ const VIEW = html.slice(A, B);
   // The tooth grid is the app's own, not a stand-in: the complaint was
   // that it was missing, so the real one has to be on this screen.
   await page.addScriptTag({ content:
-    html.slice(html.indexOf('const UPPER_T = ['), html.indexOf('\n', html.indexOf('const LOWER_T = ['))) });
+    html.slice(html.indexOf('const TOOTH_REGIONS = ['), html.indexOf('\n', html.indexOf('const LOWER_T = ['))) });
   await page.addScriptTag({ content:
     html.slice(html.indexOf('function ToothChart({'), html.indexOf('function ClinicHeader()')) });
   await page.addScriptTag({ content: VIEW });
