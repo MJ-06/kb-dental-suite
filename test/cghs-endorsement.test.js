@@ -178,7 +178,12 @@ const VIEW = html.slice(A, B);
   const PAT = { name: 'Asha Rao', uhid: 'KB1', cardId: 'C-77', panelCategory: 'Pensioner' };
   // The card details now come in as their own props, because they are typed
   // on this screen rather than only read from the record.
-  const CARD = { card: 'C-77', holder: 'Pensioner', panelSaving: false, panelSaved: false };
+  // Every case below is the RECORDS stage of this document: the one with
+  // the ticks, where what came back endorsed is recorded. The Treatment
+  // Plan stage, which writes the request and has no ticks, is checked on
+  // its own at the end.
+  const CARD = { showApproved: true, card: 'C-77', holder: 'Pensioner',
+                 panelSaving: false, panelSaved: false };
   const mkRows = () => ([
     { at: 0, r: { tooth: '16', procedure: 'RCT Single Rooted', qty: 1 }, code: 'DP030',
       card: RATES[0], rate: 1000, qty: 1, priced: true, amt: 1000 },
@@ -506,6 +511,26 @@ const VIEW = html.slice(A, B);
   ok('it reserves the pad margins the prescription uses',
      /@page\{size:A4 portrait;margin:44mm 15mm 15mm 52mm;\}/.test(doc.html),
      (/@page[^}]*\}/.exec(doc.html) || [])[0]);
+
+  // ── the other stage of the same document ──────────────────
+  // On the Treatment Plan the endorsement is the REQUEST: what is being
+  // asked for. It must not carry the ticks, because there are no answers
+  // yet, and a request that ticks its own answers is not one. The request
+  // is also what gets printed, so the buttons stay with it.
+  await mount({ ...CARD, showApproved: false, pat: PAT, panel: 'CGHS', recordedPanel: 'CGHS',
+                panels: ['CGHS'], rates: RATES, ratesMsg: '',
+                rows: mkRows().map((r, i) => i === 0 ? { ...r, r: { ...r.r, endApproved: true } } : r),
+                total: 2600, missing: 0, approvedCount: 1, approvedTotal: 1000 });
+  eq('the request stage has no tick, even on a line already endorsed',
+     (await page.$$('tbody tr input[type=checkbox]')).length, 0);
+  eq('and its columns start at the code',
+     await page.$$eval('thead th', t => t.map(x => x.textContent)),
+     ['Code', 'Treatment Advised', 'Tooth Number', 'Units', 'Rate', 'Amount', '']);
+  ok('it does not count endorsements it cannot show',
+     !/endorsed/i.test(await page.textContent('#root')));
+  eq('it keeps Preview and Print, because the request is sent from there',
+     await page.$$eval('button', b => b.filter(x => /Print Endorsement|Preview Endorsement/.test(x.textContent)).length),
+     2);
 
   ok('nothing threw', errors.length === 0, errors.join(' // '));
   await browser.close();

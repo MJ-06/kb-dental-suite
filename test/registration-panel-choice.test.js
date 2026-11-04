@@ -70,15 +70,17 @@ eq('there is one registration save path, not a panel copy of it',
 // endorsement writing the panel details back onto the patient. EVERY one of
 // them has to carry the panel marking — a save that dropped it would record a
 // panel patient as an ordinary one and put the row in the wrong book.
-eq('there are exactly three saveRegistration calls',
-  (html.match(/api\("saveRegistration", \{/g) || []).length, 3);
+eq('there are exactly four saveRegistration calls',
+  (html.match(/api\("saveRegistration", \{/g) || []).length, 4);
 // The two registration paths carry it from whichever the front desk chose.
 eq('both registration paths carry the panel marking',
   (html.match(/\.\.\.\(patientType === "panel" \? \{/g) || []).length, 2);
-// The third is only ever reached from the endorsement, which is a panel
-// document by definition, so it says so outright.
-ok('and the endorsement\'s save marks the patient as panel',
-  /api\("saveRegistration", \{\s*uhid: pat\.uhid, patientType: "Panel",/.test(html));
+// The other two are the endorsement saving the card details back onto the
+// patient -- once from the Treatment Plan, where the request is written, and
+// once from Records, where the answer is recorded. Both are panel documents
+// by definition, so both say so outright.
+eq('and both endorsement saves mark the patient as panel',
+  (html.match(/uhid(?:: pat\.uhid)?, patientType: "Panel",/g) || []).length, 2);
 // It must not send a mobile: apiDirect turns a missing value into "", and
 // removePending deletes the Pending row whose mobile cell matches — an empty
 // one would match a blank cell and delete somebody else's pending patient.
