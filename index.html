@@ -181,7 +181,7 @@ const KB_BACKEND_BUILD_REQUIRED = "2026-11-02b";
 //
 // It moves with every change to this file. Same shape as the backend's: a
 // date, and a letter when there is more than one in a day.
-const KB_APP_BUILD = "2026-11-04";
+const KB_APP_BUILD = "2026-11-04a";
 
 // Three answers, not two. A build string is a plain date, so comparing
 // them as text compares them as dates.
@@ -7092,11 +7092,35 @@ function CghsPrescription({ pat, lines }) {
 function CghsBill({ pat, panel, card, holder, lines }) {
   const pad = usePadMargins();
   const [date, setDate] = React.useState(() => toISODate(new Date()));
-  // Typed for now. A number that can never be issued twice has to be handed
-  // out by the server, and until that is deployed a typed one is honest:
-  // the clinic knows which number it is issuing, the app does not pretend to.
+  // The number comes from the server, which hands it out under a lock: two
+  // people billing at the same counter at the same moment must not both be
+  // told "0001". It can still be typed, because a backend that has not been
+  // redeployed yet should not stop a clinic billing -- it just means the
+  // clinic is keeping the series itself for now, and the screen says so.
   const [billNo, setBillNo] = React.useState("");
+  const [issuing, setIssuing] = React.useState(false);
+  const [issued, setIssued] = React.useState(false);
+  const [issueErr, setIssueErr] = React.useState("");
   const total = lines.reduce((t, x) => t + x.amt, 0);
+  const issue = async () => {
+    setIssuing(true); setIssueErr("");
+    try {
+      const res = await api("saveCghsBill", {
+        uhid: pat.uhid, patientName: pat.name || "", billDate: date,
+        panel: panel || "", cardId: card || "", panelCategory: holder || "",
+        amount: total,
+        lines: JSON.stringify(lines.map(x => ({
+          code: x.code, procedure: x.r.procedure || (x.card && x.card.procedure) || "",
+          tooth: x.r.tooth || "", qty: x.qty, rate: x.rate, amount: x.amt
+        })))
+      });
+      if (res && res.success && res.billNo) { setBillNo(res.billNo); setIssued(true); }
+      else setIssueErr((res && res.error) || "The bill number could not be issued.");
+    } catch (e) {
+      setIssueErr(e && e.message ? e.message : String(e));
+    }
+    setIssuing(false);
+  };
   const build = () => {
     const when = fmtDMY(date) || TODAY;
     const money = (v) => Number(v || 0).toLocaleString("en-IN");
@@ -7139,15 +7163,32 @@ function CghsBill({ pat, panel, card, holder, lines }) {
     React.createElement("div", { style:{ display:"flex", gap:12, alignItems:"flex-end",
       flexWrap:"wrap", marginBottom:14 } },
       fld("Bill No.", React.createElement("input", { value:billNo,
-        placeholder:"e.g. 2026110001", onChange: e => setBillNo(e.target.value),
-        style:{ ...inp, width:170 } })),
+        placeholder:"not issued yet", readOnly: issued,
+        title: issued ? "Issued by the server \u2014 it cannot be issued again" : "",
+        onChange: e => setBillNo(e.target.value),
+        style:{ ...inp, width:170, background: issued ? BGS : "#fff",
+                fontWeight: issued ? 700 : 400 } })),
       fld("Bill Date", React.createElement("input", { type:"date", value:date,
-        onChange: e => setDate(e.target.value), style:{ ...inp, width:170 } })),
+        onChange: e => setDate(e.target.value), disabled: issued,
+        style:{ ...inp, width:170, background: issued ? BGS : "#fff" } })),
+      issued ? null : React.createElement("button", { onClick:issue, disabled:issuing,
+        title:"Takes the next number in this month's series and saves the bill",
+        style:{ padding:"9px 16px", fontSize:13.5, fontWeight:700, borderRadius:7,
+          border:`1px solid #059669`, cursor: issuing ? "not-allowed" : "pointer",
+          background:"#fff", color:"#059669" } },
+        issuing ? "Issuing\u2026" : "Issue bill number"),
       React.createElement("button", { onClick: () => cghsPrint(build()), disabled: !billNo.trim(),
         title: billNo.trim() ? "" : "A bill needs its number before it is printed",
         style:{ padding:"9px 20px", fontSize:14, fontWeight:700, border:"none", borderRadius:7,
           cursor: billNo.trim() ? "pointer" : "not-allowed",
           background: billNo.trim() ? T : "#9ca3af", color:"#fff" } }, "🖨 Print Bill")),
+    issueErr ? React.createElement("div", { style:{ background:"#fffbeb", border:"1px solid #f59e0b",
+      borderRadius:8, padding:"10px 13px", fontSize:13.5, color:"#92400e", lineHeight:1.6,
+      marginBottom:12 } },
+      issueErr + " You can type the number yourself and print \u2014 the bill just will not be saved to the CGHS Bills register.") : null,
+    issued ? React.createElement("div", { style:{ background:"#f0fdf6", border:"1px solid #059669",
+      borderRadius:8, padding:"10px 13px", fontSize:13.5, color:"#065f46", marginBottom:12 } },
+      "\u2713 Bill " + billNo + " issued and saved. It is in Finance \u2192 CGHS Bills.") : null,
     React.createElement(CghsLines, { lines: lines, showAmount: true }),
     React.createElement("div", { style:{ display:"flex", justifyContent:"flex-end", gap:14,
       alignItems:"baseline", marginTop:12, fontSize:15 } },
@@ -9427,6 +9468,10 @@ const RECORDS_MENU_ITEMS = [
   // procedures. The name simply did not say so.
   { id:"procedures",       label:"📋 Procedures, Notes & Fees" },
   { id:"clinical_records", label:"📁 Clinical Records"    },
+  // A panel claim is its own run of work -- the endorsement goes out, comes
+  // back, and only then is there a prescription and a bill -- so it stands
+  // beside the clinical records rather than being a tab inside them.
+  { id:"cghs",             label:"🏥 CGHS"               },
   { id:"daily_register",   label:"📋 Daily Register"      },
 ];
 
@@ -30228,8 +30273,7 @@ function ClinicalRecords({ globalPat, setGlobalPat }) {
       React.createElement("span", { style:{ color:"#059669", fontSize:12, fontWeight:600 } }, "✓ Will auto-fill")
     ),
     React.createElement("div", { style:{ display:"flex", gap:4, background:BGS, borderRadius:8, padding:4, marginBottom:20, width:"fit-content" } },
-      [{id:"forms",label:"📋 Forms"},{id:"sheets",label:"📊 Sheets"},
-       {id:"cghs",label:"🏥 CGHS"}].map(s =>
+      [{id:"forms",label:"📋 Forms"},{id:"sheets",label:"📊 Sheets"}].map(s =>
         React.createElement("button", {
           key:s.id, onClick:()=>setSection(s.id),
           style:{ padding:"10px 28px", fontSize:14, fontWeight:section===s.id?700:400, border:"none",
@@ -30261,11 +30305,7 @@ function ClinicalRecords({ globalPat, setGlobalPat }) {
         ))
       )
     ),
-    section === "sheets" && React.createElement(ClinicalSheets, { key:(globalPat&&globalPat.uhid)||"x", globalPat:globalPat, setGlobalPat:setGlobalPat }),
-    // The panel case, in the order it actually happens: the endorsement
-    // comes back and is ticked, and only what was ticked is prescribed and
-    // billed. The Treatment Plan writes the request; this records the answer.
-    section === "cghs" && React.createElement(CghsRecords, { key:(globalPat&&globalPat.uhid)||"x", globalPat:globalPat })
+    section === "sheets" && React.createElement(ClinicalSheets, { key:(globalPat&&globalPat.uhid)||"x", globalPat:globalPat, setGlobalPat:setGlobalPat })
   );
 }
 
@@ -30443,6 +30483,7 @@ const FIN_TABS = [
   { id:"payments",    label:"💳 Payments" },
   { id:"daily",       label:"📅 Collection" },
   { id:"outstanding", label:"⚖️ Outstanding Balance" },
+  { id:"cghsbills",   label:"🏥 CGHS Bills" },
   { id:"pnl",         label:"📈 Profit & Loss" },
   { id:"settings",    label:"⚙️ Settings" },
 ];
@@ -31706,8 +31747,150 @@ function FinanceModule({ globalPat, setGlobalPat, initialTab }) {
     tab === "daily" && React.createElement(FinanceDailyTab, null),
     tab === "pnl" && React.createElement(SimplePasswordGate, { verifyAction:"verifyFinancePassword", sessionKey:"kbdc_fin_unlocked_pnl", message:"Enter the finance password to view this tab." }, React.createElement(FinanceProfitLossTab, null)),
     tab === "outstanding" && React.createElement(FinanceOutstandingTab, { globalPat }),
+    tab === "cghsbills" && React.createElement(FinanceCghsBillsTab, { globalPat }),
     tab === "settings" && React.createElement(FinanceSettingsSubTab, null)
   );
+}
+
+// ── Finance → CGHS Bills ─────────────────────────────────────────────
+// The register the panel is sent, and the one the front desk searches when
+// a patient rings about a bill. Bills are WRITTEN in Records → CGHS, where
+// the endorsed work is; this is where they are found again afterwards.
+function FinanceCghsBillsTab({ globalPat }) {
+  const [bills, setBills] = React.useState([]);
+  const [loading, setLoading] = React.useState(true);
+  const [err, setErr] = React.useState("");
+  const [q, setQ] = React.useState("");
+  const [open, setOpen] = React.useState(null);
+  const pad = usePadMargins();
+
+  const load = React.useCallback(() => {
+    setLoading(true); setErr("");
+    api("getCghsBills").then(res => {
+      if (res && res.success) setBills(res.bills || []);
+      else setErr((res && res.error) || "The CGHS bill register could not be read.");
+      setLoading(false);
+    }).catch(e => { setErr(e && e.message ? e.message : String(e)); setLoading(false); });
+  }, []);
+  React.useEffect(() => { load(); }, [load]);
+  // Opening Finance with a patient already active is almost always about
+  // that patient, so their UHID starts in the box rather than having to be
+  // typed again. It is still just a filter, and clearing it shows them all.
+  React.useEffect(() => { if (globalPat && globalPat.uhid) setQ(globalPat.uhid); }, [globalPat && globalPat.uhid]);
+
+  const needle = q.trim().toLowerCase();
+  const shown = !needle ? bills : bills.filter(b =>
+    String(b.uhid || "").toLowerCase().includes(needle) ||
+    String(b.billNo || "").toLowerCase().includes(needle) ||
+    String(b.patientName || "").toLowerCase().includes(needle));
+
+  const money = (v) => "₹" + Number(v || 0).toLocaleString("en-IN");
+  const cell = { padding:"8px 11px", fontSize:13.5 };
+  const th = (t, a) => React.createElement("th", { style:{ textAlign:a || "left",
+    padding:"9px 11px", fontSize:12.5, fontWeight:700, color:"#444444" } }, t);
+
+  // Reprinted from what was saved, not rebuilt from the plan: the plan can
+  // change afterwards and a bill that has gone to the panel must not.
+  const reprint = (b) => {
+    const esc = cghsEsc;
+    const n = (v) => Number(v || 0).toLocaleString("en-IN");
+    const trs = (b.lines || []).map((l, i) => `<tr><td class="c">${i + 1}</td>` +
+      `<td class="c b">${esc(l.tooth) || "\u2014"}</td>` +
+      `<td class="c b">${esc(l.code) || "\u2014"}</td>` +
+      `<td>${esc(l.procedure)}</td><td class="c">${esc(l.qty)}</td>` +
+      `<td class="r">${n(l.rate)}</td><td class="r b">${n(l.amount)}</td></tr>`).join("");
+    const kv = (k, v) => `<div class="kv"><b>${esc(k)}</b>: ${esc(v) || "&nbsp;"}</div>`;
+    cghsPrint(`<!DOCTYPE html><html><head><meta charset="UTF-8"/><style>${cghsPadCss(pad)}</style></head><body>` +
+      `<div class="dtitle">Bill</div><div class="g2">` +
+        kv("Bill No.", b.billNo) + kv("Bill Date", fmtDMY(b.billDate) || b.billDate) +
+        kv("Patient", b.patientName) + kv("Registration No", b.cardId) +
+        kv("UHID", b.uhid) + kv("Panel Category", b.panelCategory) +
+        kv("Panel", b.panel) +
+      `</div><table><thead><tr><th style="width:6%" class="c">Sn</th>` +
+      `<th style="width:12%" class="c">Tooth No</th><th style="width:12%" class="c">Code</th>` +
+      `<th>Description</th><th style="width:7%" class="c">Unit</th>` +
+      `<th style="width:13%" class="r">Rate (In Rs.)</th>` +
+      `<th style="width:14%" class="r">Amount (In Rs.)</th></tr></thead><tbody>${trs}</tbody></table>` +
+      `<div class="tot"><span>Bill Amount</span><span>${n(b.amount)}</span></div>` +
+      `<div class="words">${esc(rupeesInWords(b.amount))}</div>` +
+      `<div class="sigrow"><div><div class="lbl">Patient Signature</div><div class="sigbox"></div></div>` +
+      `<div><div class="lbl">For ${esc((window.CLINIC && window.CLINIC.name) || "the clinic")}</div>` +
+      `<div class="sigbox"></div><div style="font-size:8.5pt;color:#2e2e2e">Authorised Signatory</div></div></div>` +
+      `</body></html>`);
+  };
+
+  return React.createElement("div", null,
+    React.createElement("div", { style:{ display:"flex", gap:10, alignItems:"center",
+      flexWrap:"wrap", marginBottom:14 } },
+      React.createElement("input", { value:q, onChange:e => setQ(e.target.value),
+        placeholder:"Search by UHID, bill number or name…", style:{ ...inp, width:320 } }),
+      q ? React.createElement("button", { onClick:() => setQ(""),
+        style:{ padding:"8px 14px", fontSize:13, borderRadius:7, border:`1px solid ${BORDER}`,
+          background:"#fff", cursor:"pointer", color:"#444444" } }, "Show all") : null,
+      React.createElement("button", { onClick:load,
+        style:{ padding:"8px 14px", fontSize:13, borderRadius:7, border:`1px solid ${BORDER}`,
+          background:"#fff", cursor:"pointer", color:"#444444" } }, "Refresh"),
+      React.createElement("div", { style:{ marginLeft:"auto", fontSize:13, color:"#444444" } },
+        shown.length + (shown.length === 1 ? " bill" : " bills") +
+        (needle && shown.length !== bills.length ? " of " + bills.length : ""))),
+
+    err ? React.createElement("div", { style:{ background:"#fffbeb", border:"1px solid #f59e0b",
+      borderRadius:8, padding:"10px 13px", fontSize:13.5, color:"#92400e", lineHeight:1.6 } },
+      err) : null,
+    loading ? React.createElement("div", { style:{ padding:20, textAlign:"center",
+      color:"#444444", fontSize:14 } }, "⏳ Loading…") : null,
+
+    (!loading && !err && shown.length === 0) ? React.createElement("div", { style:{ background:BGS,
+      borderRadius:8, padding:24, textAlign:"center", color:"#444444", fontSize:14,
+      border:`1px dashed ${BORDER}` } },
+      bills.length === 0
+        ? "No CGHS bills yet. They are raised in Records → CGHS → Bill, once the endorsement comes back."
+        : "No bill matches that.") : null,
+
+    // Built as plain arrays rather than nested inline: a bill row and its
+    // lines are two levels of table, and counting brackets across them by
+    // eye is how a page stops compiling.
+    (!loading && shown.length > 0) ? (() => {
+      const detail = (b) => React.createElement("tr", { key: b.billNo + "-d", style:{ background:"#fafafa" } },
+        React.createElement("td", { colSpan:7, style:{ padding:"4px 11px 12px" } },
+          React.createElement("table", { style:{ width:"100%", borderCollapse:"collapse" } },
+            React.createElement("thead", null,
+              React.createElement("tr", null, th("Code"), th("Description"), th("Tooth"),
+                th("Unit", "center"), th("Rate", "right"), th("Amount", "right"))),
+            React.createElement("tbody", null, (b.lines || []).map((l, i) =>
+              React.createElement("tr", { key:i, style:{ borderTop:`1px solid ${BORDER}` } },
+                React.createElement("td", { style:{ ...cell, fontWeight:700 } }, l.code || "\u2014"),
+                React.createElement("td", { style:cell }, l.procedure || ""),
+                React.createElement("td", { style:cell }, l.tooth || "\u2014"),
+                React.createElement("td", { style:{ ...cell, textAlign:"center" } }, l.qty),
+                React.createElement("td", { style:{ ...cell, textAlign:"right" } }, money(l.rate)),
+                React.createElement("td", { style:{ ...cell, textAlign:"right", fontWeight:700 } },
+                  money(l.amount))))))));
+      const summary = (b) => React.createElement("tr", {
+        key: b.billNo, style:{ borderTop:`1px solid ${BORDER}`, cursor:"pointer" },
+        onClick: () => setOpen(open === b.billNo ? null : b.billNo) },
+        React.createElement("td", { style:{ ...cell, fontWeight:700 } }, b.billNo),
+        React.createElement("td", { style:cell }, fmtDMY(b.billDate) || b.billDate || "\u2014"),
+        React.createElement("td", { style:cell }, b.uhid),
+        React.createElement("td", { style:cell }, b.patientName || "\u2014"),
+        React.createElement("td", { style:cell }, b.panel || "\u2014"),
+        React.createElement("td", { style:{ ...cell, textAlign:"right", fontWeight:700 } }, money(b.amount)),
+        React.createElement("td", { style:{ ...cell, textAlign:"right", whiteSpace:"nowrap" } },
+          React.createElement("button", {
+            onClick: (e) => { e.stopPropagation(); reprint(b); },
+            style:{ padding:"5px 12px", fontSize:12.5, fontWeight:700, borderRadius:6,
+              border:`1px solid ${T}`, background:"#fff", color:T, cursor:"pointer" } },
+            "\uD83D\uDDA8 Reprint")));
+      const body = [];
+      shown.forEach(b => { body.push(summary(b)); if (open === b.billNo) body.push(detail(b)); });
+      return React.createElement("div", { style:{ background:"#fff",
+        border:`1px solid ${BORDER}`, borderRadius:8, overflow:"hidden" } },
+        React.createElement("table", { style:{ width:"100%", borderCollapse:"collapse" } },
+          React.createElement("thead", null, React.createElement("tr", { style:{ background:BGS } },
+            th("Bill No."), th("Date"), th("UHID"), th("Patient"), th("Panel"),
+            th("Amount", "right"), th(""))),
+          React.createElement("tbody", null, body)));
+    })() : null);
 }
 
 
@@ -33168,7 +33351,7 @@ function App() {
     }
   }, navItems.map(n => {
     const isActive = n.id === "records"
-      ? (page === "records" || page === "progress" || page === "clinical_records" || page === "daily_register")
+      ? (page === "records" || page === "progress" || page === "clinical_records" || page === "daily_register" || page === "cghs")
       : page === n.id;
     return /*#__PURE__*/React.createElement("div", {
       key: n.id,
@@ -33332,7 +33515,13 @@ function App() {
   }), page === "records" && /*#__PURE__*/React.createElement(RecordsPicker, {
     globalPat: globalPat,
     onNavigate: navigateFromSearch
-  }), page === "crm" && /*#__PURE__*/React.createElement(CRMModule, null), page === "chatbot" && /*#__PURE__*/React.createElement(ChatbotModule, null), page === "master" && /*#__PURE__*/React.createElement(SimplePasswordGate, { verifyAction:"verifyMasterPassword", sessionKey:"kbdc_master_unlocked", message:"Enter the Master password to view this page." }, /*#__PURE__*/React.createElement(Master, null)), page === "followups" && /*#__PURE__*/React.createElement(FollowUps, { onNavigate: setPage }), page === "reports" && /*#__PURE__*/React.createElement(SimplePasswordGate, { verifyAction:"verifyReportsPassword", sessionKey:"kbdc_reports_unlocked", message:"Enter your password to view Reports (either of the two people's passwords works)." }, /*#__PURE__*/React.createElement(ReportsModule, null))),
+  }), page === "cghs" && /*#__PURE__*/React.createElement("div", null,
+    /*#__PURE__*/React.createElement(ClinicHeader, null),
+    /*#__PURE__*/React.createElement("div", { style:{ fontSize:17, fontWeight:700, marginBottom:2 } }, "🏥 CGHS"),
+    /*#__PURE__*/React.createElement("div", { style:{ fontSize:13, color:"#444444", marginBottom:16 } },
+      "Endorsement, prescription and bill for a panel patient"),
+    /*#__PURE__*/React.createElement(CghsRecords, { key:(globalPat&&globalPat.uhid)||"x", globalPat:globalPat })
+  ), page === "crm" && /*#__PURE__*/React.createElement(CRMModule, null), page === "chatbot" && /*#__PURE__*/React.createElement(ChatbotModule, null), page === "master" && /*#__PURE__*/React.createElement(SimplePasswordGate, { verifyAction:"verifyMasterPassword", sessionKey:"kbdc_master_unlocked", message:"Enter the Master password to view this page." }, /*#__PURE__*/React.createElement(Master, null)), page === "followups" && /*#__PURE__*/React.createElement(FollowUps, { onNavigate: setPage }), page === "reports" && /*#__PURE__*/React.createElement(SimplePasswordGate, { verifyAction:"verifyReportsPassword", sessionKey:"kbdc_reports_unlocked", message:"Enter your password to view Reports (either of the two people's passwords works)." }, /*#__PURE__*/React.createElement(ReportsModule, null))),
     pendingRegister && /*#__PURE__*/React.createElement(RegisterConfirm, {
       entry: pendingRegister,
       onCancel: () => setPendingRegister(null),
