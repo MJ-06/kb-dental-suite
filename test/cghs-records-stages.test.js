@@ -19,8 +19,19 @@ const ok = (name, cond, detail) => checks.push({ name, ok: !!cond, got: detail }
 const eq = (name, got, want) => checks.push({ name, ok: JSON.stringify(got) === JSON.stringify(want), got, want });
 
 // ── the three stages, in order, under Records ───────────────────────────
-ok('Records has a CGHS tab', /\{id:"cghs",label:"🏥 CGHS"\}/.test(html));
-ok('and it renders the CGHS stages', /section === "cghs" && React\.createElement\(CghsRecords,/.test(html));
+// It stands BESIDE Clinical Records on the Records page, not inside it as a
+// tab: a panel claim is its own run of work, not a view of the clinical
+// record, and it is reached without going through one first.
+ok('CGHS is listed on the Records page beside Clinical Records',
+   /\{ id:"clinical_records", label:"[^"]*Clinical Records"\s*\},[\s\S]{0,400}?\{ id:"cghs",\s+label:"[^"]*CGHS"\s*\},/.test(html));
+ok('it is a page of its own',
+   /page === "cghs" && \/\*#__PURE__\*\/React\.createElement\("div", null,/.test(html));
+ok('and it renders the CGHS stages',
+   /React\.createElement\(CghsRecords, \{ key:\(globalPat&&globalPat\.uhid\)\|\|"x", globalPat:globalPat \}\)/.test(html));
+ok('Records stays lit in the sidebar while you are on it',
+   /page === "daily_register" \|\| page === "cghs"\)/.test(html));
+ok('and it is no longer a tab inside Clinical Records',
+   !/\{id:"cghs",label:/.test(html) && !/section === "cghs"/.test(html));
 ok('there are three stages, numbered in the order they happen',
    /\{ id: "endorsement", label: "1 \\u00b7 Endorsement" \}[\s\S]{0,200}?\{ id: "bill", label: "3 \\u00b7 Bill" \}/.test(html)
    || /id: "endorsement"[\s\S]{0,200}?id: "prescription"[\s\S]{0,120}?id: "bill"/.test(html));
@@ -102,8 +113,13 @@ ok('it refuses to save a plan it never managed to read',
                                     holder: 'Pensioner', lines: LINES });
   ok('a bill will not print without its number', bill === '', bill.slice(0, 80));
 
+  // The number comes from the server. With no backend answering, the box is
+  // still typeable: a backend that has not been redeployed must not stop a
+  // clinic billing -- it just means the clinic keeps the series itself.
+  ok('there is a button to take the next number from the server',
+     (await page.$$eval('button', b => b.filter(x => /Issue bill number/.test(x.textContent)).length)) === 1);
   await page.evaluate(() => {
-    const el = document.querySelector('input[placeholder="e.g. 2026110001"]');
+    const el = document.querySelector('input[placeholder="not issued yet"]');
     const set = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set;
     set.call(el, '2026110001');
     el.dispatchEvent(new Event('input', { bubbles: true }));

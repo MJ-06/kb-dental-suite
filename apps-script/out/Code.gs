@@ -755,7 +755,7 @@ function doPost(e) {
 //
 // The app reads this from ping and says so when it is behind. Bump it
 // whenever this file changes in a way the app depends on.
-var BACKEND_BUILD = "2026-11-03";
+var BACKEND_BUILD = "2026-11-04";
 
 var SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 // Always session-protected, even while the global rollout flag is off.
@@ -957,6 +957,8 @@ function route(p) {
 
       // ── Treatment Plan ─────────────────────────────────────
       case "getTreatmentPlan":  return getTreatmentPlan(p);
+      case "saveCghsBill":      return saveCghsBill(p);
+      case "getCghsBills":      return getCghsBills(p);
       case "saveTreatmentPlan": return saveTreatmentPlan(p);
 
       // ── Treatment Progress (read-only — pulls from Daily Register) ──
@@ -1981,6 +1983,97 @@ function saveTreatmentPlan(p) {
     new Date().toISOString()
   ]);
   return { success: true };
+}
+
+
+// ════════════════════════════════════════════════════════════
+// CGHS BILLS
+// ════════════════════════════════════════════════════════════
+// A bill number is the one thing on this sheet that cannot be worked out
+// again later. Two bills with the same number is a rejected claim and a
+// question from the panel, so the number is handed out HERE, under a lock,
+// and never by the browser: two people billing at the same counter at the
+// same moment would otherwise both be told "0001".
+var CGHS_BILLS_SHEET = "CGHS Bills";
+var CGHS_BILL_HEADERS = ["Bill No", "Bill Date", "UHID", "Patient", "Panel",
+                         "Card ID", "Panel Category", "Amount", "Lines", "Saved At"];
+
+// The series runs per month and is taken from the BILL's date, not from
+// today: a bill written on the 2nd for work done in the previous month
+// belongs to that month's series, which is the order the panel reads them in.
+function cghsBillPrefix_(billDate) {
+  var d = null;
+  var raw = String(billDate || "").trim();
+  var m;
+  if ((m = /^(\d{4})-(\d{1,2})-(\d{1,2})/.exec(raw))) d = new Date(+m[1], +m[2] - 1, +m[3]);
+  else if ((m = /^(\d{1,2})[\/.-](\d{1,2})[\/.-](\d{4})$/.exec(raw))) d = new Date(+m[3], +m[2] - 1, +m[1]);
+  if (!d || isNaN(d.getTime())) d = new Date();
+  var mm = d.getMonth() + 1;
+  return String(d.getFullYear()) + (mm < 10 ? "0" + mm : String(mm));
+}
+
+function saveCghsBill(p) {
+  var uhid = String((p && p.uhid) || "").trim();
+  if (!uhid) return { success: false, error: "No UHID given" };
+
+  // Allocating the number and writing the row have to be one step. Without
+  // the lock two requests read the same highest number and both take it.
+  var lock = LockService.getScriptLock();
+  try {
+    lock.waitLock(20000);
+  } catch (e) {
+    return { success: false, error: "Another bill is being saved right now. Try again in a moment." };
+  }
+  try {
+    var sh = getSheet(CGHS_BILLS_SHEET);
+    if (sh.getLastRow() === 0) sh.appendRow(CGHS_BILL_HEADERS);
+    var data = sh.getDataRange().getValues();
+
+    var prefix = cghsBillPrefix_(p.billDate);
+    var highest = 0;
+    for (var i = 1; i < data.length; i++) {
+      var no = String(data[i][0] || "").trim();
+      if (no.length !== prefix.length + 4 || no.indexOf(prefix) !== 0) continue;
+      var n = Number(no.slice(prefix.length));
+      if (!isNaN(n) && n > highest) highest = n;
+    }
+    var next = highest + 1;
+    var billNo = prefix + ("0000" + next).slice(-4);
+
+    sh.appendRow([
+      billNo, p.billDate || "", uhid, p.patientName || "", p.panel || "",
+      p.cardId || "", p.panelCategory || "", Number(p.amount) || 0,
+      safeJSON(p.lines), new Date().toISOString()
+    ]);
+    return { success: true, billNo: billNo };
+  } catch (e) {
+    return { success: false, error: String(e && e.message ? e.message : e) };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+// Every CGHS bill, or one patient's. The front desk searches by UHID; the
+// month list is the one the panel is sent, so the newest is first either way.
+function getCghsBills(p) {
+  var sh = getSheet(CGHS_BILLS_SHEET);
+  var data = sh.getDataRange().getValues();
+  if (data.length <= 1) return { success: true, bills: [] };
+  var want = String((p && p.uhid) || "").trim().toUpperCase();
+  var out = [];
+  for (var i = 1; i < data.length; i++) {
+    if (!data[i][0]) continue;
+    if (want && String(data[i][2] || "").trim().toUpperCase() !== want) continue;
+    out.push({
+      billNo: String(data[i][0]), billDate: String(data[i][1] || ""),
+      uhid: String(data[i][2] || ""), patientName: String(data[i][3] || ""),
+      panel: String(data[i][4] || ""), cardId: String(data[i][5] || ""),
+      panelCategory: String(data[i][6] || ""), amount: Number(data[i][7]) || 0,
+      lines: safeParseJSON(data[i][8]), savedAt: String(data[i][9] || "")
+    });
+  }
+  out.reverse();
+  return { success: true, bills: out };
 }
 
 // ════════════════════════════════════════════════════════════
