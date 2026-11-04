@@ -22,7 +22,10 @@ function blob(name) {
 }
 
 const FORMS = [
-  ["Implant Surgery",   "IMP_SURGERY_B64",    7, ["ANAESTHESIA","SUTURE","GRAFT / MEMBRANE / MESH"]],
+  // 7 -> 8 when Second Stage Surgery was added: the uncovering happens
+  // months after placement and has its own flap, abutment and suture, so it
+  // is a section rather than more boxes on the surgery that placed it.
+  ["Implant Surgery",   "IMP_SURGERY_B64",    8, ["ANAESTHESIA","SUTURE","GRAFT / MEMBRANE / MESH","SECOND STAGE SURGERY"]],
   ["Implant Prosthetic","IMP_PROSTHETIC_B64", 4, ["ANAESTHESIA","PROSTHESIS DETAIL","NOTES"]],
   ["Crown & Bridge",    "CROWN_BRIDGE_B64",   5, ["ANAESTHESIA","PREPARATION & RETRACTION","LABORATORY"]],
 ];
