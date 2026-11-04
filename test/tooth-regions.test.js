@@ -22,7 +22,9 @@ const eq = (name, got, want) => checks.push({ name, ok: JSON.stringify(got) === 
 // ── the regions are named once, and every chart gets them ───────────────
 ok('the regions are named in one place', /const TOOTH_REGIONS = \[/.test(html));
 ok('the chart only offers them when asked to',
-   /onRegion,\n  \/\/ The caption under the grid/.test(html) && /onRegion \? \/\*#__PURE__\*\/React\.createElement\("div"/.test(html));
+   /onRegion \? \/\*#__PURE__\*\/React\.createElement\("div"/.test(html));
+ok('and only offers a range when asked to',
+   /onRange \? \[\/\*#__PURE__\*\/React\.createElement\("button"/.test(html));
 for (const [what, pat] of [
   ['the Care Plan chart', /rows: p4\.rows,\n    onClick: clickTooth,\n    onRegion: clickRegion/],
   ['the Treatment Plan chart', /rows: planRows,\n    onClick: clickTooth,\n    onRegion: clickRegion/],
@@ -45,25 +47,33 @@ ok('and the Records stage does too', /const onRegion = \(v\) => \{\n    if \(act
   await page.addScriptTag({ content:
     html.slice(html.indexOf('const TOOTH_REGIONS = ['),
                html.indexOf('\n', html.indexOf('const LOWER_T = ['))) });
+  // The span rule lives beside the arches, not in the chart, because the
+  // Crown & Bridge form follows the same one.
+  await page.addScriptTag({ content:
+    html.slice(html.indexOf('function archSpan(a, b) {'), html.indexOf('function ToothChart({')) });
   await page.addScriptTag({ content:
     html.slice(html.indexOf('function ToothChart({'), html.indexOf('function ClinicHeader()')) });
 
-  const mount = (rows, withRegions) => page.evaluate(([r, w]) => {
-    window.__clicks = []; window.__regions = [];
+  const mount = (rows, withRegions, withRange) => page.evaluate(([r, w, g]) => {
+    window.__clicks = []; window.__regions = []; window.__ranges = [];
     const root = window.__r || (window.__r = ReactDOM.createRoot(document.getElementById('root')));
+    // A fresh key each time: the chart remembers whether its range picker
+    // is armed, and without this one case would start inside the last one.
+    window.__n = (window.__n || 0) + 1;
     root.render(React.createElement(ToothChart, Object.assign({
-      rows: r, onClick: (t) => window.__clicks.push(t)
-    }, w ? { onRegion: (v) => window.__regions.push(v) } : {})));
-  }, [rows, withRegions]);
+      key: window.__n, rows: r, onClick: (t) => window.__clicks.push(t)
+    }, w ? { onRegion: (v) => window.__regions.push(v) } : {},
+       g ? { onRange: (span) => window.__ranges.push(span) } : {})));
+  }, [rows, withRegions, withRange]);
 
   // ── a chart that was not given regions is exactly what it was ─────────
-  await mount([{ tooth: '16' }], false);
+  await mount([{ tooth: '16' }], false, false);
   await page.waitForTimeout(200);
   eq('without regions, only the 32 teeth are there',
      (await page.$$('button')).length, 32);
 
   // ── with them ─────────────────────────────────────────────────────────
-  await mount([{ tooth: '16' }], true);
+  await mount([{ tooth: '16' }], true, false);
   await page.waitForTimeout(200);
   const labels = await page.$$eval('button', b => b.map(x => x.textContent).filter(t => !/^\d\d$/.test(t)));
   eq('the regions offered are full mouth, both arches and four quadrants',
@@ -83,7 +93,7 @@ ok('and the Records stage does too', /const onRegion = \(v\) => \{\n    if \(act
   eq('a region is not mistaken for a tooth', await page.evaluate(() => window.__clicks), []);
 
   // ── a region already on the line reads as chosen ──────────────────────
-  await mount([{ tooth: 'Quadrant 2' }], true);
+  await mount([{ tooth: 'Quadrant 2' }], true, false);
   await page.waitForTimeout(200);
   const lit = await page.$$eval('button', b => b
     .filter(x => x.style.background === 'rgb(0, 120, 180)').map(x => x.textContent));
@@ -93,11 +103,62 @@ ok('and the Records stage does too', /const onRegion = \(v\) => \{\n    if \(act
     .filter(x => /^\d\d$/.test(x.textContent) && x.style.background === 'rgb(0, 120, 180)').length);
   eq('and no tooth is lit by it', teethLit, 0);
 
-  await mount([{ tooth: '16, 26' }], true);
+  await mount([{ tooth: '16, 26' }], true, false);
   await page.waitForTimeout(200);
   const litTeeth = await page.$$eval('button', b => b
     .filter(x => x.style.background === 'rgb(0, 120, 180)').map(x => x.textContent));
   eq('teeth still light up as before, and no region does', litTeeth, ['16', '26']);
+
+  // ── a bridge is a run of teeth ────────────────────────
+  // "For bridge it needs a selection of tooth range as in crown and bridge
+  //  form." The run has to follow the ARCH, not the numbers: FDI goes
+  // 48..41 | 31..38, so 43 to 33 is six teeth across the midline, not the
+  // eleven that filtering numerically would give.
+  await mount([{ tooth: '' }], true, true);
+  await page.waitForTimeout(200);
+  ok('there is a Range button', (await page.$$('button:text-is("Range")')).length === 1);
+  await page.click('button:text-is("Range")');
+  ok('arming it says what to do next',
+     /Click one end of the span, then the other/.test(await page.textContent('#root')));
+  await page.click('button[title="#43"]');
+  ok('after the first end it asks for the other',
+     /Now click the other end/.test(await page.textContent('#root')));
+  eq('and that first click is not taken as a tooth',
+     await page.evaluate(() => window.__clicks), []);
+  await page.click('button[title="#33"]');
+  eq('the span follows the arch across the midline',
+     await page.evaluate(() => window.__ranges), [[43, 42, 41, 31, 32, 33]]);
+  ok('and the picker disarms itself afterwards',
+     (await page.$$('button:text-is("Range")')).length === 1);
+  await page.click('button[title="#16"]');
+  eq('so the next click is an ordinary tooth again',
+     await page.evaluate(() => window.__clicks), [16]);
+
+  // Upper to lower spans no real prosthesis, and is usually a mis-click.
+  await mount([{ tooth: '' }], true, true);
+  await page.waitForTimeout(200);
+  await page.click('button:text-is("Range")');
+  await page.click('button[title="#16"]');
+  await page.click('button[title="#46"]');
+  eq('a span from one jaw to the other is refused',
+     await page.evaluate(() => window.__ranges), []);
+  ok('and says why',
+     /same arch/.test(await page.textContent('#root')), await page.textContent('#root'));
+
+  // A span picked the other way round is the same span.
+  await mount([{ tooth: '' }], true, true);
+  await page.waitForTimeout(200);
+  await page.click('button:text-is("Range")');
+  await page.click('button[title="#33"]');
+  await page.click('button[title="#43"]');
+  eq('picking the ends in either order gives the same teeth',
+     await page.evaluate(() => window.__ranges), [[43, 42, 41, 31, 32, 33]]);
+
+  // A chart not given onRange is unchanged.
+  await mount([{ tooth: '' }], true, false);
+  await page.waitForTimeout(200);
+  ok('a chart with no range asked for does not offer one',
+     (await page.$$('button:text-is("Range")')).length === 0);
 
   ok('nothing threw', errors.length === 0, errors.join(' // '));
   await browser.close();

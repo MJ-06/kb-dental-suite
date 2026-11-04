@@ -755,7 +755,7 @@ function doPost(e) {
 //
 // The app reads this from ping and says so when it is behind. Bump it
 // whenever this file changes in a way the app depends on.
-var BACKEND_BUILD = "2026-11-04";
+var BACKEND_BUILD = "2026-11-04a";
 
 var SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 // Always session-protected, even while the global rollout flag is off.
@@ -1966,7 +1966,13 @@ function saveTreatmentPlan(p) {
 
   var data = sh.getDataRange().getValues();
   var uhid = String(p.uhid || "").trim().toUpperCase();
-  for (var i = 1; i < data.length; i++) {
+  // BACKWARDS, because getTreatmentPlan reads backwards. It returns the LAST
+  // row for a patient and this used to update the FIRST, so a patient with
+  // more than one row in this tab had their plan written to one row and read
+  // back from another: the save reported success, the screen that reloaded
+  // showed the old plan, and the endorsement never reached Records. The two
+  // have to agree on which row is the patient's plan, and the newest is it.
+  for (var i = data.length - 1; i >= 1; i--) {
     if (String(data[i][0]).trim().toUpperCase() === uhid) {
       sh.getRange(i + 1, 1, 1, 6).setValues([[
         p.uhid, p.patientName, p.date,
