@@ -9758,7 +9758,7 @@ function PatientSearch({ setGlobalPat, onNavigate }) {
       name:   p.name   || p["Full Name"] || "",
       dob:    p.dob    || p.DOB    || "",
       gender: p.gender || p.Gender || "",
-      organizationPatientId:p.organization_patient_id || null, organizationUhid:p.organization_uhid || null,
+      organizationPatientId:p.organization_patient_id || null, organizationUhid:p.organization_uhid || null,importReviewRequired:!!p.import_review_required,
       mobile: p.mobile || p.Mobile || ""
     };
     setSelected(pat);
@@ -9841,7 +9841,7 @@ function PatientSearch({ setGlobalPat, onNavigate }) {
                 pat.dob && React.createElement("span", null, "DOB: ", pat.dob, ageLabel(pat.dob) ? " (" + ageLabel(pat.dob) + ")" : ""),
                 pat.gender && React.createElement("span", null, pat.gender),
                 pat.mobile && React.createElement("span", null, "📱 ", pat.mobile)
-              ), p.last_appointment && React.createElement("div",{style:{fontSize:12,color:"#5a5a5a",marginTop:4}},"Last appointment: "+new Date(p.last_appointment).toLocaleDateString("en-IN"))
+              ), p.import_review_required && React.createElement("div",{style:{fontSize:12,color:"#946200",marginTop:4}},"Historical record — identity and registration details need review"),p.last_appointment && React.createElement("div",{style:{fontSize:12,color:"#5a5a5a",marginTop:4}},"Last appointment: "+new Date(p.last_appointment).toLocaleDateString("en-IN"))
             ),
             // Select indicator
             isSelected

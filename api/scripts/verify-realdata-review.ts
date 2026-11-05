@@ -2,6 +2,7 @@ import {readFileSync} from 'node:fs';
 const base=process.argv[2]??'http://127.0.0.1:8300',url=new URL(base);
 if(!((url.hostname==='127.0.0.1'&&url.port==='8300')||(url.protocol==='https:'&&url.hostname.endsWith('.trycloudflare.com'))))throw Error('Unexpected review URL');
 const state=JSON.parse(readFileSync(new URL('../.organization-demo-runtime/realdata-review/state.json',import.meta.url),'utf8'));
+const expectedPatients=JSON.parse(readFileSync(new URL('../.organization-demo-runtime/realdata-review/verification-summary.json',import.meta.url),'utf8')).selectedPatients;
 let checks=0;const check=(ok:unknown,label:string)=>{if(!ok)throw Error('FAIL: '+label);console.log('PASS: '+label);checks++;};
 async function session(username:string){
  const login=await fetch(base+'/api/v1/auth/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({clinic:'kb-review',username,password:state.userPasswords?.[username]??state.loginPassword})});check(login.ok,username+' login');
@@ -16,9 +17,9 @@ const anonymous=await (await fetch(base+'/exec?action=getAllPatients')).json() a
 check((await fetch(base+'/roles-access.js')).ok,'native staff access asset loads');
 const admin=await session('admin');
 try{
- const all=await admin.call('getAllPatients');check(all.success&&all.patients.length===2000,'exactly 2000 migrated patients available');
+ const all=await admin.call('getAllPatients');check(all.success&&all.patients.length===expectedPatients,'expected migrated patient cohort available');
  const recent=await admin.call('getRecentPatients');check(recent.success&&recent.patients.length===20,'default patient list capped at20');
- const overview=await admin.call('getClinicOverview');check(overview.success&&overview.patients===2000,'dashboard uses organization patient count');
+ const overview=await admin.call('getClinicOverview');check(overview.success&&overview.patients===expectedPatients,'dashboard uses organization patient count');
  const policy=await (await fetch(base+'/api/v1/capabilities',{headers:admin.headers()})).json() as any;check(policy.mode==='full'&&Object.values(policy.features).every(Boolean),'all tier capabilities enabled for review');
  check((await admin.call('verifyReportsPassword',{password:''})).correct,'administrator reports require no extra password');
  for(const action of ['getAppointments','getDailyRegister','getFinanceSummary','getExpenses','getCrmData','getCghsBills','getOrganizationReports'])check((await admin.call(action)).success,action+' contract');

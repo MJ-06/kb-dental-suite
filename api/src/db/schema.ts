@@ -73,7 +73,8 @@ export interface PatientsTable extends Tenant, Housekeeping {
   emergency_name: string | null;
   emergency_contact: string | null;
   emergency_relation: string | null;
-  patient_type: Generated<"Normal" | "Panel">;
+  patient_type: Generated<"Normal" | "Panel" | null>;
+  import_provenance: Generated<Record<string,unknown>>;
   panel_id: string | null;
   panel_category: "Serving" | "Pensioner" | null;
   card_id: string | null;

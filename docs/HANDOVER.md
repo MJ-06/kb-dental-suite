@@ -1,5 +1,36 @@
 # Handover for the next tool (31 Oct 2026)
 
+## All-patient expansion — latest 5 November 2026
+
+User explicitly approved expanding the protected Cloudflare review to all identifiable
+source patients. Read REAL-DATA-REVIEW.md before using older 2,000-patient counts below.
+Review and private full clone now hold 2,576 identities: 2,499 original accepted patients
+plus 77 historical-record-only identities requiring review. Migration0032 allows unknown
+patient types and adds private import provenance plus a shared review flag. No fictional
+clinical histories or demographics were added. All original patient/clinical/finance fields and three file
+checksums match; seven existing CRM UI transformations are explicitly preserved; recovered fields/provenance also match workbook extraction directly.
+Some raw identifiers remain ambiguous/missing and are held for review, not invented.
+
+Important provenance: original registration dates include 1,886 UHID-month estimates
+and107 earliest-activity dates;325 receipt descriptions were register-derived;219 of220
+plan-table rows are finance opening estimates rather than authored clinical plans.
+The original source database/workbooks remain untouched. The all-patient expansion
+report is current; initial verification-summary financial values describe the old subset.
+
+Independent GPT-6 Luna verification chat:01a1abc8-f2dc-7823-8df7-41a99cb28f91.
+Its report is docs/QA-REAL-DATA-REVIEW-2026-11-05.md. Rotate temporary review credentials
+after its password-dependent tests finish; user already authorized temporary use and
+rotation. Private login path stays api/.organization-demo-runtime/realdata-review/demo-logins.txt.
+No patient-bearing candidate ledger should be created. Audit emits aggregate counts only;
+private migration payloads are streamed in memory directly to marked databases.
+
+Final coordination checks: backend300/300, TypeScript/build and four inline scripts pass;
+33 expanded public HTTP checks pass after credential rotation. Independent Luna finished
+its password-dependent testing. Temporary staff and screen passwords were rotated and
+old sessions ended; use the updated private demo-logins.txt. UI acceptance still has
+an inconclusive historical Daysheet date filter and only partial populated-history
+coverage; see the QA report. Do not call this completed production acceptance.
+
 ## Latest user scope and real-data review — 5 November2026
 
 Read `REAL-DATA-REVIEW.md`. User authorized existing exports and the latest2000

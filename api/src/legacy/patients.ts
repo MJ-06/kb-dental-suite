@@ -48,13 +48,16 @@ const last10 = (v: unknown) => str(v).replace(/\D/g, "").slice(-10);
 // ── one patient, with their newest history ───────────────────────────────
 
 interface Row {
+  import_provenance:Record<string,unknown>;
+  import_review_required:boolean;
+  registration_date_source:string|null;
   safety_flags:string[];
   organization_patient_id:string|null;
   id: string; uhid: string; full_name: string; gender: string | null; dob: string | null;
   mobile: string | null; mobile_2: string | null; whatsapp: string | null; email: string | null;
   blood_group: string | null; occupation: string | null; marital_status: string | null; address: string | null;
   emergency_name: string | null; emergency_relation: string | null; emergency_contact: string | null;
-  referred_by: string | null; referred_by_type: string | null; patient_type: string; panel: string | null;
+  referred_by: string | null; referred_by_type: string | null; patient_type: string|null; panel: string | null;
   panel_category: string | null; card_id: string | null; registered_on: Date; registration_status: string;
   conditions: string[] | null; allergies: string[] | null; medicines: string | null; habits: string | null;
   chief_complaint: string | null; pain_level: string | null; how_known: string | null; reg_id: string | null;
@@ -69,7 +72,8 @@ export async function findPatient(tx: Tx, uhid: string): Promise<Row | undefined
            p.email::text AS email, p.blood_group, p.occupation, p.marital_status, p.address,
            p.emergency_name, p.emergency_relation, p.emergency_contact, p.referred_by, p.referred_by_type,
            p.patient_type, pn.name AS panel, p.panel_category, p.card_id, p.registered_on, p.registration_status,p.safety_flags,
-           r.conditions, r.allergies, r.medicines, r.habits, r.chief_complaint, r.pain_level, r.how_known, r.id AS reg_id
+           r.conditions, r.allergies, r.medicines, r.habits, r.chief_complaint, r.pain_level, r.how_known, r.id AS reg_id,
+           p.import_provenance,(coalesce(identity.import_review_required,false) OR p.import_provenance->>'review_required'='true') IS TRUE AS import_review_required,r.form->>'reg_date_source' AS registration_date_source
       FROM patients p
       LEFT JOIN org_clinical_patient_links identity_link ON identity_link.patient_id=p.id AND identity_link.clinic_id=p.clinic_id
       LEFT JOIN org_patients identity ON identity.id=identity_link.organization_patient_id
@@ -219,27 +223,34 @@ export const patients: ActionTable = {
       organizationPatientId:x.organization_patient_id ?? undefined, safetyFlags:x.safety_flags ?? [], uhid: x.uhid, name: x.full_name, gender: x.gender ?? "", dob: dobOut(x.dob),
       mobile: x.mobile ?? "", mobile2: x.mobile_2 ?? "", whatsapp: x.whatsapp ?? "", email: x.email ?? "",
       bloodGroup: x.blood_group ?? "", occupation: x.occupation ?? "", maritalStatus: x.marital_status ?? "",
-      patientType:x.patient_type ?? "Normal", panel:x.panel ?? "", panelCategory:x.panel_category ?? "", cardId:x.card_id ?? "",
+      patientType:x.import_review_required && !x.import_provenance.review_required ? "" : x.patient_type ?? "", panel:x.panel ?? "", panelCategory:x.panel_category ?? "", cardId:x.card_id ?? "",
+      importReviewRequired:x.import_review_required,registrationDateSource:x.import_provenance.registration_date_source??x.registration_date_source??"recorded",
       address: x.address ?? "", emergencyName: x.emergency_name ?? "", emergencyRelation: x.emergency_relation ?? "",
       emergencyContact: x.emergency_contact ?? "", referredBy: x.referred_by ?? "",
       conditions: x.conditions ?? [], medicines: x.medicines ?? "", allergies: x.allergies ?? [],
       habits: x.habits ?? "", complaint: x.chief_complaint ?? "", painLevel: x.pain_level ?? "",
-      registeredOn: x.registered_on.toISOString()
+      registeredOn: x.import_review_required || x.import_provenance.registration_date_source==='import_timestamp_not_registration'?"":x.registered_on.toISOString()
     } };
   }, "patients:read"),
 
   getAllPatients: read(async (_p, { tx }) => {
     const r = await sql<{ uhid: string; name: string; gender: string | null; dob: string | null; mobile: string | null;
       panel: string | null; panel_category: string | null; card_id: string | null; referred_by: string | null;
-      referred_by_type: string | null; registered_on: Date }>`
+      referred_by_type: string | null; registered_on: Date;import_provenance:Record<string,unknown>;import_review_required:boolean;registration_date_source:string|null }>`
       SELECT p.uhid, p.full_name AS name, p.gender, p.date_of_birth::text AS dob, p.mobile, pn.name AS panel,
-             p.panel_category, p.card_id, p.referred_by, p.referred_by_type, p.registered_on
+             p.panel_category, p.card_id, p.referred_by, p.referred_by_type, p.registered_on,p.import_provenance,
+             (coalesce(o.import_review_required,false) OR p.import_provenance->>'review_required'='true') IS TRUE AS import_review_required,
+             (SELECT r.form->>'reg_date_source' FROM patient_registrations r WHERE r.patient_id=p.id ORDER BY r.collected_at DESC LIMIT 1) AS registration_date_source
         FROM patients p LEFT JOIN panels pn ON pn.id = p.panel_id
+        LEFT JOIN org_clinical_patient_links l ON l.patient_id=p.id AND l.clinic_id=p.clinic_id
+        LEFT JOIN org_patients o ON o.id=l.organization_patient_id
        WHERE p.deleted_at IS NULL ORDER BY p.registered_on`.execute(tx);
     return { success: true, patients: r.rows.map((x) => ({
       uhid: x.uhid, name: x.name, gender: x.gender ?? "", dob: dobOut(x.dob), mobile: x.mobile ?? "",
       panel: x.panel ?? "", panelCategory: x.panel_category ?? "", cardId: x.card_id ?? "",
-      referredBy: x.referred_by ?? "", referredByType: x.referred_by_type ?? "", registeredOn: x.registered_on.toISOString()
+      referredBy: x.referred_by ?? "", referredByType: x.referred_by_type ?? "",
+      importReviewRequired:x.import_review_required,registrationDateSource:x.import_provenance.registration_date_source??x.registration_date_source??"recorded",
+      registeredOn:x.import_review_required?"":x.registered_on.toISOString()
     })) };
   }, "patients:read"),
 

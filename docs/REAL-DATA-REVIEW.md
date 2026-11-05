@@ -1,70 +1,116 @@
-# Real-data review: 5 November2026
+# Real-data review: 5 November 2026
 
-User-approved scope: existing30–31 October exports; latest2000 patients by
-registration timestamp, with all available linked records and files. Basic launch
-retains current screens and new backend storage. Essential/Growth/Enterprise are
-accepted as tier categories; all capabilities are enabled now, tier UI/billing later.
+Latest approved scope: all identifiable patients in the supplied 30–31 October
+exports, exposed only through the authenticated laptop-hosted Cloudflare review.
+This supersedes the earlier 2,000-patient limit. Basic launch retains the clinical
+screens and new backend; tier controls/billing remain later work.
 
 ## Current review deployment
 
-Dedicated PostgreSQL database `kb_realdata_review`, runtime/owner roles, sessions,
-configuration and local document root. Source `kb_rehearsal` is read-only during
-copy/verification and remains unchanged. The original2499-patient rehearsal and
-workbook snapshots are retained. A new independent full migration rehearsal is in
-`kb_realdata_full_rehearsal`:2499 patients,5161 register entries,4308 clinical form
-entries,306 appointments,220 Treatment Plans,1683 receipts,1226 expenses and2511
-CRM rows. All compared source fields and the3 file checksums match in that database
-as well. It is private and is not tunneled. The demo subset is not the production
-cutover or acceptance of unresolved original spreadsheet exceptions.
+The protected review contains **2,576 patient identities**:
 
-Server: loopback8300. Cloudflare URL is temporary and is shared in the main chat.
-The application requires a staff login before reading patients. Private credentials:
-`api/.organization-demo-runtime/realdata-review/demo-logins.txt`. Clinic code
-`kb-review`; review users admin/doctor/reception/accounts have distinct passwords.
-Share credentials only
-with the authorized reviewer; no credentials, source rows or documents belong in Git.
+- 2,499 patients accepted by the original spreadsheet importer.
+- 77 additional named identities recovered from historical workbook records,
+  preserving their recorded identifiers. All require identity/registration review;
+  they are not proof of 77 additional distinct, fully registered people.
 
-The source has one clinic's care history. KB Main Clinic retains that attribution;
-KB Second Clinic starts without historical clinical rows. Opening a central patient
-there may create its internal reference; no historical care is copied or invented.
+Database `kb_realdata_review`, loopback8300; private full rehearsal
+`kb_realdata_full_rehearsal` has the same patient cohort. Original `kb_rehearsal`
+and workbooks remain unchanged. Application credentials, sessions and document
+storage are separate from the original source. Runtime reports/credentials are
+ignored under `api/.organization-demo-runtime/realdata-review/`.
 
-## Reconciled selected data
+Private login file: `demo-logins.txt` in that directory. Clinic code `kb-review`;
+users admin/doctor/reception/accounts have distinct passwords. Share only with
+an authorized reviewer. The Cloudflare URL is temporary; inspect the tunnel log
+before sharing it. No patient values or passwords belong in Git or chat.
 
-| Data | Imported |
+KB Main Clinic retains the source clinic's care. KB Second Clinic starts without
+invented historical care; opening a shared patient creates a compatibility
+reference, not a second registration or a copy of the original treatment history.
+
+## Imported data and verification
+
+| Data | Count |
 |---|---:|
-| Patients and registration-history rows | 2000 each |
-| Appointments | 252 |
-| Daily register entries | 4280 |
-| Clinical form entries | 3581 |
-| Clinical charts | 22 |
-| Treatment cases | 25 |
-| Treatment Plans | 200 |
-| Receipts | 1491 |
-| Clinic expenses | 1226 |
-| Patient documents | 3 |
-| CRM contacts linked by explicit UHID | 2000 |
-| CRM leads / pipelines / companies | 6 / 2 / 1 |
+| Central patient identities | 2,576 |
+| Recorded registration-history rows | 2,499 |
+| Appointments | 306 |
+| Daily register entries | 5,161 |
+| Clinical form entries | 4,308 |
+| Clinical charts | 25 |
+| Treatment cases | 31 |
+| Treatment-plan table rows | 220 (219 finance opening estimates; 1 other source plan) |
+| Receipts | 1,683 |
+| Expenses | 1,226 |
+| Patient documents with matching checksums | 3 |
+| Original CRM rows / inbox rows | 2,511 / 3 |
 
-Doctor/chair/panel/treatment/medicine/procedure masters are copied. Existing entity
-IDs and visible UHIDs are retained. CRM source IDs remain passive links; this is
-not external CRM synchronization. Expenses are clinic-level, not filtered by patient.
-Care Plans and consents have no saved source rows in this snapshot. Source workbook
-Care Plans tabs were checked and are empty. Do not add fictional clinical facts to
-real patients merely to fill an empty screen.
+The existing review retains one additional CRM pipeline. The familiar UI had
+already transformed six leads and one pipeline during its own migration; these
+updated payloads were preserved under their original source row IDs. Seven
+append-introduced collisions were removed without losing those UI changes.
+Three duplicate CRM entity groups already exist in the source and remain a
+separate review item. All original patient, master, clinical and finance fields
+compare equal by stable source IDs. CRM comparison records explicit fingerprinted
+exceptions for the seven preserved UI transformations. All three available copied attachments match source
+checksums. The 77 recovered identities were separately compared directly against
+workbook demographics and provenance in memory; no patient-bearing audit ledger
+was written. Unknown patient type remains NULL; no registration-history row or
+fictional clinical care was created for these identities.
 
-Financial totals match the selected source rows. Independent verification compares
-the original fields by stable IDs for patient, registration, appointment, register,
-form, chart, case, plan, receipt, expense and document records. It also checks exact
-patient selection and all3 original/copy document checksums. Private count-only
-reports are under the ignored runtime folder.
+Care Plans and consent tables have no saved source rows in this snapshot. Source
+Care Plan tabs are empty. Existing IDs/UHIDs remain the passive links; external CRM
+synchronization is not implemented. Historical rows with no patient UUID retain
+that original state rather than silently rewriting clinical source records.
 
-The independent comparison caught a date-only conversion defect in the initial
-copy. A read-only diagnostic proved every discrepancy was the same one-day shift,
-with zero other field differences. The exact source DATE values were restored in
-the marked review, transactionally, without removing or merging records. The
-importer now preserves PostgreSQL DATE literals instead of JSON-serializing local
-midnight Date objects. A full independent comparison then passed for every field
-checked and all documents. Original source dates were never modified.
+## What was derived, rather than recorded directly?
+
+The earlier importer did transform data; an exact copy of its database does not
+make every imported field an original confirmed fact:
+
+- Registration dates: 506 came from source timestamps, 1,886 were estimated from
+  the UHID year/month, and 107 used earliest available activity. These origins are
+  retained in `patient_registrations.form.reg_date_source` and returned as
+  `registrationDateSource` by patient APIs.
+- Receipt descriptions: 1,326 were typed in source; 307 were suggested from a
+  same-day register entry and 18 from a nearby register entry; 32 were blank.
+  `receipts.service_source` preserves the distinction. Suggestions are not proof
+  that a particular treatment was performed for that receipt.
+- 219 treatment-plan table rows are opening estimates calculated from the Finance
+  “Working for Balance” sheet, identified by `estimate.source`. They are not 219
+  clinician-authored plans. Current plan-table counts must be interpreted with
+  this limitation until the UI separates opening balances from authored plans.
+- Older import code normalized identifiers, used technical UUIDs/counters/manual
+  receipt references, and defaulted some missing classifications to Normal.
+  Original exports and exception reports are retained for review.
+- The 77 newly recovered identities use recorded names/identifiers and available
+  unambiguous demographics. Missing data remains absent. Their technical database
+  creation timestamp is explicitly not a registration date; APIs hide it as such.
+  `patients.import_provenance` retains source references and recorded variants;
+  `org_patients.import_review_required` keeps the flag visible across clinics.
+
+No new diagnoses, treatments, payments, names or contact details were invented to
+fill the recovered records. Internal UUIDs and audit timestamps are system metadata.
+
+An earlier date-copy bug was found and corrected using exact source DATE values;
+future imports preserve PostgreSQL DATE literals. Source dates were not modified.
+
+## Source exceptions still requiring review
+
+Coverage scanned 82 patient-identifier tabs and 57,474 nonempty rows. Beyond the
+accepted cohort, recovery found 39 standard-format and 38 legacy-format named
+identities. Five other standard identifiers remain unresolved (one conflicting
+name, four without a name); 24 other nonstandard named identifiers and 13 named
+rows without identifiers also need review. Many other tokens are malformed or
+unnamed references and cannot safely be treated as additional people.
+
+Do not split combined identifiers, merge by phone/name, or manufacture missing
+names to force these rows into patients. The original private exception reports
+and exports remain the reconciliation source. Inventory/assets/attendance are
+outside the current clinical-screen migration scope. This is a migration rehearsal
+and review deployment, not completed production cutover or proof that every raw
+spreadsheet row has been accepted.
 
 ## Updated UI and backend
 
@@ -93,49 +139,54 @@ disabled/unconfigured in the public review; this does not reduce staff permissio
 
 ## Reproduction and verification
 
-From `api/`, after local prerequisites and private source rehearsal are available:
+From `api/`, with prerequisites and the private original rehearsal available:
 
 ```powershell
-node --import tsx scripts/provision-realdata-review.ts
 node --import tsx scripts/provision-realdata-review.ts --apply
-node --import tsx scripts/supplement-review-crm.ts
-node --import tsx scripts/verify-review-data.ts
+node --import tsx scripts/provision-realdata-review.ts --all --apply
+node --import tsx scripts/migrate-realdata-review.ts
+node --import tsx scripts/migrate-realdata-review.ts --all
+node --import tsx scripts/import-additional-patients.ts --apply
+node --import tsx scripts/expand-review-all.ts --apply
+node --import tsx scripts/reconcile-review-crm.ts --apply
+node --import tsx scripts/verify-review-data.ts --review-all
+node --import tsx scripts/verify-review-data.ts --all
+node --import tsx scripts/verify-recovered-patients.ts
 node --import tsx src/realdata-review-server.ts
 ```
 
-Provisioning creates a new marked target only and refuses incomplete/unmarked
-targets; it retains a completed existing review rather than wiping reviewer edits.
-Database/source credentials are read privately and never printed. Source table
-and record differences are reported as counts, not patient values.
+Provisioning creates marked targets and preserves completed targets. Expansion is
+append-only from the private full clone and preserves existing reviewer records.
+The current final aggregate report is `all-patients-expansion-summary.json`;
+`verification-summary.json` retains the initial financial snapshot for historical
+comparison. Use current original-field verification for the expanded cohort.
+Do not run the Python migration-payload mode directly: it is consumed privately
+in memory by the importer/verifier and must never be printed or saved as an audit
+ledger. Install the existing Python/openpyxl prerequisites on a fresh laptop.
 
-In another terminal, run official cloudflared against `http://127.0.0.1:8300`, then:
+Run official cloudflared against `http://127.0.0.1:8300`, then:
 
 ```powershell
 node --import tsx scripts/verify-realdata-review.ts https://YOUR-URL.trycloudflare.com
 ```
 
-That script checks authenticated patient access, exact2000 count, screen contracts,
-full capabilities, native role APIs and permission boundaries without printing
-patient values. Independent browser QA should use CUA on the signed-in page and
-record pass/fail per screen. Use synthetic test DBs for destructive/write journeys;
-do not add invented clinical histories to migrated real patients.
+The 33 HTTP checks pass for the expanded cohort, including login, anonymous denial,
+patient counts, clinical contracts, full capabilities, role APIs and permission
+boundaries. The full backend suite passes 300/300, including the incomplete-import regression;
+TypeScript passes. Independent Luna QA owns `QA-REAL-DATA-REVIEW-2026-11-05.md` and distinguishes
+browser/API checks from synthetic write tests. Real patient histories are read-only
+during verification; all invented write journeys use the separate synthetic demo.
 
-## Remaining launch gates
+Temporary staff/screen credentials have now been rotated after independent QA;
+prior sessions were ended and all 33 public HTTP checks passed with the new logins.
+Use the updated private login file and sign in again. For later authorized rotations:
 
-For the separate full-data rehearsal, run
-`node --import tsx scripts/provision-realdata-review.ts --all --apply` then
-`node --import tsx scripts/verify-review-data.ts --all` from `api/`.
+```powershell
+node --import tsx scripts/rotate-review-credentials.ts --apply
+```
 
-After independent verification finishes, run
-`node --import tsx scripts/rotate-review-credentials.ts --apply` to rotate temporary
-staff/screen passwords, end old sessions and update the private login file. Do not
-rotate while verification is still using those credentials.
-
-Independent browser/basic-flow review and source-to-workbook reconciliation must
-distinguish accepted imported records from original duplicate/orphan/rejected rows.
-The existing ignored `migration/data/out` reports retain those unresolved source
-exceptions. Their existence is not silently treated as production data acceptance.
-The2000-patient review is ready for verification, not proof that every original
-workbook row is accepted or that production cutover is complete. Inventory, assets
-and attendance exports remain outside the current clinical-screen migration scope.
-Keep originals privately; no source workbook has been deleted or overwritten.
+The private login file is rewritten; do not paste its contents into chat.
+Remaining launch gates: review source exceptions and inferred values, accept each
+clinical screen and printed output, rehearse backup/restore and final cutover,
+resolve any independent QA findings. Tier billing/quotas and external integrations
+are not implied by the current full-access backend capability mode.

@@ -177,3 +177,16 @@ Opening that history does not copy Riverside's receipts or forms into Orchard.
 - Identity/grants: migrations0024–0026; patient flags0027; UHID allocation0028;
   all-clinic report access0029. Other clinic tables originate in earlier migrations.
 - Demo reproduction/review: `PUBLIC-CLINICAL-DEMO.md`, `ANOTHER-LAPTOP.md`.
+
+
+## Import provenance and incomplete identities — 5 November 2026
+
+Migration0032 adds `patients.import_provenance`, shared
+`org_patients.import_review_required`, and permits NULL patient classification for
+historical identities without a registration. `getPatient` and `getAllPatients`
+return `importReviewRequired` and `registrationDateSource`; an import timestamp
+is not returned as a registration date. Recent and organization search rows include
+`import_review_required`, shown as a review notice in patient search. Source record
+references/recorded demographic variants remain in the database, not the public API.
+See REAL-DATA-REVIEW.md for estimated dates, inferred receipt descriptions and
+finance opening estimates: table presence alone does not imply a clinician-authored plan.

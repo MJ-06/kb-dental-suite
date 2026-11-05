@@ -29,7 +29,7 @@ export const overview:ActionTable={
   const appointmentSort=p.sort==="appointments" && actor.permissions.has("appointments:read");
   const rows=await sql<any>`SELECT p.uhid,p.full_name AS name,p.gender,
    to_char(p.date_of_birth,'DD/MM/YYYY') AS dob,p.mobile,
-   l.organization_patient_id,o.uhid AS organization_uhid,p.registered_on,
+   l.organization_patient_id,o.uhid AS organization_uhid,p.registered_on,coalesce(o.import_review_required,false) AS import_review_required,
    ${appointmentSort ? sql`(SELECT max(a.starts_at) FROM appointments a WHERE a.patient_id=p.id AND a.starts_at<=now() AND a.status NOT IN ('Cancelled','No Show'))` : sql`NULL::timestamptz`} AS last_appointment
    FROM patients p LEFT JOIN org_clinical_patient_links l ON l.patient_id=p.id AND l.clinic_id=p.clinic_id
    LEFT JOIN org_patients o ON o.id=l.organization_patient_id

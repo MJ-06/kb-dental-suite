@@ -1,0 +1,5 @@
+// Keep source identifiers in memory; Python returns aggregate counts only.
+import pg from 'pg';import {execFileSync} from 'node:child_process';import {fileURLToPath} from 'node:url';import {required} from '../src/env.js';
+const c=new pg.Client({connectionString:required('REHEARSAL_OWNER_DATABASE_URL')});
+async function main(){await c.connect();try{const clinics=(await c.query('SELECT id FROM clinics')).rows;if(clinics.length!==1)throw Error('Ambiguous source');await c.query("SELECT set_config('app.clinic_id',$1,false)",[clinics[0].id]);const keys=(await c.query('SELECT upper(uhid) AS uhid FROM patients')).rows;const result=execFileSync('py',['-X','utf8',fileURLToPath(new URL('../../migration/audit_patient_coverage.py',import.meta.url))],{input:JSON.stringify(keys),encoding:'utf8',windowsHide:true,stdio:['pipe','pipe','pipe']});console.log(result.trim());}finally{await c.end();}}
+main().catch(()=>{console.error('Aggregate workbook coverage audit failed; no identifiers or demographic values printed or persisted.');process.exitCode=1;});

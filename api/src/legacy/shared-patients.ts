@@ -16,7 +16,7 @@ export const sharedPatientActions: ActionTable = {
     if (q.length<2 || q.length>100) return {success:false,error:"Enter between 2 and 100 characters"};
     const like=`%${q.replace(/[%_\\]/g,"\\$&")}%`;
     const rows=(await sql<any>`SELECT o.id AS organization_patient_id,o.uhid AS organization_uhid,o.name,o.phone AS mobile,
-      o.gender,to_char(o.dob,'DD/MM/YYYY') AS dob,o.version AS identity_version,p.uhid AS local_uhid
+      o.gender,to_char(o.dob,'DD/MM/YYYY') AS dob,o.version AS identity_version,p.uhid AS local_uhid,o.import_review_required
       FROM org_patients o LEFT JOIN org_clinical_patient_links l ON l.organization_patient_id=o.id AND l.clinic_id=${actor.clinicId}
       LEFT JOIN patients p ON p.id=l.patient_id AND p.deleted_at IS NULL
       WHERE (o.name ILIKE ${like} OR o.uhid ILIKE ${like} OR o.phone ILIKE ${like} OR p.uhid ILIKE ${like})

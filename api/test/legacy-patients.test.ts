@@ -19,6 +19,18 @@ async function quickRegister(name: string, extra: Record<string, unknown> = {}) 
 }
 
 describe("registration", () => {
+  it("keeps record-only imports visibly incomplete instead of inventing a registration date or patient type", async () => {
+    const {default:pg}=await import("pg");const {OWNER_URL}=await import("./setup.js");
+    const c=new pg.Client({connectionString:OWNER_URL});await c.connect();
+    try{await c.query('BEGIN');await c.query("SELECT set_config('app.clinic_id',$1,true)",[w.clinicA]);
+      await c.query(`INSERT INTO patients(uhid,full_name,patient_type,import_provenance) VALUES('ZZ010199','Historical Test Person',NULL,'{"review_required":true,"registration_date_source":"import_timestamp_not_registration"}'::jsonb)`);
+      await c.query('COMMIT');
+    }finally{await c.end();}
+    const detail=(await exec(w,desk,'getPatient',{uhid:'ZZ010199'})).patient;
+    expect(detail).toMatchObject({patientType:'',registeredOn:'',importReviewRequired:true,registrationDateSource:'import_timestamp_not_registration'});
+    const row=(await exec(w,desk,'getAllPatients')).patients.find((p:{uhid:string})=>p.uhid==='ZZ010199');
+    expect(row).toMatchObject({registeredOn:'',importReviewRequired:true,registrationDateSource:'import_timestamp_not_registration'});
+  });
   it("does not truncate the monthly UHID when the sequence grows past 99", async () => {
     const {default:pg}=await import("pg"); const {OWNER_URL}=await import("./setup.js");
     const c=new pg.Client({connectionString:OWNER_URL});await c.connect();
