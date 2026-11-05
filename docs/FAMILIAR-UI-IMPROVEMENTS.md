@@ -14,6 +14,10 @@ Delivered in this review slice:
   password, and authorized all-clinic reporting under Master > Organization.
 - Remove duplicate clinic/patient banners in nested Clinical Records > Sheets.
 
+5 November correction delivered: Roles & access is now native to the clinical UI,
+replacing the earlier embedded page. Staff controls, grouped role permissions and
+activity history retain server permissions. See `REAL-DATA-REVIEW.md`.
+
 Next small UI changes to review:
 1. Consistent **Save record**, **Saved**, **Unsaved changes** and retry/error labels.
    Replace remaining Google Sheets wording in the local runtime without changing

@@ -12,6 +12,7 @@ import { hashToken, SESSION_COOKIE } from "../auth/tokens.js";
 import { resumeSession, type Actor, type Tx } from "../db/index.js";
 import type { DB } from "../db/schema.js";
 import { HttpError } from "./errors.js";
+import {capabilities} from "../entitlements.js";
 
 export async function asActor<T>(
   db: Kysely<DB>,
@@ -29,6 +30,8 @@ export async function asActor<T>(
     if (permission && !can(actor, permission)) {
       throw new HttpError(403, "forbidden", "Your role does not allow this");
     }
+    const feature=req.url.startsWith('/api/v1/forms')?'forms.custom':req.url.startsWith('/api/v1/storage')?'integration.storage':null;
+    if(feature && !(await capabilities(tx,actor)).features[feature])throw new HttpError(403,'feature_unavailable','This feature is not enabled for this organization');
     return fn(tx, actor);
   });
 }

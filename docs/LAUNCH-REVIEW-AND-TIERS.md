@@ -1,5 +1,18 @@
 # Basic launch: review, transfer and commercial tiers
 
+## Latest user decision — 5 November2026
+
+Basic launch scope is all accepted existing clinical data and current screens on
+the new backend. Tiers Essential/Growth/Enterprise are accepted as categories;
+backend capability foundations are implemented with full behavior enabled now,
+while tier UI, quotas/pricing and billing automation are later. The demo remains on
+this laptop through authenticated Cloudflare access and uses the latest2000 patients
+from the existing exports. A separate full2499-patient migration rehearsal is private.
+Roles are now native UI controls. Read `REAL-DATA-REVIEW.md` for actual migration,
+verification evidence and original source exceptions still needing acceptance.
+The older proposed sequence below remains planning history; it does not override
+these decisions or imply that permanent cloud hosting is needed for this demo.
+
 3 November2026. Proposed launch sequence and tier design. No pricing, paid plan
 limits, billing integration or production cutover is approved/implemented by this
 document. The current release remains a synthetic prototype.

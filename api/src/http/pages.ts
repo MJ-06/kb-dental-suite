@@ -84,6 +84,7 @@ function csp(nonce: string, needsEval: boolean, framedBySelf = false): string {
 }
 
 export const pageRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) => {
+  app.get('/roles-access.js',async(_req,reply)=>reply.type('application/javascript; charset=utf-8').header('Cache-Control','no-cache').send(readFileSync(ROOT+'roles-access.js')));
   for (const [path, file] of Object.entries(PAGES)) {
     app.get(path, async (req, reply) => {
       const nonce = randomBytes(16).toString("base64");
@@ -134,6 +135,7 @@ window.KB_PIN_FETCH = function(w) {
 }; window.KB_PIN_FETCH(window);</script>`;
       }
       if (file === "index.html") {
+        html=html.replace(/(<script[^>]*src="\/vendor\/react.js"[^>]*><\/script>)/i,'$1<script src="/roles-access.js"></script>');
         head += EMBED_FIX(nonce);
         if (actor?.organizationId) {
           head += `<script>const embed = window.__kbEmbed; window.__kbEmbed = function(h) {

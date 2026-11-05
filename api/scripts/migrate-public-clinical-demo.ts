@@ -12,5 +12,6 @@ try{
  await c.query('REVOKE ALL ON ALL TABLES IN SCHEMA public FROM kb_app');
  await c.query('REVOKE EXECUTE ON FUNCTION clinical_report_access(bytea) FROM PUBLIC,kb_app');
  await c.query(`GRANT EXECUTE ON FUNCTION clinical_report_access(bytea) TO "${state.app}"`);
+ await c.query(`GRANT SELECT,INSERT,UPDATE ON cghs_bills,cghs_bill_counters TO "${state.app}"`);
  console.log("Marked synthetic database migrated; reporting function granted only to its dedicated runtime role.");
 }finally{await c.end();}

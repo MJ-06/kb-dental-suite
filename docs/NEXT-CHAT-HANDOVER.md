@@ -1,5 +1,13 @@
 # Copyable handover prompt
 
+5 November update: start with `docs/REAL-DATA-REVIEW.md` and latest `HANDOVER.md`.
+Latest Viveyk UI3389d7b is integrated; native role UI, CGHS bill APIs and full-mode
+tier capabilities are implemented. There is a protected2000-patient review on8300
+and a private full2499-patient migrated rehearsal. Source was not changed. User
+approved GPT-6 Luna verification and temporary credential use followed by rotation
+after testing. Do not run parallel DB suites or print patient/credential values.
+Check latest Git history and QA report before using older statuses below.
+
 Continue work in `D:\Projects\kb-dental-suite` on `saas/multi-clinic`. Read
 `AGENTS.md`, then `docs/HANDOVER.md`, `docs/PATIENT-CRM-DIRECTION.md`,
 `docs/SCREEN-API-DATA-GUIDE.md` and `docs/LAUNCH-REVIEW-AND-TIERS.md`.

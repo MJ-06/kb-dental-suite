@@ -97,12 +97,20 @@ also load clinic profile, staff context, doctors and master lists as needed.
 | Master → Organization | `getOrganizationProfile` | `verifyMasterPassword`, `saveOrganizationProfile` | `org_identity`, organization-level `org_settings` profile and shared Master password hash; organization audit records. Profile saves check version and server-side Master unlock. |
 | Master → All-clinic Reports | `getOrganizationReports` | Date/clinic filters only | Aggregates permitted clinics without switching the session. Each target needs active `reports:read` and `finance:read`; current user also needs administration access. Plan counts are all-time; appointments, distinct linked patients with appointments, collections and expenses use chosen dates. Patient counts across clinic rows are not additive unique organization patients. |
 | Master → clinic setup | `getClinicProfile`, `getDoctorDetailsList`, `getEmployeesList`, `getChairsList`, `getPanelsList`, `getTreatmentsMaster`, `getMedicinesMaster`, `getPanelRates`, `getImplantBrandsList`, `getReasonsList`, `getClinicTimings`, `getWorkingDays`, templates/value lists | Corresponding `save…` actions | Dedicated doctor/chair/panel/treatment/medicine tables; `master_values`, `clinic_settings` and related master tables. Most legacy clinical defaults are still clinic-scoped. Complete organization-default inheritance for every clinical master is not implemented merely by the Organization profile tab. |
-| Master → Roles & access | REST `/api/v1/access/permissions`, `/roles`, `/staff`, `/activity` | POST/PATCH/DELETE role and staff routes; POST `/staff/:id/reset-password` | `roles`, `app_users`, audit/system logs. Existing page is embedded under Master, retaining its own REST permission checks. Manages selected-clinic accounts; cross-clinic grants remain operator-managed. Last-administrator protection applies. |
+| Master → Roles & access | REST `/api/v1/access/permissions`, `/roles`, `/staff`, `/activity` | POST/PATCH/DELETE role and staff routes; POST `/staff/:id/reset-password` | Native clinical UI component `roles-access.js`; `roles`, `app_users`, audit/system logs. No embedded role page. Manages selected-clinic accounts; cross-clinic grants remain operator-managed. Last-administrator protection applies. |
 | CRM | `getCrmData`, `getCrmLeadInbox`, patient lookup helpers | `saveCrmCollection`, `queueCrmLead`, `markCrmLeadsTaken` | `crm_records` JSON collections plus lead/pending data. Existing embedded CRM storage is still legacy clinic-scoped; no external CRM synchronization or universal canonical patient FK is claimed. |
 | Patient Chatbot | `findAppointmentsByPhone`, `chatbotReply`, scheduling/master helpers | `saveChatbotAppointment` | Scheduling delegates to appointment storage. External AI is disabled in public demo. Phone matching is not proof of a unique patient identity. |
 | Follow-ups / birthdays | `getFollowUps`, `getTodaysBirthdays` | Existing navigation/booking actions | Computed from clinic patients, appointments and treatment/register data. They are not a separate central patient table. |
 
 ### Flat clinical form contracts
+
+5 November additions: Records/Finance CGHS bills use `saveCghsBill` and
+`getCghsBills`, storing `cghs_bills` and `cghs_bill_counters` (migrations0030/0031).
+Number allocation is atomic per clinic/month; finance permissions apply. Bill lines
+retain the source UI's JSON structure. Endorsement and prescription stages remain
+inside Treatment Plan JSON rather than introducing an unrelated patient identity.
+`GET /api/v1/capabilities` exposes tier capabilities and existing staff permissions;
+the current review is enterprise/full. Tier controls and billing UI are deferred.
 
 `api/src/legacy/clinical-forms.ts` defines the generated field mapping used by
 `clinical.ts`. These actions create `clinical_records` rows with tab name, UHID,

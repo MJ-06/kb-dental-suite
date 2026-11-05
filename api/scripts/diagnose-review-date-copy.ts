@@ -1,0 +1,16 @@
+// Read-only proof of import conversion drift; no identifiers/values in output.
+import {readFileSync,writeFileSync} from 'node:fs';import {parseEnv} from 'node:util';import {join} from 'node:path';import {homedir} from 'node:os';import pg from 'pg';
+import {preservePostgresDates} from '../src/migration/pg-dates.js';
+preservePostgresDates();
+const root=new URL('../.organization-demo-runtime/realdata-review/',import.meta.url),state=JSON.parse(readFileSync(new URL('state.json',root),'utf8')),env=parseEnv(readFileSync(join(homedir(),'.kb-pms/owner.env'),'utf8'));
+const source=new pg.Client({connectionString:env.REHEARSAL_OWNER_DATABASE_URL}),target=new pg.Client({host:'localhost',database:'kb_realdata_review',user:state.owner,password:state.ownerPassword});const q=(s:string)=>'"'+s.replaceAll('"','""')+'"';
+async function main(){await source.connect();await target.connect();try{await source.query('BEGIN READ ONLY');await target.query('BEGIN READ ONLY');const sourceId=(await source.query('SELECT id FROM clinics')).rows[0].id,clinic=(await target.query("SELECT id FROM clinics WHERE code::text='kb-review'")).rows[0].id;await source.query("SELECT set_config('app.clinic_id',$1,true)",[sourceId]);await target.query("SELECT set_config('app.clinic_id',$1,true)",[clinic]);
+ const skip=new Set(['clinic_id','version','created_at','updated_at','created_by','updated_by','storage_key','storage_ref','storage_backend','checksum_sha256']);let shifted=0,unexpected=0,nonDateDifferences=0;const tables:Record<string,unknown>={};
+ for(const table of ['patients','patient_registrations','appointments','daily_register','clinical_records','clinical_sheets','treatment_cases','treatment_plans','receipts','expenses','patient_documents','holidays']){
+  const cols=(await source.query("SELECT column_name,data_type FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 ORDER BY ordinal_position",[table])).rows.filter(r=>!skip.has(r.column_name));const names=cols.map(c=>q(c.column_name)).join(',');const rows=(await target.query(`SELECT ${names} FROM ${q(table)}`)).rows;if(!rows.length)continue;const original=(await source.query(`SELECT ${names} FROM ${q(table)} WHERE id=ANY($1::uuid[])`,[rows.map(r=>r.id)])).rows;const lookup=new Map(original.map(r=>[r.id,r]));let differences=0;
+  for(const row of rows){const src=lookup.get(row.id);if(!src){unexpected++;continue;}for(const col of cols){const key=col.column_name;if(JSON.stringify(src[key])===JSON.stringify(row[key]))continue;if(col.data_type==='date'&&src[key]&&row[key]&&(Date.parse(src[key])-Date.parse(row[key]))===86400000){shifted++;differences++;}else if(col.data_type==='date')unexpected++;else nonDateDifferences++;}}
+  tables[table]={rows:rows.length,dateFieldsShiftedBackOneDay:differences};
+ }
+ const report={readOnly:true,shiftedDateFields:shifted,unexpectedDateDifferences:unexpected,nonDateDifferences,tables,sourceAuthoritativeCorrectionSafe:unexpected===0&&nonDateDifferences===0};writeFileSync(new URL('date-copy-proof.json',root),JSON.stringify(report,null,2),{mode:0o600});console.log(JSON.stringify(report));
+ }finally{await source.end();await target.end();}}
+main().catch(()=>{console.error('Read-only diagnostic failed without printing source values.');process.exitCode=1;});

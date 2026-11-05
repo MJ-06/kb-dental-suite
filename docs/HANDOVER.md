@@ -1,5 +1,45 @@
 # Handover for the next tool (31 Oct 2026)
 
+## Latest user scope and real-data review — 5 November2026
+
+Read `REAL-DATA-REVIEW.md`. User authorized existing exports and the latest2000
+patients with linked records/files; basic launch is existing screens plus migrated
+data/new backend. Three tier categories accepted; backend foundation now full-access,
+tier UI/billing later. Roles must be native in the clinical UI, not an iframe.
+Viveyk branch3389d7b merged locally with CGHS bill APIs and updated clinical fields.
+New migrations0030/0031. Native staff/role component is `roles-access.js`.
+
+New private database `kb_realdata_review`, loopback8300, org codekb-real-review.
+It has exactly2000 migrated patients and2000 central links. Main clinic keeps source
+history; second clinic has no invented care. CRM linked contacts and available files
+were copied. Credentials/reports/documents are ignored under
+`api/.organization-demo-runtime/realdata-review/`. Never expose8080 or print source
+values. Read the private aggregate reports if needed, not source rows in chat.
+Cloudflare link changes; inspect the dedicated log before sharing. User was asked
+to sign in for browser verification and to choose a simpler verification-chat model.
+
+Independent original-field comparison and all3 file checksums passed after fixing
+DATE JSON serialization drift; source was untouched. Preserve literal PostgreSQL
+DATE values in future imports. Original source exception reports remain unresolved
+production acceptance work; do not equate the demo subset with full cutover.
+Full suite297 tests passed before adding the native render regression, which passed
+separately; see current test output for final suite count.33 real-data HTTP checks
+passed before date repair; repeat after final server restart. A separate verification
+chat requested by the user should independently check basic flows/data and document
+limits. No concurrent DB test runs; never write fictional care into real patients.
+
+Final checks:298 tests across27 files passed, plus the added PostgreSQL DATE codec
+regression passed separately; TypeScript/build pass.33 public HTTP checks passed
+after date correction and distinct credential setup. All original fields in clinical,
+financial and master tables match for both the2000-patient review and a newly copied
+full2499-patient private rehearsal (`kb_realdata_full_rehearsal`). All3 files match
+original checksums. Native role controls were verified in the authenticated browser;
+evidence `docs/evidence/native-roles-review.png` contains review accounts only.
+User approved GPT-6 Luna for the independent verification chat and explicitly
+authorized temporary password use followed by rotation AFTER testing. Rotate with
+`scripts/rotate-review-credentials.ts --apply`, update the private login file and
+verify new credentials; do not publish passwords in chat. Source remains untouched.
+
 ## Viveyk UI merge — 3 November2026
 
 Fetched and merged `origin/claude/kb-dental-sheet-structure-mlfjr0` at5f2af9a

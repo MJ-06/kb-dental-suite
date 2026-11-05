@@ -16,6 +16,7 @@ import { actions } from "./registry.js";
 import { assertClinicContext } from "../http/context.js";
 import { sql } from "kysely";
 import { DeskError, type Params, type Result } from "./types.js";
+import {capabilities,actionFeature} from "../entitlements.js";
 
 const BATCH_MAX = 25;
 const AUTH_REQUIRED: Result = { success: false, error: "AUTH_REQUIRED", authRequired: true };
@@ -79,6 +80,8 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
         if (def.permission && !can(actor, def.permission)) {
           return { success: false, error: "Your role does not allow this", forbidden: true };
         }
+        const feature=actionFeature(action);
+        if(feature && !(await capabilities(tx,actor)).features[feature])return {success:false,featureUnavailable:true,error:"This feature is not enabled for this organization"};
         const out = await def.run(params, { tx, actor });
         // An action that reports failure must not leave half its work behind.
         if (!out.success) throw new Refused(out);

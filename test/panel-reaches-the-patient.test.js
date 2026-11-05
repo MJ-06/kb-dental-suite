@@ -54,11 +54,15 @@ for (const [key, col] of [['patientType', 'Patient Type'], ['panel', 'Panel'],
   ok('getPatient returns ' + key,
      new RegExp(key + ':\\s*get\\("' + col + '"\\)').test(gp), gp.slice(-400));
 
-// The backend has to be redeployed for any of it to arrive, so the app must
-// be asking for a build that actually carries it.
+// The app must NOT demand this build. The panel is read from getAllPatients
+// when getPatient is too old to hand it over, so the endorsement works on
+// the backend the clinic already has; demanding a redeploy for something
+// that is merely nicer puts a red warning across a working screen.
 const required = (/const KB_BACKEND_BUILD_REQUIRED = "([^"]+)"/.exec(html) || [])[1];
 const backend = (/var BACKEND_BUILD = "([^"]+)"/.exec(gs) || [])[1];
-eq('the app asks for the build that returns the panel', required, backend);
+ok('the new backend is there to deploy', backend >= '2026-11-03', backend);
+ok('but the app does not demand it, because it does not need it',
+   required < backend, required + ' vs ' + backend);
 
 // ── 3. the registration form shows it back ──────────────────────────────
 const regAt = html.indexOf('// Auto-load existing patient if globalPat is set');
@@ -77,11 +81,18 @@ ok('which is what lets a re-save keep them',
 // ── 4. the endorsement reads it ─────────────────────────────────────────
 ok('the endorsement reads the panel getPatient now returns',
    /const panelOf = \(p\) => String\(\(p && \(p\.panel \|\| p\.Panel\)\) \|\| ""\)\.trim\(\);/.test(html));
+// The card ID is a box on the endorsement now, not a line of text: it is
+// typed there when the register has none, and saved back onto the patient.
 ok('the screen reads the card ID getPatient now returns',
-   /"Card ID: " \+ \(pat\.cardId \|\| pat\["Card ID"\]/.test(html));
+   /const panelCard = String\(\(panelPat && \(panelPat\.cardId \|\| panelPat\["Card ID"\]\)\) \|\| ""\);/.test(html));
+ok('and writes it back to the registration',
+   /api\("saveRegistration", \{[\s\S]{0,160}?cardId: panelCard/.test(html));
+// The sheet prints from the topped-up patient, so that an older backend --
+// one that does not return the panel from getPatient yet -- still produces a
+// correct sheet from what the register holds.
 ok('and the printed sheet reads them too',
-   /field\("Card ID", pat \? \(pat\.cardId \|\| pat\["Card ID"\]/.test(html) &&
-   /field\("Card Holder", pat \? \(pat\.panelCategory \|\| pat\["Panel Category"\]/.test(html));
+   /field\("Card ID", panelPat \? \(panelPat\.cardId \|\| panelPat\["Card ID"\]/.test(html) &&
+   /field\("Card Holder", panelPat \? \(panelPat\.panelCategory/.test(html));
 
 console.log('  ' + pass + ' passed, ' + fail + ' failed');
 process.exit(fail ? 1 : 0);

@@ -17,6 +17,8 @@ import { accessRoutes } from "./routes/access.js";
 import { storageRoutes } from "./routes/storage.js";
 import { systemLogRoutes } from "./routes/system-log.js";
 import { configureSystemLog } from "./syslog.js";
+import {asActor} from "./http/context.js";
+import {capabilities} from "./entitlements.js";
 
 export interface AppOptions {
   db: Kysely<DB>;
@@ -36,6 +38,7 @@ export async function buildApp(opts: AppOptions & { logger?: boolean }) {
 
   configureSystemLog(opts.db);
   app.setErrorHandler(errorHandler);
+  app.get('/api/v1/capabilities',async req=>asActor(opts.db,req,null,(tx,actor)=>capabilities(tx,actor)));
   await app.register(cookie);
   // Global ceiling per address; login sets its own, much lower one.
   await app.register(rateLimit, { max: 600, timeWindow: "1 minute" });
