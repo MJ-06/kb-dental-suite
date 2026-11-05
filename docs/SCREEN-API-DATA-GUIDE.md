@@ -190,3 +190,15 @@ is not returned as a registration date. Recent and organization search rows incl
 references/recorded demographic variants remain in the database, not the public API.
 See REAL-DATA-REVIEW.md for estimated dates, inferred receipt descriptions and
 finance opening estimates: table presence alone does not imply a clinician-authored plan.
+
+
+## Tabbed clinical reports — 5 November 2026
+
+Reports now has Summary, Doctor Details and Patient Details. All use the same
+applied date range and existing working-clinic API reads; there is no new report
+storage or migration. Doctor totals use `daily_register.operating_doctor` and
+separately label planned `appointments.doctor_name`. Patient drill-downs join by
+UHID across register/appointments/receipts, retain import review/date provenance,
+and do not match on names or infer a doctor for receipts. Missing UHIDs remain
+unlinked. Read REPORT-TABS-AND-SOURCE-REVIEW.md for the full source report inventory,
+limits and the distinction between legacy Group metadata and real organizations.

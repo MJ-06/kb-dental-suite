@@ -1,5 +1,22 @@
 # Handover for the next tool (31 Oct 2026)
 
+## Tabbed clinical reports — latest 5 November 2026
+
+Read REPORT-TABS-AND-SOURCE-REVIEW.md. Fetched Viveyk's latest branch (still3389d7b,
+already integrated); retained his report calculations under Summary and added Doctor
+Details and Patient Details with search, pagination and day-book/appointment/receipt
+drill-downs. These remain working-clinic reports; Master all-clinic summary is separate.
+No new API, schema or data migration. Date changes require Show, and all tabs use the
+same applied range. Unknown/later registration dates do not imply returning status;
+registration estimates are disclosed and cohort milestones no longer claim drop-offs.
+Doctor activity is not inferred from patient payments or scheduled doctor names.
+
+Group in the legacy Other Clinic form is only clinic-profile JSON metadata, not real
+organization membership/sharing; UI now clarifies it. Sales Tracker remains unimplemented;
+removed its broken link and marked the placeholder honestly. Focused UI checks8/8,
+upstream report math113/113, TypeScript and inline parsing pass. Synthetic browser checks
+include all tabs/drill-downs and an empty applied range. See synthetic evidence screenshot.
+
 ## All-patient expansion — latest 5 November 2026
 
 User explicitly approved expanding the protected Cloudflare review to all identifiable

@@ -9,7 +9,7 @@ const path = require('path');
 const vm = require('vm');
 
 const REPO = path.resolve(__dirname, '..');
-const html = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+const html = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8').replace(/\r\n/g, '\n');
 
 let pass = 0, fail = 0;
 const ok = (name, cond, detail) => {

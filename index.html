@@ -29501,13 +29501,14 @@ function OtherClinicEditor({ profile, onSave }) {
   return React.createElement("div", null,
     React.createElement("div", { style:{ fontSize:15, fontWeight:700, marginBottom:2 } }, "Create Clinic"),
     React.createElement("div", { style:{ fontSize:13, color:"#444444", marginBottom:16, maxWidth:620, lineHeight:1.55 } },
-      "Another clinic in the same group — a second branch, or a clinic of a different speciality under the same ownership."),
+      "Legacy clinic profile list. These entries do not create working clinics or access grants. Manage actual organization clinics in Master → Organization."),
 
     row("Clinic Name", React.createElement("input", { style:{ ...inp, width:"100%" }, value:name,
       onChange:e=>setName(e.target.value), placeholder:"e.g. K.B. Dental Clinic — Vasundhara" })),
 
-    row("Group", select(group, setGroup,
-      groups.map(g => ({ v:g, l:g })).concat([{ v:"__new", l:"+ Add a new group…" }]))),
+    row("Group (legacy label)", select(group, setGroup,
+      groups.map(g => ({ v:g, l:g })).concat([{ v:"__new", l:"+ Add a new group…" }])),
+      "A saved ownership label only. Organization membership, clinic access and shared settings are managed separately under Organization."),
     group === "__new" && row("New group", React.createElement("input", { style:{ ...inp, width:"100%" },
       value:newGroup, onChange:e=>setNewGroup(e.target.value), placeholder:"e.g. KB DENTAL CLINIC" })),
 
@@ -30103,10 +30104,8 @@ function Master() {
     sales: () => React.createElement("div", { style:{ background:"#fff", border:`1px solid ${BORDER}`, borderRadius:10, padding:"20px 24px", maxWidth:560 } },
       React.createElement("div", { style:{ fontSize:14, fontWeight:700, marginBottom:4 } }, "📊 Sales Tracker"),
       React.createElement("div", { style:{ fontSize:12.5, color:"#444444", marginBottom:14 } },
-        "Tracks demos, registrations and purchases for the Clinical Suite product itself — a separate tool, kept out of any clinic's own copy (including this one's, if it's ever handed off)."),
-      React.createElement("a", { href:"KB_Sales_Tracker.html", target:"_blank", rel:"noopener",
-        style:{ display:"inline-block", padding:"9px 22px", fontSize:14, borderRadius:7, background:T, color:"#fff", fontWeight:700, textDecoration:"none" } },
-        "↗ Open Sales Tracker")
+        "Not implemented. This future tool will track sales of the Clinical Suite product itself, separately from clinic collections and patient records."),
+      React.createElement("div", { style:{fontSize:12.5,color:"#555"} }, "Clinic revenue is available in Finance and Reports.")
     ),
     organizationProfile: () => React.createElement(OrganizationProfileEditor, null),
     rolesAccess: () => React.createElement(RolesAccessPanel, null),
@@ -32611,11 +32610,58 @@ function reportRead(action, params, onDone) {
   });
 }
 
+function ReportDetailTable({ headers, rows }) {
+  return RE("div", {style:{overflowX:"auto"}}, RE("table", {style:{width:"100%",borderCollapse:"collapse"}},
+    RE("thead",null,RE("tr",null,headers.map(h=>RE("th",{key:h,style:thS},h)))),
+    RE("tbody",null,rows.length ? rows.map((row,i)=>RE("tr",{key:i},row.map((cell,j)=>RE("td",{key:j,style:tdS},cell))))
+      : RE("tr",null,RE("td",{colSpan:headers.length,style:{...tdS,padding:20,color:"#555"}},"No records in this date range.")))));
+}
+
+function ReportDetails({ data, kind }) {
+  const [query,setQuery]=useState(""),[selected,setSelected]=useState(""),[page,setPage]=useState(0),[recordPage,setRecordPage]=useState(0);
+  useEffect(()=>{setQuery("");setSelected("");setPage(0);setRecordPage(0);},[data,kind]);
+  const isDoctor=kind==="doctors", rows=isDoctor?data.doctors:data.patients;
+  const search=query.trim().toLowerCase(),filtered=rows.filter(p=>(p.name+" "+(p.uhid||"")).toLowerCase().includes(search));
+  const active=rows.find(p=>(isDoctor?p.key:p.uhid)===selected),pageCount=Math.max(1,Math.ceil(filtered.length/20));
+  const button=(label,onClick,disabled)=>RE("button",{type:"button",onClick,disabled,style:{padding:"6px 10px",border:`1px solid ${BORDER}`,borderRadius:6,background:"#fff",color:T,cursor:disabled?"default":"pointer"}},label);
+  const choose=p=>{setSelected(isDoctor?p.key:p.uhid);setRecordPage(0);};
+  let history=[];
+  if(active){
+    for(const row of active.visitRows)history.push({date:row.date,type:"Day book",patient:row.patientName,uhid:row.uhid,doctor:row.operatingDoctor,detail:[row.procedureDone,row.toothNo?"Tooth/site: "+row.toothNo:"",row.workDone].filter(Boolean).join(" · ")});
+    for(const row of active.appointmentRows)history.push({date:row.date,type:"Appointment",patient:row.patientName,uhid:row.uhid,doctor:row.doctor,detail:[row.time,row.status,reasonWithStep(row.type,row.subType)].filter(Boolean).join(" · ")});
+    if(!isDoctor)for(const row of active.receiptRows)history.push({date:row.date,type:"Receipt",doctor:"",detail:["#"+row.receiptNo,row.service,rupees(row.fee)].filter(Boolean).join(" · ")});
+    history.sort((a,b)=>String(b.date).localeCompare(String(a.date)));
+  }
+  return RE("div",{role:"tabpanel",id:"report-panel-"+kind,"aria-labelledby":"report-tab-"+kind},
+    Card({title:isDoctor?"Doctor Details":"Patient Details",subtitle:isDoctor
+      ? "Day-book activity uses the recorded operating doctor. Appointments show the planned doctor separately. Combined doctor names stay together as recorded."
+      : "Patients with a day-book entry, appointment, receipt or registration in the applied range. Records are linked by UHID, never by matching names.",
+      children:RE(React.Fragment,null,
+        RE("div",{style:{display:"flex",gap:10,alignItems:"center",flexWrap:"wrap",marginBottom:12}},
+          RE("input",{"aria-label":isDoctor?"Filter doctors":"Filter patients",placeholder:isDoctor?"Search doctor name":"Search patient name or UHID",value:query,onChange:e=>{setQuery(e.target.value);setPage(0);},style:{...inp,width:280,maxWidth:"100%"}}),
+          RE("span",{style:{fontSize:12,color:"#555"}},filtered.length+" result(s)")),
+        RE(ReportDetailTable,{headers:isDoctor?["Doctor as recorded","Day-book entries","Patients seen","Procedure entries","Appointments (planned)",""]:["UHID","Patient","Day-book entries","Appointments","Collections","Latest activity", ""],
+          rows:filtered.slice(page*20,page*20+20).map(p=>isDoctor
+            ?[p.name,p.visits,p.patients,p.procedures,p.appointments,button("View doctor",()=>choose(p))]
+            :[p.uhid,p.name+(p.importReviewRequired?" · identity needs review":""),p.visits,p.appointments,rupees(p.collections),p.lastActivity||"—",button("View patient",()=>choose(p))])}),
+        RE("div",{style:{display:"flex",gap:10,alignItems:"center",marginTop:12}},button("Previous",()=>setPage(p=>p-1),page===0),RE("span",{style:{fontSize:12}},"Page "+(page+1)+" of "+pageCount),button("Next",()=>setPage(p=>p+1),page+1>=pageCount))),
+      note:isDoctor?"Collections are not assigned to doctors: receipts have no reliable treating-doctor link. Day-book entries are historical rows, not a new encounter count."
+        : (data.unlinkedRecords?data.unlinkedRecords+" source record(s) have no UHID and are excluded from patient attribution; they remain in Summary totals. ":"")+"Collections are receipts within this range, not total treatment cost or outstanding balance."}),
+    active&&Card({title:active.name+(isDoctor?"":" · "+active.uhid),
+      subtitle:isDoctor?"Recorded activity and planned appointments in this range. Appointment completion does not establish the actual treating doctor."
+        :"Registration: "+(active.registeredOn?String(active.registeredOn).slice(0,10):"not recorded")+" · Date source: "+({uhid_month:"estimated from UHID month",first_data:"earliest recorded activity",timestamp:"source timestamp",import_timestamp_not_registration:"import time only; registration unknown",recorded:"recorded"}[active.registrationDateSource]||active.registrationDateSource)+(active.importReviewRequired?" · Identity/registration needs review":""),
+      children:RE(React.Fragment,null,button("Close details",()=>setSelected("")),
+        RE(ReportDetailTable,{headers:isDoctor?["Date","Source","UHID","Patient","Details"]:["Date","Source","Doctor as recorded","Details"],
+          rows:history.slice(recordPage*20,recordPage*20+20).map(row=>isDoctor?[row.date,row.type,row.uhid||"—",row.patient||"—",row.detail||"—"]:[row.date,row.type,row.doctor||"—",row.detail||"—"])}),
+        RE("div",{style:{display:"flex",gap:10,alignItems:"center",marginTop:12}},button("Earlier page",()=>setRecordPage(p=>p-1),recordPage===0),RE("span",{style:{fontSize:12}},history.length+" record(s) · Page "+(recordPage+1)+" of "+Math.max(1,Math.ceil(history.length/20))),button("More records",()=>setRecordPage(p=>p+1),(recordPage+1)*20>=history.length))),
+      note:"This report reads saved day-book, appointment and receipt records. It does not infer treatments or item usage from billing or scheduling."}));
+}
+
 function ReportsModule() {
   // Three months, not twelve. A year of a busy clinic's day book is a lot
   // to pull through Apps Script, and the range is one click to widen once
   // the page is up.
-  const today = new Date();
+  const today = new Date(clinicISODate()+"T12:00:00");
   const defFrom = toISODate(new Date(today.getFullYear(), today.getMonth() - 2, 1));
   const defTo = toISODate(new Date(today.getFullYear(), today.getMonth() + 1, 0));
 
@@ -32625,8 +32671,10 @@ function ReportsModule() {
   const [err, setErr] = useState("");
   const [done, setDone] = useState(0);
   const [d, setD] = useState(null);
+  const [tab,setTab]=useState("summary");
 
   const load = React.useCallback(async () => {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to) || from>to) { setErr("Choose a valid date range with From before To."); return; }
     setBusy(true); setErr(""); setDone(0);
     try {
       const range = { fromDate: from, toDate: to };
@@ -32648,10 +32696,11 @@ function ReportsModule() {
           .map(r => (r && r.error) || "").filter(Boolean)[0] || "";
         setErr("Could not read: " + bad.join(", ") + ". Nothing below would be right, so it is not shown."
           + (why ? " (" + why + ")" : "")
-          + " A shorter date range is usually the fix \u2014 a year of the day book is a lot to pull through Google Sheets.");
+          + " Check your access and connection, then retry.");
         setD(null); return;
       }
       setD({
+        from,to,
         receipts: receipts.receipts || [], expenses: expenses.expenses || [],
         register: register.entries || [], appts: appts.appointments || [],
         patients: patients.patients || [],
@@ -32665,46 +32714,56 @@ function ReportsModule() {
 
   useEffect(() => { load(); }, []);   // once on open; re-run is the button
 
-  const r = React.useMemo(() => d ? computeReports(d, from, to) : null, [d, from, to]);
+  const r = React.useMemo(() => d ? computeReports(d, d.from, d.to) : null, [d]);
+  const detail = React.useMemo(() => d ? computeDetailedReports(d,d.from,d.to) : null,[d]);
 
   return RE("div", null,
     // ── the range ───────────────────────────────────────────────────
     RE("div", { style: { background: "#fff", border: `1px solid ${BORDER}`, borderRadius: 10, padding: 14, marginBottom: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "flex-end" } },
       RE("div", null,
         RE("div", { style: { fontSize: 12, color: "#4b4b4b", marginBottom: 3 } }, "From"),
-        RE("input", { type: "date", value: from, onChange: e => setFrom(e.target.value), style: { ...inp } })),
+        RE("input", { type: "date", "aria-label":"Reports from date", value: from, onChange: e => setFrom(e.target.value), style: { ...inp } })),
       RE("div", null,
         RE("div", { style: { fontSize: 12, color: "#4b4b4b", marginBottom: 3 } }, "To"),
-        RE("input", { type: "date", value: to, onChange: e => setTo(e.target.value), style: { ...inp } })),
+        RE("input", { type: "date", "aria-label":"Reports to date", value: to, onChange: e => setTo(e.target.value), style: { ...inp } })),
       RE("button", { onClick: load, disabled: busy,
         style: { padding: "9px 18px", fontSize: 13, border: "none", borderRadius: 8, cursor: busy ? "wait" : "pointer", background: T, color: "#fff", fontWeight: 700 } },
         busy ? "Working…" : "Show"),
       r && RE("div", { style: { fontSize: 12, color: "#4b4b4b", marginLeft: "auto" } },
-        r.months.length + " month(s) · " + r.receipts.length + " receipts · " + r.register.length + " visits")),
+        "Showing "+d.from+" to "+d.to+" · " + r.receipts.length + " receipts · " + r.register.length + " day-book entries")),
+
+    RE("div",{role:"tablist","aria-label":"Report views",style:{display:"flex",gap:8,flexWrap:"wrap",marginBottom:14}},
+      [["summary","Summary"],["doctors","Doctor Details"],["patients","Patient Details"]].map(([id,label])=>
+        RE("button",{key:id,id:"report-tab-"+id,type:"button",role:"tab","aria-selected":tab===id,"aria-controls":"report-panel-"+id,onClick:()=>setTab(id),style:{padding:"9px 18px",border:`1px solid ${tab===id?T:BORDER}`,borderRadius:8,background:tab===id?T:"#fff",color:tab===id?"#fff":"#444",fontWeight:700,cursor:"pointer"}},label))),
 
     err && RE("div", { style: { background: "#FEF2F2", border: "1px solid #FCA5A5", color: "#7F1D1D", borderRadius: 10, padding: 14, marginBottom: 14, fontSize: 13 } }, "⚠ " + err),
     busy && RE("div", { style: { padding: 24, textAlign: "center", color: "#444444", fontSize: 13.5 } },
       "Reading the books\u2026 " + done + " of 7",
       RE("div", { style: { fontSize: 12, color: "#4b4b4b", marginTop: 6 } },
-        "Google Sheets answers one request at a time, so a wide range takes a while.")),
+        "Loading saved clinic records for all three report tabs.")),
 
-    r && RE(React.Fragment, null,
+    !busy && detail && tab!=="summary" && RE(ReportDetails,{data:detail,kind:tab}),
+
+    !busy && r && tab==="summary" && RE("div", {role:"tabpanel",id:"report-panel-summary","aria-labelledby":"report-tab-summary"},
       // ── 1. new and returning patients ─────────────────────────────
       Card({
         title: "1. Patients each month — new and returning",
-        subtitle: "New means registered that month. Returning means seen that month, having registered earlier.",
+        subtitle: "New means registered that month. Returning means seen with an earlier registration. Missing or later registration dates remain unclassified.",
         children: RE("table", { style: { width: "100%", borderCollapse: "collapse" } },
           RE("thead", null, RE("tr", null,
             RE("th", { style: thS }, "Month"), RE("th", { style: thS }, "New"),
             RE("th", { style: thS }, "Returning"), RE("th", { style: thS }, "Seen in all"),
+            RE("th", { style: thS }, "Registration unclear"),
             RE("th", { style: { ...thS, width: "32%" } }, ""))),
           RE("tbody", null, r.byMonth.map(m => RE("tr", { key: m.key },
             RE("td", { style: tdS }, monthLabelOf(m.key)),
             RE("td", { style: { ...tdS, fontWeight: 700, color: T } }, m.newPatients),
             RE("td", { style: tdS }, m.returning),
             RE("td", { style: tdS }, m.seen),
+            RE("td", { style: tdS }, m.uncertainRegistration),
             RE("td", { style: tdS }, RE(Bar, { value: m.newPatients + m.returning, max: r.maxSeen })))))),
-        note: r.patientsWithoutDate ? r.patientsWithoutDate + " patient(s) have no registration date on file and are not counted as new in any month." : null
+        note: [r.patientsWithoutDate ? r.patientsWithoutDate + " patient(s) have no registration date on file and are not counted as new in any month." : "",
+          r.estimatedRegistrationDates ? r.estimatedRegistrationDates+" registration date(s) in this range are estimated from UHID month or earliest activity; monthly counts include these estimates." : ""].filter(Boolean).join(" ") || null
       }),
 
       // ── 2 and 3. what the money comes from ────────────────────────
@@ -32743,23 +32802,20 @@ function ReportsModule() {
 
       // ── 7. where patients stop ────────────────────────────────────
       Card({
-        title: "7. Where patients stop",
-        subtitle: "Everyone who registered in this range, and how far each got.",
+        title: "7. Patient activity in the registration cohort",
+        subtitle: "Separate recorded milestones for patients registered in this range. These are not a mandatory sequence or confirmed drop-offs.",
         children: RE("div", null,
           RE("table", { style: { width: "100%", borderCollapse: "collapse" } },
             RE("thead", null, RE("tr", null,
-              RE("th", { style: thS }, "Step"), RE("th", { style: thS }, "Reached"),
-              RE("th", { style: thS }, "Dropped here"), RE("th", { style: { ...thS, width: "30%" } }, ""))),
+              RE("th", { style: thS }, "Activity"), RE("th", { style: thS }, "Patients"),
+              RE("th", { style: { ...thS, width: "30%" } }, ""))),
             RE("tbody", null, r.funnel.map((f, i) => RE("tr", { key: f.step },
               RE("td", { style: tdS }, f.step),
               RE("td", { style: { ...tdS, fontWeight: 700 } }, f.reached),
-              RE("td", { style: { ...tdS, color: f.dropped > 0 ? "#B91C1C" : "#4b4b4b" } },
-                i === 0 ? "—" : f.dropped + (f.reached + f.dropped > 0 ? " (" + Math.round(f.dropped * 100 / (f.reached + f.dropped)) + "%)" : "")),
               RE("td", { style: tdS }, RE(Bar, { value: f.reached, max: r.funnel[0].reached, color: i === r.funnel.length - 1 ? "#059669" : T })))))),
           RE("div", { style: { fontSize: 12.5, marginTop: 10, color: "#2e2e2e" } },
-            "Biggest drop: ", RE("b", null, r.worstStep ? r.worstStep.step : "—"),
-            r.worstStep ? " — " + r.worstStep.dropped + " patient(s) got no further." : "")),
-        note: "Counted on patients who registered inside the range, so the whole of each patient's journey is inside the window being measured."
+            "Missing activity may have occurred outside this date range or may not have been recorded.")),
+        note: "The cohort uses recorded registration dates, including the imported estimates noted above; activity is limited to the selected dates."
       }),
 
       // ── 8. did not turn up ────────────────────────────────────────
@@ -32788,17 +32844,18 @@ function ReportsModule() {
 
       // ── 9. the money ──────────────────────────────────────────────
       Card({
-        title: "9. Revenue, expenses and profit",
+        title: "9. Collections, expenses and cash surplus",
+        subtitle: "Receipt collections less recorded expenses. This is cash movement, not accounting profit.",
         children: RE("div", null,
           RE("div", { style: { display: "flex", gap: 16, marginBottom: 14, flexWrap: "wrap" } },
-            RE(Stat, { label: "Revenue", value: rupees(r.revenue), color: "#059669" }),
+            RE(Stat, { label: "Collections", value: rupees(r.revenue), color: "#059669" }),
             RE(Stat, { label: "Expenses", value: rupees(r.expenseTotal), color: "#B91C1C" }),
-            RE(Stat, { label: "Profit", value: rupees(r.revenue - r.expenseTotal), color: r.revenue - r.expenseTotal >= 0 ? T : "#B91C1C" }),
+            RE(Stat, { label: "Cash surplus", value: rupees(r.revenue - r.expenseTotal), color: r.revenue - r.expenseTotal >= 0 ? T : "#B91C1C" }),
             RE(Stat, { label: "Average a month", value: rupees(r.months.length ? r.revenue / r.months.length : 0) })),
           RE("table", { style: { width: "100%", borderCollapse: "collapse" } },
             RE("thead", null, RE("tr", null,
-              RE("th", { style: thS }, "Month"), RE("th", { style: thS }, "Revenue"),
-              RE("th", { style: thS }, "Expenses"), RE("th", { style: thS }, "Profit"),
+              RE("th", { style: thS }, "Month"), RE("th", { style: thS }, "Collections"),
+              RE("th", { style: thS }, "Expenses"), RE("th", { style: thS }, "Cash surplus"),
               RE("th", { style: { ...thS, width: "26%" } }, ""))),
             RE("tbody", null, r.byMonth.map(m => RE("tr", { key: m.key },
               RE("td", { style: tdS }, monthLabelOf(m.key)),
@@ -32839,7 +32896,7 @@ function ReportsModule() {
 
       // ── what the books cannot answer yet ──────────────────────────
       RE("div", { style: { fontSize: 13.5, fontWeight: 800, color: "#2e2e2e", margin: "22px 0 10px" } },
-        "Three of the nine cannot be worked out yet"),
+        "Cost and pharmacy reporting"),
 
       r.margins.length === 0
         ? RE(NotYet, {
@@ -32862,7 +32919,7 @@ function ReportsModule() {
               + "Cost is counted once for each time the treatment appears in the day book."
           }),
 
-      RE(NotYet, {
+      r.split.pharmacy>0 ? Card({title:"Pharmacy collections",subtitle:"Receipts classified under the Pharmacy department in Treatments Master.",children:RE(Stat,{label:"Collections",value:rupees(r.split.pharmacy)}),note:"This is recorded collection, not pharmacy profit or stock usage."}) : RE(NotYet, {
         title: "9c. Contribution from pharmacy",
         why: "Nothing in the app records a pharmacy sale. Medicines are prescribed and the prescription is kept, but what the patient was charged for medicines never reaches a receipt as its own line — if it is billed at all, it is inside a treatment total.",
         unlock: "bill medicines as their own receipt line, and add a “Pharmacy” department in Treatments Master. This report already knows how to read that department: the moment pharmacy revenue is recorded that way, it appears here with no further work."
@@ -32903,9 +32960,63 @@ function ServiceTable({ rows, max, total }) {
 
 // All the arithmetic, in one place and with no React in it, so it can be
 // run on its own and checked against numbers worked out by hand.
+function computeDetailedReports(d, from, to) {
+  const inRange = row => row.date && row.date >= from && row.date <= to;
+  const keyOf = value => String(value || "").trim().toUpperCase();
+  const directory = new Map((d.patients || []).map(p => [keyOf(p.uhid), p]));
+  const patients = new Map(), doctors = new Map();
+  let unlinkedRecords = 0;
+  const patient = row => {
+    const key = keyOf(row.uhid);
+    if (!key) { unlinkedRecords++; return null; }
+    if (!patients.has(key)) {
+      const profile = directory.get(key) || {};
+      patients.set(key, { uhid:key, name:profile.name || row.patientName || "Name not recorded",
+        registeredOn:profile.registeredOn || "", registrationDateSource:profile.registrationDateSource || "recorded",
+        importReviewRequired:!!profile.importReviewRequired, visits:0, appointments:0, collections:0,
+        lastActivity:"", visitRows:[], appointmentRows:[], receiptRows:[] });
+    }
+    const p = patients.get(key);
+    if (row.date > p.lastActivity) p.lastActivity = row.date;
+    return p;
+  };
+  const doctor = value => {
+    const name = String(value || "").trim() || "Doctor not recorded", key = name.toLowerCase().replace(/\s+/g, " ");
+    if (!doctors.has(key)) doctors.set(key, { key, name, visits:0, appointments:0, patients:0, procedures:0, patientIds:new Set(), visitRows:[], appointmentRows:[] });
+    return doctors.get(key);
+  };
+  for (const row of (d.register || []).filter(inRange)) {
+    const p = patient(row), doc = doctor(row.operatingDoctor);
+    doc.visits++; doc.visitRows.push(row);
+    if (row.uhid) doc.patientIds.add(keyOf(row.uhid));
+    if (String(row.procedureDone || "").trim()) doc.procedures++;
+    if (p) { p.visits++; p.visitRows.push(row); }
+  }
+  for (const row of (d.appts || []).filter(inRange)) {
+    const p = patient(row), doc = doctor(row.doctor);
+    doc.appointments++; doc.appointmentRows.push(row);
+    if (p) { p.appointments++; p.appointmentRows.push(row); }
+  }
+  for (const row of (d.receipts || []).filter(inRange)) {
+    const p = patient(row);
+    if (p) { p.collections += Math.max(0, Number(row.fee) || 0); p.receiptRows.push(row); }
+  }
+  for (const profile of d.patients || []) {
+    const date = String(profile.registeredOn || "").slice(0,10);
+    if (date >= from && date <= to && !profile.importReviewRequired) patient({uhid:profile.uhid});
+  }
+  return { unlinkedRecords,
+    patients:Array.from(patients.values()).sort((a,b) => b.lastActivity.localeCompare(a.lastActivity) || a.name.localeCompare(b.name)),
+    doctors:Array.from(doctors.values()).map(doc => { const {patientIds,...rest} = doc; return {...rest,patients:patientIds.size}; })
+      .sort((a,b) => b.visits-a.visits || b.appointments-a.appointments || a.name.localeCompare(b.name)) };
+}
+
 function computeReports(d, from, to) {
   const months = monthsBetween(monthKeyOf(from), monthKeyOf(to));
   const inRange = iso => iso && iso >= from && iso <= to;
+  // Every tab uses the applied range, even when a source returns wider data.
+  d = {...d, receipts:d.receipts.filter(row=>inRange(row.date)), expenses:d.expenses.filter(row=>inRange(row.date)),
+    register:d.register.filter(row=>inRange(row.date)), appts:d.appts.filter(row=>inRange(row.date))};
 
   // Treatments Master, by a key that survives the way the service is typed.
   const byKey = {};
@@ -33001,11 +33112,13 @@ function computeReports(d, from, to) {
   const registeredIn = {};
   let patientsWithoutDate = 0;
   const firstSeen = {};
+  let estimatedRegistrationDates=0;
   for (const p of d.patients) {
     const uhid = String(p.uhid || "").trim().toUpperCase();
     if (!uhid) continue;
     const iso = String(p.registeredOn || "").slice(0, 10);
     if (!/^\d{4}-\d{2}-\d{2}$/.test(iso)) { patientsWithoutDate++; continue; }
+    if (inRange(iso) && ["uhid_month","first_data"].includes(p.registrationDateSource)) estimatedRegistrationDates++;
     // A patient in both books has two rows; the earlier date is when they
     // became a patient here.
     if (!firstSeen[uhid] || iso < firstSeen[uhid]) firstSeen[uhid] = iso;
@@ -33034,9 +33147,10 @@ function computeReports(d, from, to) {
     const seen = seenIn[key] || {};
     const newPatients = Object.keys(reg).length;
     // Seen this month, but registered before it.
-    const returning = Object.keys(seen).filter(u => !reg[u]).length;
+    const returning = Object.keys(seen).filter(u => firstSeen[u] && firstSeen[u] < key+"-01").length;
+    const uncertainRegistration = Object.keys(seen).filter(u => !firstSeen[u] || monthKeyOf(firstSeen[u]) > key).length;
     return {
-      key, newPatients, returning, seen: Object.keys(seen).length,
+      key, newPatients, returning, uncertainRegistration, seen: Object.keys(seen).length,
       revenue: revenueIn[key] || 0, expenses: expensesIn[key] || 0
     };
   });
@@ -33099,6 +33213,7 @@ function computeReports(d, from, to) {
     treatmentsWithCost: d.treatments.filter(t => Number(t && t.cost) > 0).length,
     treatmentsTotal: d.treatments.length,
     patientsWithoutDate,
+    estimatedRegistrationDates,
     maxSeen: Math.max(1, ...byMonth.map(m => m.newPatients + m.returning)),
     maxMonthRevenue: Math.max(1, ...byMonth.map(m => m.revenue))
   };
