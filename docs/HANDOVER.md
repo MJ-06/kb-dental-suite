@@ -1,5 +1,28 @@
 # Handover for the next tool (31 Oct 2026)
 
+## Verification follow-up and improvement backlog — 6 November 2026
+
+Read POST-TEST-IMPROVEMENTS-2026-11-06.md. A second, independently selected patient
+has the one imported authored Treatment Plan: all six rows/visible clinical values
+and normalized preview text matched the original UI. No source/local plan saves.
+This closes the populated-plan check for that plan; the earlier reference patient
+still correctly has an empty plan. Supplied root PDFs are populated Restoration
+outputs, image-only and sideways on portrait Letter pages; actual PDF export
+formatting remains open despite the in-page preview improvement.
+
+Original Daysheet initially showed unrelated rows after a committed date; explicit
+Refresh produced four snapshot-matching bookings. One of five snapshot bookings
+remains unmatched. Missing stale-request protection is a code risk requiring a
+controlled regression before a fix; neither issue is claimed resolved.
+
+Newly noticed legacy import behavior changes past Scheduled to No Show and past
+Checked In/In Chair to Completed. Raw-row impact/provenance audit is still needed;
+do not treat those inferred outcomes as confirmed attendance or completed care.
+No raw source, rehearsal or clinical data was rewritten by this follow-up.
+Temporary review credentials were rotated after this follow-up; prior sessions
+ended. The updated private demo-logins.txt is authoritative. No fresh HTTP suite
+or full backend suite was run for this documentation-only backlog update.
+
 ## One-patient original/prototype UI check — latest 6 November 2026
 
 Read UI-COMPARISON-2026-11-06.md. User approved keeping uncertain details separate

@@ -1,5 +1,36 @@
 # One-patient UI comparison — 6 November 2026
 
+## Follow-up: authored plan, supplied PDFs and refreshed Daysheet
+
+The initial reference below has no authored plan. A separate read-only inventory
+found one imported authored plan with six meaningful procedure rows. Its linked
+patient was opened in the original and prototype: all visible clinical control
+values matched, including six populated tooth/price fields and all six procedures;
+normalized full preview text matched exactly. No plan was created or saved.
+Populated-plan acceptance is therefore established for this particular plan.
+
+Offline inspection of the two user-supplied PDFs identifies both as populated
+Restoration work-done outputs for the earlier reference, with matching recorded
+doctor/material fields. Each has two image-only pages with sideways content on
+portrait US Letter paper. The earlier unobservable print action did produce files
+for the user; automation visibility was inconclusive. Actual PDF orientation,
+paper and page-break fidelity remain open.
+
+A further historical Daysheet check initially displayed unrelated rows despite
+the committed date. Explicit Refresh returned four bookings matching snapshot
+identities; one of the five snapshot bookings remains unmatched. A stale-response
+race is a supported risk in the current unguarded loader, requiring a controlled
+regression; cause of the remaining one-booking difference is still unproven.
+
+Source-code inspection additionally found inferred appointment statuses in the
+legacy importer: historical Scheduled becomes No Show, and Checked In/In Chair
+becomes Completed. Affected raw rows have not yet been inventoried or corrected.
+This extends the provenance work; matching an already-transformed rehearsal DB
+does not prove raw attendance facts. See POST-TEST-IMPROVEMENTS-2026-11-06.md.
+
+The older findings and remaining-gate text below describe the initial comparison;
+this section supersedes only its populated-plan and original-print uncertainty.
+
 ## Scope and handling
 
 Compared the live original at https://kbdental.github.io/kb-dental-suite/ with the
