@@ -9949,7 +9949,7 @@ function Dashboard({
         {l:"Pending Registrations",v:String(res.pending),s:"At this clinic",c:"#D97706",page:"registration"},
         {l:"Patients",v:String(res.patients),s:window.KB_CLINIC_CONTEXT?"Across the organization":"Registered patients",c:"#0078B4",page:"search"},
         {l:"Care Plans",v:res.carePlans===null?"—":String(res.carePlans),s:res.carePlans===null?"Clinical permission required":"Saved at this clinic",c:"#7C3AED",page:"careplan"},
-        {l:"Treatment Plans",v:res.treatmentPlans===null?"—":String(res.treatmentPlans),s:res.treatmentPlans===null?"Clinical permission required":"Saved at this clinic",c:"#059669",page:"treatmentplan"}]);
+        {l:"Treatment Plans",v:res.treatmentPlans===null?"—":String(res.treatmentPlans),s:res.treatmentPlans===null?"Clinical permission required":res.openingEstimates>0?"Clinical plans · "+res.openingEstimates+" unverified finance estimates held separately":"Saved at this clinic",c:"#059669",page:"treatmentplan"}]);
     });
     else {api("getAllPatients").then(res=>{if(res.success)setStats(prev=>prev.map((s,i)=>i===1?{...s,v:String((res.patients||[]).length)}:s));});api("getPending").then(res=>{if(res.success)setStats(prev=>prev.map((s,i)=>i===0?{...s,v:String((res.pending||[]).length)}:s));});}
     api("getTodaysBirthdays").then(res => {
@@ -14055,6 +14055,7 @@ function ClinicalSheets({ globalPat, setGlobalPat, embedded=false }) {
   const [teeth, setTeeth] = React.useState({rct:[],implant_surgery:[],implant_prosthetic:[],crown_bridge:[],restoration:[],pedo:[]});
   const [loadedTabs, setLoadedTabs] = React.useState({});
   const [tabErr, setTabErr] = React.useState({});
+  const [printPreviewHtml, setPrintPreviewHtml] = React.useState("");
 
   React.useEffect(()=>{
     api("getSignatures").then(res=>{ if(res.success&&res.signatures) setStoredSigs(res.signatures); }).catch(()=>{});
@@ -14132,7 +14133,7 @@ function ClinicalSheets({ globalPat, setGlobalPat, embedded=false }) {
     // The sample can be printed with no patient loaded, and every builder reads
     // pat.name for the header — so it gets a patient of its own, clearly
     // marked, rather than throwing or printing a real name onto an example.
-    const who = pat || { name: sampleFor ? "SAMPLE \u2014 not a patient" : "\u2014", uhid: sampleFor ? "SAMPLE" : "\u2014" };
+    const who = sampleFor ? {name:"SAMPLE \u2014 not a patient",uhid:"SAMPLE"} : pat || {name:"\u2014",uhid:"\u2014"};
     let html = "";
     if(tab==="rct") html=buildRCTSheetHTML(who,toothArr,sigSrc);
     else if(tab==="implant_surgery") html=buildImplantSurgeryHTML(who,toothArr,sigSrc);
@@ -14140,7 +14141,7 @@ function ClinicalSheets({ globalPat, setGlobalPat, embedded=false }) {
     else if(tab==="crown_bridge") html=buildCrownBridgeHTML(who,toothArr,sigSrc);
     else if(tab==="restoration") html=buildRestorationHTML(who,toothArr,sigSrc);
     else html=buildPedoHTML(who,toothArr,sigSrc);
-    const w=window.open("","_blank"); w.document.write(html); w.document.close(); setTimeout(()=>w.print(),600);
+    setPrintPreviewHtml(html);
   };
 
   const currentTab = CS_TABS.find(t=>t.id===tab)||CS_TABS[0];
@@ -14195,6 +14196,7 @@ function ClinicalSheets({ globalPat, setGlobalPat, embedded=false }) {
       key:t.toothNo, tooth:t, sheetType:tab, storedSigs,
       onPrint:(tooth)=>printSheet([tooth])
     })),
+    printPreviewHtml && React.createElement(PreviewModal,{html:printPreviewHtml,onClose:()=>setPrintPreviewHtml("")}),
   );
 }
 
@@ -29751,8 +29753,8 @@ function OrganizationReportsPanel(){
    error&&React.createElement("p",{role:"alert"},error),data&&React.createElement("div",{style:{overflowX:"auto"}},
     React.createElement("p",{style:{fontSize:12,marginBottom:12}},data.scope),
     React.createElement("table",{style:{width:"100%",borderCollapse:"collapse",fontSize:13}},
-     React.createElement("thead",null,React.createElement("tr",null,["Clinic","Appointments","Patients with appointments","Care plans (all time)","Treatment plans (all time)","Collections ₹","Expenses ₹"].map(t=>React.createElement("th",{key:t,style:{padding:10,textAlign:"left",borderBottom:`1px solid ${BORDER}`}},t)))),
-     React.createElement("tbody",null,data.rows.map(r=>React.createElement("tr",{key:r.clinicId},[r.clinicName,r.appointments,r.patientsseen,r.careplans,r.treatmentplans,r.collections,r.expenses].map((v,i)=>React.createElement("td",{key:i,style:{padding:10,borderBottom:`1px solid ${BORDER}`}},v))))))));
+     React.createElement("thead",null,React.createElement("tr",null,["Clinic","Appointments","Patients with appointments","Care plans (all time)","Clinical treatment plans (all time)","Opening finance estimates (unverified)","Collections ₹","Expenses ₹"].map(t=>React.createElement("th",{key:t,style:{padding:10,textAlign:"left",borderBottom:`1px solid ${BORDER}`}},t)))),
+     React.createElement("tbody",null,data.rows.map(r=>React.createElement("tr",{key:r.clinicId},[r.clinicName,r.appointments,r.patientsseen,r.careplans,r.treatmentplans,r.openingestimates,r.collections,r.expenses].map((v,i)=>React.createElement("td",{key:i,style:{padding:10,borderBottom:`1px solid ${BORDER}`}},v))))))));
 }
 function RolesAccessPanel(){
   const [allowed,setAllowed]=React.useState(null);

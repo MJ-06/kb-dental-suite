@@ -3,6 +3,7 @@ import {readFileSync,writeFileSync,existsSync} from 'node:fs';import {parseEnv} 
 const full=process.argv.includes('--all'),expanded=full||process.argv.includes('--review-all');
 const root=new URL(full?'../.organization-demo-runtime/realdata-full-rehearsal/':'../.organization-demo-runtime/realdata-review/',import.meta.url);
 import {preservePostgresDates} from '../src/migration/pg-dates.js';
+import {alignCrmStorageRows} from '../src/migration/crm-identity.js';
 preservePostgresDates();
 const state=JSON.parse(readFileSync(new URL('state.json',root),'utf8')),sourceEnv=parseEnv(readFileSync(join(homedir(),'.kb-pms/owner.env'),'utf8'));
 const source=new pg.Client({connectionString:sourceEnv.REHEARSAL_OWNER_DATABASE_URL});const target=new pg.Client({host:'localhost',database:full?'kb_realdata_full_rehearsal':'kb_realdata_review',user:state.owner,password:state.ownerPassword});
@@ -18,6 +19,15 @@ async function main(){await source.connect();await target.connect();try{
  const report:any={patientSelectionMatches:true,tables:{},files:{checked:0,matched:0}};
  for(const table of ['panels','doctors','chairs','staff','treatments','medicines','implant_brands','appointment_reasons','pick_lists','holidays','panel_rates','procedure_library','patients','patient_registrations','appointments','daily_register','clinical_records','clinical_sheets','treatment_cases','treatment_plans','receipts','expenses','patient_documents',...(expanded?['crm_records','crm_lead_inbox','pending_registrations']:[])]){
   const cols=(await source.query("SELECT column_name FROM information_schema.columns WHERE table_schema='public' AND table_name=$1 ORDER BY ordinal_position",[table])).rows.map(r=>r.column_name).filter(c=>!skip.has(c));
+  if(table==='crm_records'&&expanded){
+   const originals=(await source.query(`SELECT ${cols.map(q).join(',')} FROM crm_records ORDER BY id`)).rows;
+   const current=(await target.query(`SELECT ${cols.map(q).join(',')} FROM crm_records ORDER BY id`)).rows;
+   const aligned=alignCrmStorageRows(originals,current),matched=hash(aligned.rows)===hash(originals);
+   let preservedReviewChanges=false;const reconciliation=new URL('crm-reconciliation-summary.json',root);
+   if(!matched&&!full&&existsSync(reconciliation)){const expected=JSON.parse(readFileSync(reconciliation,'utf8'));preservedReviewChanges=expected.originalSourceRowsHash===hash(originals)&&expected.reviewSourceRowsHash===hash(aligned.rows);}
+   report.tables[table]={rows:aligned.rows.length,matched,preservedReviewChanges,additionalReviewRows:aligned.additionalRows,regeneratedStorageIds:aligned.regenerated};
+   if(!matched&&!preservedReviewChanges){if(process.argv.includes('--report-pending'))report.pendingReview=['crm_records'];else throw Error('Field comparison mismatch in crm_records');}continue;
+  }
   const sourceIds=(await source.query(`SELECT id FROM ${q(table)}`)).rows.map(r=>r.id);
   const rows=(await target.query(`SELECT ${cols.map(q).join(',')} FROM ${q(table)} WHERE id=ANY($1::uuid[]) ORDER BY id`,[sourceIds])).rows;
   if(expanded&&rows.length!==sourceIds.length)throw Error('Missing original source rows in '+table);
@@ -31,6 +41,6 @@ async function main(){await source.connect();await target.connect();try{
  }
  const sourceRoot=resolve(join(homedir(),'.kb-pms/documents-rehearsal')),targetRoot=resolve(new URL('documents/',root).pathname.replace(/^\/([A-Za-z]:)/,'$1'));
  for(const doc of (await target.query('SELECT id,storage_key FROM patient_documents')).rows){const original=(await source.query('SELECT storage_key FROM patient_documents WHERE id=$1',[doc.id])).rows[0];const from=resolve(sourceRoot,...String(original.storage_key).split('/')),to=resolve(targetRoot,...String(doc.storage_key).split('/'));if(!from.startsWith(sourceRoot+sep)||!to.startsWith(targetRoot+sep))throw Error('Invalid file key');report.files.checked++;if(createHash('sha256').update(readFileSync(from)).digest('hex')!==createHash('sha256').update(readFileSync(to)).digest('hex'))throw Error('Attachment mismatch');report.files.matched++;}
- report.complete=true;writeFileSync(new URL('independent-data-verification.json',root),JSON.stringify(report,null,2),{mode:0o600});console.log(JSON.stringify(report));
+ report.complete=!report.pendingReview;writeFileSync(new URL('independent-data-verification.json',root),JSON.stringify(report,null,2),{mode:0o600});console.log(JSON.stringify(report));if(report.pendingReview)process.exitCode=2;
  }finally{await source.end();await target.end();}}
 main().catch(e=>{writeFileSync(new URL('private-comparison-error.json',root),JSON.stringify({error:e instanceof Error?e.message:'Unknown',code:e.code??null}),{mode:0o600});console.error('Independent data comparison failed. No patient values printed; inspect the private migration summary.');process.exitCode=1;});

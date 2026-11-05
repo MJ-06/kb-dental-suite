@@ -1,4 +1,4 @@
-import {readFileSync} from 'node:fs';
+import {readFileSync,existsSync} from 'node:fs';
 const base=process.argv[2]??'http://127.0.0.1:8300',url=new URL(base);
 if(!((url.hostname==='127.0.0.1'&&url.port==='8300')||(url.protocol==='https:'&&url.hostname.endsWith('.trycloudflare.com'))))throw Error('Unexpected review URL');
 const state=JSON.parse(readFileSync(new URL('../.organization-demo-runtime/realdata-review/state.json',import.meta.url),'utf8'));
@@ -20,6 +20,9 @@ try{
  const all=await admin.call('getAllPatients');check(all.success&&all.patients.length===expectedPatients,'expected migrated patient cohort available');
  const recent=await admin.call('getRecentPatients');check(recent.success&&recent.patients.length===20,'default patient list capped at20');
  const overview=await admin.call('getClinicOverview');check(overview.success&&overview.patients===expectedPatients,'dashboard uses organization patient count');
+ const provenance=new URL('../.organization-demo-runtime/realdata-review/recovered-patient-verification.json',import.meta.url);
+ if(existsSync(provenance)){const plans=JSON.parse(readFileSync(provenance,'utf8')).treatmentPlanProvenance;
+  check(overview.treatmentPlans===plans.total-plans.financeopeningestimates&&overview.openingEstimates===plans.financeopeningestimates,'unverified opening estimates are separate from clinical plan counts');}
  const policy=await (await fetch(base+'/api/v1/capabilities',{headers:admin.headers()})).json() as any;check(policy.mode==='full'&&Object.values(policy.features).every(Boolean),'all tier capabilities enabled for review');
  check((await admin.call('verifyReportsPassword',{password:''})).correct,'administrator reports require no extra password');
  for(const action of ['getAppointments','getDailyRegister','getFinanceSummary','getExpenses','getCrmData','getCghsBills','getOrganizationReports'])check((await admin.call(action)).success,action+' contract');

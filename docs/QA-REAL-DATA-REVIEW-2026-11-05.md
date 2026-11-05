@@ -85,3 +85,26 @@ rotated after the independent verifier finished; old sessions ended. The public
 and rotation items above are therefore closed; the documented Daysheet, populated
 history and source-acceptance limitations remain open. This paragraph records
 coordination evidence, not additional independent browser coverage.
+
+
+## Superseding focused check — 6 November 2026
+
+Read UI-COMPARISON-2026-11-06.md for the later one-patient original/prototype check.
+Daysheet date commitment now works: prototype5 rows/API5, selected patient1 in both
+UIs/API. Original live day total4 versus snapshot5 remains pending source review.
+Populated restoration doctor's/material values match both UIs; prototype in-page
+print preview contains those values. This patient's Treatment Plan is empty in
+both versions and no explicit historical staff attribution was present. Original
+popup print layout remains unverified. Do not broaden these results to every form
+or complete structured visit/material history.
+
+The previous CRM fingerprint/rotation were completed at the time recorded above.
+A newer pipeline stages change is now preserved for review; two storage IDs were
+regenerated and order values changed. Contacts/leads remain unchanged. The latest
+strict CRM comparison is pending rather than silently blessing that later change.
+Current patient/clinical/finance fields and three file checksums match the source.
+
+
+Final Nov6 coordination: credentials rotated again after the focused comparison;
+prior sessions ended and34 public checks passed with the new logins. Source-related
+pending items remain preserved for Viveyk; rotation is not pending user action.

@@ -1,5 +1,38 @@
 # Handover for the next tool (31 Oct 2026)
 
+## One-patient original/prototype UI check — latest 6 November 2026
+
+Read UI-COMPARISON-2026-11-06.md. User approved keeping uncertain details separate
+for Viveyk's later verification. Private packet under realdata-review/verification-pending
+contains known inferred dates/descriptions, opening estimates, recovered identities
+and source exception CSVs; no data sent or committed. Preserve the unrelated untracked
+root test pdf.pdf; it was not used as comparison proof.
+
+One patient with five cases/109 forms/83 register entries/13 appointments checked.
+Original/prototype populated restoration sheets both show two tooth groups and match
+recorded doctor/material values. No explicit historical assistant/staff attribution
+was available; never substitute importing/demo accounts. Treatment Plan is empty in
+both UIs for this patient, so populated-plan acceptance remains open. Committed Daysheet
+date: prototype5 rows matches API5; selected patient1 row in original/prototype/API.
+Live original whole day4 vs snapshot5 remains pending source review, cause unproven.
+
+Clinical Sheets now opens existing PreviewModal instead of an unobservable popup;
+populated preview matches selected doctor/material fields, A4 and no horizontal
+overflow. No actual printing or original pixel parity claimed. Print Sample always
+uses SAMPLE identity. Opening finance estimates excluded from clinical plan counts
+and shown separately. New render and count/permission regressions cover these changes.
+No real patient writes, external sends or schema migration in this work.
+
+Final checks308 backend tests plus3 CRM identity regressions, TypeScript/build,
+113 report math checks and34 public HTTP checks pass. Clinical plan count1 is
+separate from219 unverified opening estimates. Later CRM check found two re-saved
+pipeline storage IDs/order values and one changed pipeline stages payload; all
+patient/clinical/finance fields and3 file hashes match, contact/lead data unchanged.
+Preserved that newer configuration in the private packet; strict CRM comparison
+remains pending, not a fresh clean fingerprint. See the Nov6 comparison report.
+Credentials rotated again after the Nov6 checks; old sessions ended. Updated private
+demo-logins.txt is authoritative;34 public HTTP checks passed with new credentials.
+
 ## Tabbed clinical reports — latest 5 November 2026
 
 Read REPORT-TABS-AND-SOURCE-REVIEW.md. Fetched Viveyk's latest branch (still3389d7b,

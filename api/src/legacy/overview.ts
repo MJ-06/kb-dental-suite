@@ -17,12 +17,13 @@ export const overview:ActionTable={
     (SELECT count(*)::int FROM appointments WHERE (starts_at AT TIME ZONE ${c.timezone})::date BETWEEN ${from}::date AND ${to}::date AND status<>'Cancelled') AS appointments,
     (SELECT count(DISTINCT patient_id)::int FROM appointments WHERE (starts_at AT TIME ZONE ${c.timezone})::date BETWEEN ${from}::date AND ${to}::date AND status<>'Cancelled') AS patientsSeen,
     (SELECT count(*)::int FROM care_plans) AS carePlans,
-    (SELECT count(*)::int FROM treatment_plans) AS treatmentPlans,
+    (SELECT count(*)::int FROM treatment_plans WHERE estimate->>'source' IS DISTINCT FROM 'Finance sheet, Working for Balance') AS treatmentPlans,
+    (SELECT count(*)::int FROM treatment_plans WHERE estimate->>'source'='Finance sheet, Working for Balance') AS openingEstimates,
     (SELECT coalesce(sum(amount1+amount2),0)::float8 FROM receipts WHERE receipt_date BETWEEN ${from}::date AND ${to}::date) AS collections,
     (SELECT coalesce(sum(amount),0)::float8 FROM expenses WHERE voided_at IS NULL AND expense_date BETWEEN ${from}::date AND ${to}::date) AS expenses`.execute(tx)).rows[0];
    rows.push({clinicId:c.id,clinicName:c.name,...r});
   }}finally{await setTenant(tx,actor.clinicId,actor.userId);}
-  return {success:true,fromDate:from,toDate:to,clinics:clinics.map(c=>({id:c.id,name:c.name})),rows,scope:"Only clinics with active report and finance permissions are included. Plan counts are all-time; other metrics use the selected dates."};
+  return {success:true,fromDate:from,toDate:to,clinics:clinics.map(c=>({id:c.id,name:c.name})),rows,scope:"Only clinics with active report and finance permissions are included. Plan counts are all-time and exclude imported opening financial estimates, shown separately as unverified. Other metrics use the selected dates."};
  },"reports:read"),
  getRecentPatients:read(async(p,{tx,actor})=>{
   const limit=Math.max(1,Math.min(20,Number(p.limit)||20));
@@ -42,13 +43,15 @@ export const overview:ActionTable={
   const row=(await sql<any>`SELECT clinic_today()::text AS today,
    ${actor.organizationId ? sql`(SELECT count(*)::int FROM org_patients)` : sql`(SELECT count(*)::int FROM patients WHERE deleted_at IS NULL)`} AS patients,
    (SELECT count(*)::int FROM pending_registrations) AS pending`.execute(tx)).rows[0];
-  let carePlans:number|null=null,treatmentPlans:number|null=null;
-  if(clinical){const r=(await sql<any>`SELECT (SELECT count(*)::int FROM care_plans) AS care,(SELECT count(*)::int FROM treatment_plans) AS treatment`.execute(tx)).rows[0];carePlans=r.care;treatmentPlans=r.treatment;}
+  let carePlans:number|null=null,treatmentPlans:number|null=null,openingEstimates:number|null=null;
+  if(clinical){const r=(await sql<any>`SELECT (SELECT count(*)::int FROM care_plans) AS care,
+   (SELECT count(*)::int FROM treatment_plans WHERE estimate->>'source' IS DISTINCT FROM 'Finance sheet, Working for Balance') AS treatment`.execute(tx)).rows[0];carePlans=r.care;treatmentPlans=r.treatment;}
+  if(actor.permissions.has('finance:read'))openingEstimates=(await sql<{n:number}>`SELECT count(*)::int AS n FROM treatment_plans WHERE estimate->>'source'='Finance sheet, Working for Balance'`.execute(tx)).rows[0]!.n;
   const appointments=diary?(await sql<any>`SELECT a.id,a.patient_name AS name,p.uhid,
    to_char(a.starts_at AT TIME ZONE ${actor.timezone},'HH24:MI') AS time,a.status,a.reason,a.doctor_name AS doctor
    FROM appointments a LEFT JOIN patients p ON p.id=a.patient_id
    WHERE (a.starts_at AT TIME ZONE ${actor.timezone})::date=clinic_today()
    AND a.status<>'Cancelled' ORDER BY a.starts_at,a.id LIMIT 10`.execute(tx)).rows:[];
-  return {success:true,...row,carePlans,treatmentPlans,appointments,canViewAppointments:diary};
+  return {success:true,...row,carePlans,treatmentPlans,openingEstimates,appointments,canViewAppointments:diary};
  },"patients:read")
 };

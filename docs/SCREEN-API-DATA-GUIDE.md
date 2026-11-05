@@ -202,3 +202,17 @@ UHID across register/appointments/receipts, retain import review/date provenance
 and do not match on names or infer a doctor for receipts. Missing UHIDs remain
 unlinked. Read REPORT-TABS-AND-SOURCE-REVIEW.md for the full source report inventory,
 limits and the distinction between legacy Group metadata and real organizations.
+
+
+## Unverified estimates and print preview — 6 November 2026
+
+`getClinicOverview` returns clinical `treatmentPlans` excluding rows whose
+`estimate.source` is Finance sheet, Working for Balance. `openingEstimates` is
+returned separately only with finance:read permission. Organization reports likewise
+separate these counts; existing per-clinic report/finance grants still apply.
+The data remains stored for financial compatibility, with a private review packet
+for later verification. No clinical plan is generated from an opening estimate.
+Clinical Sheets Print All / per-tooth / Print Sample now opens the existing
+PreviewModal over generated HTML. The modal performs actual browser printing only
+when its Print button is clicked. Samples always use SAMPLE identity.
+See UI-COMPARISON-2026-11-06.md for the one-patient comparison and open source issues.
