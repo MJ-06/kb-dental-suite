@@ -1,0 +1,12 @@
+import {readFileSync} from 'node:fs';
+import {join} from 'node:path';
+import {parseEnv} from 'node:util';
+import {archiveCommand,verifyBundle} from '../src/archive/bundle.js';
+const file=process.env.KB_ARCHIVE_WORKER_ENV??process.argv.find(a=>a.startsWith('--config='))?.slice(9);
+const id=process.argv.find(a=>a.startsWith('--id='))?.slice(5);
+if(!file||!id)throw Error('Supply --config=<private worker env file> and --id=<archive UUID>.');
+const config=parseEnv(readFileSync(file,'utf8'));
+const marker=JSON.parse(readFileSync(join(config.ARCHIVE_DIR!,'.kb-archive-root.json'),'utf8'));
+const manifest=await verifyBundle(config.ARCHIVE_DIR!,id,marker.organizationId);
+await archiveCommand(config.PG_RESTORE!,['--list',join(config.ARCHIVE_DIR!,id,'database.dump')]);
+console.log(JSON.stringify({verified:true,files:manifest.files.length,dumpBytes:manifest.dump.bytes}));

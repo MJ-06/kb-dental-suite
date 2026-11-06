@@ -13,6 +13,8 @@
 // a person, and the narrower "drive.file" scope cannot see files the app did
 // not make itself.
 import { createSign, randomBytes } from "node:crypto";
+import {createReadStream} from 'node:fs';
+import {stat} from 'node:fs/promises';
 
 export type DriveCredential =
   | { type: "service_account"; client_email: string; private_key: string }
@@ -64,7 +66,7 @@ export class DriveClient {
       body.set("grant_type", "urn:ietf:params:oauth:grant-type:jwt-bearer");
       body.set("assertion", `${head}.${claims}.${b64url(sig)}`);
     }
-    const res = await fetch(tokenUrl(), { method: "POST", body, headers: { "content-type": "application/x-www-form-urlencoded" } });
+    const res = await fetch(tokenUrl(), { method: "POST", body, headers: { "content-type": "application/x-www-form-urlencoded" },signal:AbortSignal.timeout(30000) });
     const json = (await res.json().catch(() => ({}))) as { access_token?: string; expires_in?: number; error_description?: string; error?: string };
     if (!res.ok || !json.access_token) {
       throw new DriveError(`Google refused the sign-in (${json.error_description ?? json.error ?? res.status})`, res.status);
@@ -77,7 +79,7 @@ export class DriveClient {
   private async call(path: string, init: RequestInit & { headers?: Record<string, string> } = {}): Promise<Response> {
     let last: DriveError | null = null;
     for (let attempt = 0; attempt < 4; attempt++) {
-      const res = await fetch(apiBase() + path, { ...init, headers: { ...init.headers, authorization: `Bearer ${await this.accessToken()}` } });
+      const res = await fetch(apiBase() + path, { ...init, signal:AbortSignal.timeout(30000),headers: { ...init.headers, authorization: `Bearer ${await this.accessToken()}` } });
       if (res.ok) return res;
       const j = (await res.json().catch(() => ({}))) as { error?: { message?: string } };
       last = new DriveError(`Google Drive: ${j.error?.message ?? res.statusText} (${res.status})`, res.status);
@@ -128,6 +130,28 @@ export class DriveClient {
   async download(fileId: string): Promise<Buffer> {
     const res = await this.call(`/drive/v3/files/${encodeURIComponent(fileId)}?alt=media&supportsAllDrives=true`);
     return Buffer.from(await res.arrayBuffer());
+  }
+
+  async metadata(fileId:string):Promise<{id:string;mimeType?:string;trashed?:boolean;size?:string;md5Checksum?:string;parents?:string[];appProperties?:Record<string,string>;capabilities?:{canAddChildren?:boolean}}>{
+    const r=await this.call(`/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,mimeType,trashed,size,md5Checksum,parents,appProperties,capabilities(canAddChildren)&supportsAllDrives=true`);
+    return r.json() as Promise<any>;
+  }
+
+  /** Resumable-session upload streams the archive from disk instead of loading a
+   * database plus all documents into RAM. A failed transfer fails the run; no
+   * older backup is expired in that case. */
+  async uploadFile(p:{name:string;parentId:string;file:string;appProperties:Record<string,string>}):Promise<string>{
+    const size=(await stat(p.file)).size;
+    const session=await this.call('/upload/drive/v3/files?uploadType=resumable&fields=id&supportsAllDrives=true',{
+      method:'POST',headers:{'content-type':'application/json','x-upload-content-type':'application/gzip','x-upload-content-length':String(size)},
+      body:JSON.stringify({name:p.name,parents:[p.parentId],appProperties:p.appProperties})});
+    const location=session.headers.get('location');
+    if(!location||new URL(location).origin!==new URL(apiBase()).origin)throw new DriveError('Drive returned an invalid upload session');
+    const response=await fetch(location,{method:'PUT',headers:{authorization:`Bearer ${await this.accessToken()}`,'content-type':'application/gzip','content-length':String(size)},body:createReadStream(p.file) as unknown as BodyInit,duplex:'half',signal:AbortSignal.timeout(3600000)} as RequestInit);
+    if(!response.ok)throw new DriveError('Drive archive upload failed',response.status);
+    const result=await response.json() as {id?:string};
+    if(!result.id)throw new DriveError('Drive returned no archive file');
+    return result.id;
   }
 
   /** Moves a file to Drive's bin (recoverable for 30 days); never a permanent delete. */

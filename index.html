@@ -28595,7 +28595,7 @@ function ProcedureLibraryEditor({ items, families, onSave }) {
 // pills. Sub-tabs marked `placeholder:true` have no backend/editor yet —
 // they render a "not built yet" notice until a follow-up wires them up.
 const MASTER_STRUCTURE = [
-  { id:"organization", label:"Organization", subtabs:[{ id:"organizationProfile", label:"Organization Details" },{id:"rolesAccess",label:"Roles & access"},{id:"organizationReports",label:"All-clinic Reports"}] },
+  { id:"organization", label:"Organization", subtabs:[{ id:"organizationProfile", label:"Organization Details" },{id:"rolesAccess",label:"Roles & access"},{id:"organizationReports",label:"All-clinic Reports"},{id:"dataArchiving",label:"Data Archiving"}] },
   { id:"clinic", label:"CLINIC", subtabs:[
     { id:"clinicProfile", label:"Clinic" },
     { id:"doctors",       label:"Doctors" },
@@ -30112,6 +30112,7 @@ function Master() {
     organizationProfile: () => React.createElement(OrganizationProfileEditor, null),
     rolesAccess: () => React.createElement(RolesAccessPanel, null),
     organizationReports: () => React.createElement(OrganizationReportsPanel, null),
+    dataArchiving: () => window.KBArchivePanel ? React.createElement(window.KBArchivePanel,null) : React.createElement("p",{role:"alert"},"Data Archiving requires the local backend. Refresh the page if it could not load."),
     clinicProfile: () => React.createElement(ClinicProfileEditor, {
       profile: clinicProfile,
       onSave: saveClinicProfile

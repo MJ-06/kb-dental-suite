@@ -19,6 +19,7 @@ import { systemLogRoutes } from "./routes/system-log.js";
 import { configureSystemLog } from "./syslog.js";
 import {asActor} from "./http/context.js";
 import {capabilities} from "./entitlements.js";
+import {archiveRoutes} from './routes/archives.js';
 
 export interface AppOptions {
   db: Kysely<DB>;
@@ -85,6 +86,7 @@ export async function buildApp(opts: AppOptions & { logger?: boolean }) {
   await app.register(accessRoutes, { ...opts, prefix: "/api/v1/access" });
   await app.register(storageRoutes, { ...opts, prefix: "/api/v1/storage" });
   await app.register(systemLogRoutes, { ...opts, prefix: "/api/v1/system-log" });
+  await app.register(archiveRoutes, { ...opts, prefix: "/api/v1/archives" });
   await app.register(legacyRoutes, opts);
   await app.register(pageRoutes, opts);
 

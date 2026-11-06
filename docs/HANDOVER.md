@@ -1,5 +1,23 @@
 # Handover for the next tool (31 Oct 2026)
 
+## Organization data archiving — 6 November 2026
+
+Read DATA-ARCHIVING.md. Master → Organization → Data Archiving now has daily time,
+daily-days/monthly-copy retention, direct Google Drive or personal synced-folder
+destination settings, worker readiness and manual/history controls. Existing Master
+password plus organization management permission gates the APIs. No live records
+are purged. User chose both storage options with destination configuration later:
+schedule saved disabled,23:00,30 daily days,12 monthly copies; no real-data upload.
+
+Migration0033 applied only to the marked review, with a private database-only backup
+role and hidden current-user Windows task `KB Dental Review Archives`. Worker online;
+destination not ready as intended. Review server restarted; existing Cloudflare URL
+and staff/Master passwords unchanged. No CRM UI access or patient-history edits.
+15 archive regressions pass, including actual fictional two-clinic pg_dump/restore
+and documents with backup-role privileges; existing storage14/organization13 pass
+as separate file runs. TypeScript/build/browser policy save pass. No full suite run.
+Configure the destination/account later, then enable schedule and verify first upload.
+
 ## Verification follow-up and improvement backlog — 6 November 2026
 
 Read POST-TEST-IMPROVEMENTS-2026-11-06.md. A second, independently selected patient

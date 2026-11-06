@@ -216,3 +216,13 @@ Clinical Sheets Print All / per-tooth / Print Sample now opens the existing
 PreviewModal over generated HTML. The modal performs actual browser printing only
 when its Print button is clicked. Samples always use SAMPLE identity.
 See UI-COMPARISON-2026-11-06.md for the one-patient comparison and open source issues.
+
+## Data Archiving addition — 6 November 2026
+
+Master → Organization → Data Archiving uses GET `/api/v1/archives/`, PUT
+`/api/v1/archives/policy` and POST `/api/v1/archives/runs`. Organization settings hold
+the versioned schedule/destination policy; `org_archive_runs` and
+`org_archive_worker` hold attempts/readiness. A separate local worker makes a
+database-plus-files copy and publishes to the configured Drive/personal folder.
+No patient rows are removed or archived out of the live tables. Read
+[DATA-ARCHIVING.md](DATA-ARCHIVING.md) for retention, scope, setup and restore.

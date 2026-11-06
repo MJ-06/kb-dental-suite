@@ -1,0 +1,20 @@
+import {readFileSync} from 'node:fs';
+import {runInNewContext} from 'node:vm';
+import {expect,it} from 'vitest';
+import {DEFAULT_POLICY} from '../src/archive/policy.js';
+it('keeps both destinations configurable and blocks Archive now until ready',async()=>{
+ const data={policy:DEFAULT_POLICY,version:7,timezone:'Asia/Kolkata',worker:{online:true,ready:false,destination:'Google Drive — connection required',last_error:'GOOGLE_DRIVE_CONNECTION_REQUIRED'},runs:[]};
+ const states:any[]=[data,{...DEFAULT_POLICY},'','',false];let cursor=0;const requests:any[]=[];
+ const h=(type:any,props:any,...children:any[])=>({type,props,children});
+ const context:any={window:{},React:{createElement:h,useEffect:()=>{},useState:()=>{const i=cursor++;return [states[i],(v:any)=>states[i]=typeof v==='function'?v(states[i]):v];}},fetch:async(url:string,options:any)=>{requests.push({url,...options});return {ok:true,json:async()=>data};}};
+ runInNewContext(readFileSync(new URL('../../archive-panel.js',import.meta.url),'utf8'),context);
+ const flatten=(n:any):any[]=>!n||typeof n!=='object'?[]:[n,...(n.children??[]).flat(Infinity).flatMap(flatten)];
+ const render=()=>{cursor=0;return flatten(context.window.KBArchivePanel());};
+ let nodes=render();expect(nodes.filter(n=>n.type==='option').map(n=>n.props.value)).toEqual(['drive','folder']);
+ expect(nodes.find(n=>n.type==='button'&&n.children.includes('Archive now')).props.disabled).toBe(true);
+ nodes.find(n=>n.type==='select').props.onChange({target:{value:'folder'}});nodes=render();
+ const path=nodes.find(n=>n.type==='input'&&n.props.placeholder?.includes('G:'));expect(path).toBeDefined();path.props.onChange({target:{value:'G:/My Drive/Clinic Backups'}});
+ nodes=render();await nodes.find(n=>n.type==='form').props.onSubmit({preventDefault(){}});
+ const save=requests.find(r=>r.method==='PUT');expect(save.url).toBe('/api/v1/archives/policy');
+ expect(JSON.parse(save.body)).toMatchObject({version:7,policy:{destination:'folder',folderPath:'G:/My Drive/Clinic Backups',dailyDays:30,monthlyMonths:12,enabled:false}});
+});
