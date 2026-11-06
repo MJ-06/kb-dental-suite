@@ -11,8 +11,10 @@ or credentials are included.
    HttpOnly session cookie; patient data access is checked on the server.
 2. The page sends an action and fields to `/exec`. This compatibility endpoint
    replaces the old Apps Script URL while retaining the familiar screens.
-   Reads can use GET; mutations and password verification use POST bodies in the
-   local UI. Large records use POST. A `token` supplied in a URL is not authority.
+   The native UI uses POST bodies for reads and saves, avoiding patient fields
+   in URLs. Reads may still use GET for compatibility; declared mutations,
+   UHID reservations, logout and password verification require POST. A `token`
+   supplied in a URL is not authority.
 3. The server resumes the session, checks the named permission and pins the
    transaction to the selected clinic and user. `X-KB-Clinic` and
    `X-KB-Clinic-Revision` reject stale-tab operations after a clinic switch.
@@ -23,6 +25,21 @@ or credentials are included.
    tables carry `version`, created/updated timestamps and actor IDs. This is an
    audit trail, not a completed clinical finalization/addendum workflow for every
    type of record. Not every Save endpoint enforces optimistic version checks.
+
+7 November update: native registration, Care Plan, Treatment Plan and Clinical
+Sheets reads return the local row version with the data; the main native client
+returns it on save. A stale version is refused with `conflict:true`, retaining
+the previous saved record. Existing clients omitting version remain compatible
+and are not protected. This does not yet provide organization-wide demographic
+version checking for simultaneous identity changes made from different clinics.
+The in-memory save guard coalesces identical pending writes and warns before
+leaving edited clinical screens. It is not durable offline storage or a server
+idempotency key for receipts/append-only forms after a lost response.
+
+CGHS bills now retain their submitted address snapshot in `cghs_bills.address`
+(migration0034). Old blank addresses remain unknown; they are not rewritten from
+today's registration. Local usage analytics has separate APIs/storage, described
+in LOCAL-ANALYTICS.md, and receives no patient or form values.
 
 The visible UHID stays the patient identifier staff know. Internal UUIDs keep
 database relationships stable; they are not a replacement ID staff must learn.

@@ -126,6 +126,63 @@ function regAllRows_() {
 // The sheet a NEW registration is written to. Only ever called once the UHID
 // has been looked for in both books, so an existing patient is updated where
 // they already are rather than copied into the other book.
+
+// A patient who was ours before the panel existed, and is marked as a panel
+// patient now, has their row in the MAIN book -- saveRegistration updates a
+// patient where they already live, which is what stops the iPad form
+// splitting somebody across two books. Right for an edit, wrong for a
+// conversion: the row has to end up in the panel book, or the panel book is
+// missing the very patients the panel is for.
+//
+// Moved by HEADER NAME, never by position. The two books drift: the panel
+// book has columns the main one does not, and a positional copy would file
+// a card number under a blood group.
+//
+// Appended first and deleted second, deliberately. If the append fails the
+// patient is still in the main book and nothing is lost; if the delete
+// fails there are two rows, which is visible and fixable. The other order
+// risks losing the patient outright.
+function moveRegRowToPanelBook_(fromSheet, rowNum) {
+  if (SS_ID === PANEL_PMS_SHEET_ID) return { moved: false, reason: "already the panel book" };
+  var dest = regSheetFor_(true);
+  if (!dest) return { moved: false, reason: "no panel book" };
+  // Compared by SPREADSHEET, not by sheet id. getSheetId() is unique within
+  // one spreadsheet and says nothing across two: both books have a tab
+  // called Registrations and in each it is usually the first one, so both
+  // ids are 0. Comparing them concluded the row was already in the panel
+  // book and moved nothing, which is exactly what was reported.
+  if (dest.getParent().getId() === fromSheet.getParent().getId()) {
+    return { moved: false, reason: "already in the panel book" };
+  }
+
+  var srcHeaders = fromSheet.getRange(1, 1, 1, fromSheet.getLastColumn()).getValues()[0];
+  var srcValues = fromSheet.getRange(rowNum, 1, 1, fromSheet.getLastColumn()).getValues()[0];
+
+  // The panel book must be able to hold everything the main row carries,
+  // or the move would quietly drop whatever it has no column for.
+  if (dest.getLastRow() === 0) {
+    ensureGridWidth_(dest, srcHeaders.length);
+    dest.getRange(1, 1, 1, srcHeaders.length).setValues([srcHeaders]);
+  } else {
+    ensureRegColumns_(dest, srcHeaders.filter(function (h) { return String(h).trim(); }));
+  }
+
+  var destHeaders = dest.getRange(1, 1, 1, dest.getLastColumn()).getValues()[0];
+  var out = destHeaders.map(function () { return ""; });
+  srcHeaders.forEach(function (h, i) {
+    var name = String(h).trim();
+    if (!name) return;
+    var col = findRegColumn_(destHeaders, [name]);
+    if (col >= 0) out[col] = srcValues[i];
+  });
+
+  ensureGridWidth_(dest, out.length);
+  dest.appendRow(out);
+  fromSheet.deleteRow(rowNum);
+  regCacheClear_();
+  return { moved: true };
+}
+
 function regSheetFor_(isPanel) {
   if (!isPanel || SS_ID === PANEL_PMS_SHEET_ID) return getSheet("Registrations");
   var ss = SpreadsheetApp.openById(PANEL_PMS_SHEET_ID);
@@ -142,7 +199,96 @@ function ensureRegColumns_(sh, names) {
   var headers = sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0];
   var missing = names.filter(function (n) { return findRegColumn_(headers, [n]) < 0; });
   if (!missing.length) return;
+  ensureGridWidth_(sh, headers.length + missing.length);
   sh.getRange(1, headers.length + 1, 1, missing.length).setValues([missing]);
+}
+
+// A sheet is a fixed grid, and writing one column past its right-hand edge
+// does NOT widen it -- it throws "those columns are out of bounds". A new
+// sheet is 26 columns wide and the main register carries more than that, so
+// moving a row into a panel book that had never been widened threw here,
+// inside a try/catch, and the row stayed exactly where it was while the save
+// reported success. Widened by what is short, and by nothing more.
+function ensureGridWidth_(sh, needed) {
+  var have = sh.getMaxColumns();
+  if (needed > have) sh.insertColumnsAfter(have, needed - have);
+}
+
+// Every patient marked onto a panel whose row is still in the main book.
+//
+// The hook on save only catches a conversion at the moment it is made. The
+// clinic had years of CGHS patients on file before the panel went live, and
+// every one of them would otherwise have to be opened and re-saved by hand.
+// This is also the only honest answer to "is the move working": it reports
+// what it found, what it moved, and the reason for anything it could not.
+//
+// Walked from the bottom up, because deleting a row shifts every row under it.
+function panelBookStrandedRows_() {
+  var sh = getSheet("Registrations");
+  var data = sh.getDataRange().getValues();
+  var out = { sheet: sh, rows: [] };
+  if (data.length <= 1) return out;
+  var typeCol = findRegColumn_(data[0], ["Patient Type"]);
+  var panelCol = findRegColumn_(data[0], ["Panel"]);
+  var uhidCol = findRegColumn_(data[0], ["UHID", "Registration ID"]);
+  var nameCol = findRegColumn_(data[0], ["Full Name", "Name"]);
+  for (var r = data.length - 1; r >= 1; r--) {
+    var type = typeCol >= 0 ? String(data[r][typeCol] || "").trim() : "";
+    var panel = panelCol >= 0 ? String(data[r][panelCol] || "").trim() : "";
+    // Marked Panel, or carrying a panel name and never marked either way.
+    // Somebody explicitly marked Normal is left alone even if a panel name
+    // was once typed against them: that was a decision.
+    var isPanel = type.toLowerCase() === "panel" || (!type && !!panel);
+    if (!isPanel) continue;
+    out.rows.push({
+      row: r + 1,
+      uhid: uhidCol >= 0 ? String(data[r][uhidCol] || "").trim() : "",
+      name: nameCol >= 0 ? String(data[r][nameCol] || "").trim() : "",
+      panel: panel
+    });
+  }
+  return out;
+}
+
+function auditPanelBook(p) {
+  if (SS_ID === PANEL_PMS_SHEET_ID) {
+    return { success: true, here: "panel", stranded: [], build: BACKEND_BUILD };
+  }
+  var found = panelBookStrandedRows_();
+  return {
+    success: true, here: "main", build: BACKEND_BUILD,
+    stranded: found.rows.map(function (r) {
+      return { uhid: r.uhid, name: r.name, panel: r.panel };
+    })
+  };
+}
+
+function sweepPanelBook(p) {
+  if (SS_ID === PANEL_PMS_SHEET_ID) {
+    return { success: false, error: "Open the main clinic app to do this. From the empanelled app there is nowhere to move a row to." };
+  }
+  var lock = LockService.getScriptLock();
+  try { lock.waitLock(30000); } catch (e) {
+    return { success: false, error: "The sheet is busy. Try again in a moment." };
+  }
+  try {
+    var found = panelBookStrandedRows_();
+    var moved = 0, left = [];
+    found.rows.forEach(function (r) {
+      var who = (r.name || r.uhid || ("row " + r.row));
+      try {
+        var res = moveRegRowToPanelBook_(found.sheet, r.row);
+        if (res && res.moved) moved++;
+        else left.push(who + " — " + ((res && res.reason) || "not moved"));
+      } catch (e) {
+        left.push(who + " — " + e.message);
+      }
+    });
+    regCacheClear_();
+    return { success: true, found: found.rows.length, moved: moved, left: left, build: BACKEND_BUILD };
+  } finally {
+    lock.releaseLock();
+  }
 }
 
 function getSheet(name) {
@@ -755,7 +901,7 @@ function doPost(e) {
 //
 // The app reads this from ping and says so when it is behind. Bump it
 // whenever this file changes in a way the app depends on.
-var BACKEND_BUILD = "2026-11-04a";
+var BACKEND_BUILD = "2026-11-06g";
 
 var SESSION_TTL_MS = 12 * 60 * 60 * 1000; // 12 hours
 // Always session-protected, even while the global rollout flag is off.
@@ -925,6 +1071,8 @@ function route(p) {
       case "getNextUHID":       return getNextUHID();
       case "checkDuplicate":    return checkDuplicate(p);
       case "saveRegistration":  return saveRegistration(p);
+      case "auditPanelBook":    return auditPanelBook(p);
+      case "sweepPanelBook":    return sweepPanelBook(p);
       case "patientLookup":     return patientLookup(p);
       case "patientCompleteRegistration": return patientCompleteRegistration(p);
       case "getPending":        return getPending();
@@ -1327,7 +1475,30 @@ function saveRegistration(p) {
   else sh.appendRow(rowValues);
   regCacheClear_();
 
-  return { success: true, uhid: p.uhid };
+  // The row is written before it is moved, so the move carries the panel
+  // details that were just saved rather than the state before them.
+  var movedToPanel = false;
+  // Why it did not move, in words, carried back to whoever pressed Save.
+  // The first attempt at this failed silently for a week: the move threw,
+  // the throw was logged where nobody reads logs, and the save reported
+  // success. A reason on the screen is what turns the next report into a
+  // diagnosis instead of another round of guessing.
+  var panelMoveNote = "";
+  if (isPanel && existingRow > 0) {
+    try {
+      var mv = moveRegRowToPanelBook_(sh, existingRow);
+      movedToPanel = !!(mv && mv.moved);
+      if (!movedToPanel) panelMoveNote = (mv && mv.reason) || "not moved";
+    } catch (e) {
+      // The save itself worked. Say the move did not rather than failing
+      // the whole thing and leaving the desk thinking nothing saved.
+      panelMoveNote = e.message;
+      Logger.log("Panel book move failed for " + p.uhid + ": " + e.message);
+    }
+  }
+
+  return { success: true, uhid: p.uhid, movedToPanelBook: movedToPanel,
+           panelMoveNote: panelMoveNote, build: BACKEND_BUILD };
 }
 
 // ── Patient-facing registration completion (register.html) ──────────
@@ -2002,7 +2173,12 @@ function saveTreatmentPlan(p) {
 // same moment would otherwise both be told "0001".
 var CGHS_BILLS_SHEET = "CGHS Bills";
 var CGHS_BILL_HEADERS = ["Bill No", "Bill Date", "UHID", "Patient", "Panel",
-                         "Card ID", "Panel Category", "Amount", "Lines", "Saved At"];
+                         "Card ID", "Panel Category", "Amount", "Lines", "Saved At",
+                         // The panel wants the beneficiary's address on the
+                         // bill. Kept with the bill rather than looked up at
+                         // reprint time, because a patient who moves house
+                         // must not change a bill that was already submitted.
+                         "Address"];
 
 // The series runs per month and is taken from the BILL's date, not from
 // today: a bill written on the 2nd for work done in the previous month
@@ -2033,6 +2209,13 @@ function saveCghsBill(p) {
   try {
     var sh = getSheet(CGHS_BILLS_SHEET);
     if (sh.getLastRow() === 0) sh.appendRow(CGHS_BILL_HEADERS);
+    // A sheet written by an earlier build is one column short. Its heading
+    // is added rather than assumed, or the address would be written into
+    // nothing -- the same silent loss the registers had.
+    else if (sh.getRange(1, 1, 1, sh.getLastColumn()).getValues()[0].length < CGHS_BILL_HEADERS.length) {
+      ensureGridWidth_(sh, CGHS_BILL_HEADERS.length);
+      sh.getRange(1, 1, 1, CGHS_BILL_HEADERS.length).setValues([CGHS_BILL_HEADERS]);
+    }
     var data = sh.getDataRange().getValues();
 
     var prefix = cghsBillPrefix_(p.billDate);
@@ -2049,7 +2232,7 @@ function saveCghsBill(p) {
     sh.appendRow([
       billNo, p.billDate || "", uhid, p.patientName || "", p.panel || "",
       p.cardId || "", p.panelCategory || "", Number(p.amount) || 0,
-      safeJSON(p.lines), new Date().toISOString()
+      safeJSON(p.lines), new Date().toISOString(), p.address || ""
     ]);
     return { success: true, billNo: billNo };
   } catch (e) {
@@ -2057,6 +2240,22 @@ function saveCghsBill(p) {
   } finally {
     lock.releaseLock();
   }
+}
+
+// The address on file for a patient, for a bill that was written before the
+// address was kept with it. regAllRows_ is memoised per request, so asking
+// for a page of bills costs one read of the register, not one per bill.
+function regAddressFor_(uhid) {
+  var want = String(uhid || "").trim().toUpperCase();
+  if (!want) return "";
+  var data = regAllRows_();
+  if (!data || data.length <= 1) return "";
+  var uhidCol = findRegColumn_(data[0], ["UHID", "Registration ID"]);
+  var addrCol = findRegColumn_(data[0], ["Complete Address", "Address"]);
+  if (uhidCol < 0 || addrCol < 0) return "";
+  var latest = regLatestByUhid_(data, uhidCol);
+  var hit = latest[want];
+  return hit ? String(data[hit.row][addrCol] || "").trim() : "";
 }
 
 // Every CGHS bill, or one patient's. The front desk searches by UHID; the
@@ -2075,7 +2274,12 @@ function getCghsBills(p) {
       uhid: String(data[i][2] || ""), patientName: String(data[i][3] || ""),
       panel: String(data[i][4] || ""), cardId: String(data[i][5] || ""),
       panelCategory: String(data[i][6] || ""), amount: Number(data[i][7]) || 0,
-      lines: safeParseJSON(data[i][8]), savedAt: String(data[i][9] || "")
+      lines: safeParseJSON(data[i][8]), savedAt: String(data[i][9] || ""),
+      // Bills written before the address was kept have none. Rather than
+      // reprinting them with a blank line, the register is asked -- the
+      // address on file today is better than nothing at all, and the
+      // register is already in memory for this request.
+      address: String(data[i][10] || "") || regAddressFor_(String(data[i][2] || ""))
     });
   }
   out.reverse();
@@ -5595,8 +5799,96 @@ function saveChairsList(p) {
   return { success: true };
 }
 
+// ── Clinical note templates ─────────────────────────────────────────────
+// There is ONE list. It was briefly two -- the clinic's 188 notes went in
+// beside the older set while they were looked over -- and the older set is
+// now replaced by them, under the name everything already calls it.
+//
+// The heading row carries a version cell. Without it there is no way to
+// tell the clinic's list from the set it replaced: both sheets can be
+// called Clinical Note Templates and both hold Situation / Template Text /
+// Category. With it, the swap below can run on every read and do nothing
+// every time but the first.
+var CLINICAL_TPL_SHEET = "Clinical Note Templates";
+var CLINICAL_TPL_HEADERS = ["Situation", "Template Text", "Category", "Updated At", "v2"];
+
+// Three departments were renamed to the names the rest of the clinic uses.
+// A sheet seeded before that still carries the old ones, and those headings
+// are no longer offered by the editor -- so a note under one of them could
+// be read but never filed again. The cells are corrected on read rather
+// than left for somebody to find.
+var CLINICAL_TPL_RENAMES = {
+  "RCT / Endodontics": "RCT",
+  "Minor Oral Surgery": "Minor Surgery",
+  "Denture": "Prosthodontics"
+};
+
+// Idempotent by construction: once rewritten nothing matches, so the next
+// read does no work and writes nothing.
+function clinicalTplFixCategories_(sh) {
+  if (sh.getLastRow() < 2) return;
+  var col = 3;
+  var rows = sh.getRange(2, col, sh.getLastRow() - 1, 1).getValues();
+  var touched = false;
+  for (var i = 0; i < rows.length; i++) {
+    var was = String(rows[i][0] || "").trim();
+    if (CLINICAL_TPL_RENAMES.hasOwnProperty(was)) { rows[i][0] = CLINICAL_TPL_RENAMES[was]; touched = true; }
+  }
+  if (touched) sh.getRange(2, col, rows.length, 1).setValues(rows);
+}
+
+function clinicalTplIsCurrent_(sh) {
+  if (!sh || sh.getLastRow() === 0) return false;
+  var head = sh.getRange(1, 1, 1, Math.max(sh.getLastColumn(), 1)).getValues()[0];
+  return String(head[4] || "").trim() === "v2";
+}
+
+// The sheet the list lives in, swapping the old one out of the way the
+// first time it is asked for.
+//
+// The old set is RENAMED, never deleted. It is the clinic's own writing,
+// nobody asked for it to be destroyed, and a tab sitting there clearly
+// marked is something they can delete themselves once they are sure. A
+// delete here would not be undoable.
+function clinicalTplSheet_() {
+  var ss = SpreadsheetApp.getActiveSpreadsheet();
+  var sh = ss.getSheetByName(CLINICAL_TPL_SHEET);
+  if (clinicalTplIsCurrent_(sh)) return sh;
+
+  if (sh) {
+    var name = CLINICAL_TPL_SHEET + " (replaced)", n = 2;
+    while (ss.getSheetByName(name)) { name = CLINICAL_TPL_SHEET + " (replaced " + n + ")"; n++; }
+    sh.setName(name);
+  }
+  // The list may already be in the book under the name it was first given.
+  var carried = ss.getSheetByName("Treatment Note Templates");
+  if (carried) {
+    carried.setName(CLINICAL_TPL_SHEET);
+    if (carried.getLastRow() > 0) {
+      ensureGridWidth_(carried, CLINICAL_TPL_HEADERS.length);
+      carried.getRange(1, 1, 1, CLINICAL_TPL_HEADERS.length).setValues([CLINICAL_TPL_HEADERS]);
+    }
+    return carried;
+  }
+  return getSheet(CLINICAL_TPL_SHEET);
+}
+
 function getClinicalNoteTemplates() {
-  var sh = getSheet("Clinical Note Templates");
+  var sh = clinicalTplSheet_();
+  // Untouched, so the clinic's own list is put in. getLastRow() is 0 only
+  // before anything has ever been written: once saved, even an emptied list
+  // leaves its heading row, so a list the clinic deliberately cleared is
+  // never refilled behind their back.
+  if (sh.getLastRow() === 0) {
+    sh.appendRow(CLINICAL_TPL_HEADERS);
+    var seeded = new Date().toISOString();
+    var block = CLINICAL_NOTE_SEED.map(function (r) { return [r[1], r[2], r[0], seeded, ""]; });
+    if (block.length) {
+      ensureGridWidth_(sh, CLINICAL_TPL_HEADERS.length);
+      sh.getRange(2, 1, block.length, CLINICAL_TPL_HEADERS.length).setValues(block);
+    }
+  }
+  clinicalTplFixCategories_(sh);
   var data = sh.getDataRange().getValues();
   var items = [];
   for (var i = 1; i < data.length; i++) {
@@ -5607,13 +5899,214 @@ function getClinicalNoteTemplates() {
 function saveClinicalNoteTemplates(p) {
   var arr = parseList_(p.templates, "clinical note templates");
   if (arr && arr.__bad) return { success: false, error: arr.__bad };
-  var sh = getSheet("Clinical Note Templates");
+  var sh = clinicalTplSheet_();
   sh.clearContents();
-  sh.appendRow(["Situation", "Template Text", "Category", "Updated At"]);
+  sh.appendRow(CLINICAL_TPL_HEADERS);
   var now = new Date().toISOString();
-  arr.forEach(function(t) { sh.appendRow([t.situation, t.text, t.category || "", now]); });
+  arr.forEach(function(t) { sh.appendRow([t.situation, t.text, t.category || "", now, ""]); });
   return { success: true };
 }
+
+// The 188 clinical notes the clinic wrote, by department and treatment.
+// Shipped here rather than typed into the sheet by hand: they are the
+// clinic's own text, they have to be identical on both instances, and a
+// list this long entered twice through a browser is a list entered wrong.
+//
+// It is a STARTING point, not a fixed table. It is written into the sheet
+// once, the first time the sheet is read while still untouched, and after
+// that the sheet is the truth: every edit and every deletion sticks,
+// because saving leaves a heading row behind and an untouched sheet is the
+// only thing that seeds.
+var CLINICAL_NOTE_SEED = [
+  ["General / Consultation", "Air Polishing", "Full mouth air polishing done using {powderType} powder for extrinsic stain removal."],
+  ["General / Consultation", "Conscious sedation", "Conscious sedation administered for {duration} hour(s) for {procedure}."],
+  ["General / Consultation", "Consultation", "Consultation for sensitivity while drinking water and / or eating from (right/left) side (front/back) treatment plan discussed"],
+  ["General / Consultation", "Consultation", "Consultation for fractured crown wrt # (Tooth no.) retained root stamp wrt # (tooth no.) in maxillary (left/right) region. Advised extraction followed by dental implant."],
+  ["General / Consultation", "Consultation", "Consultation for fractured crown wrt # (Tooth no.) retained root stump wrt # (tooth no.) in mandibular (left/right) region. Advised extraction followed by dental implant."],
+  ["General / Consultation", "Consultation", "Consultation for generalized attrition in (maxillary/mandibular) arch, advised brushing twice daily with soft tooth brush."],
+  ["General / Consultation", "Consultation", "Consultation for fractured Zirconium FPD. Advised removal and fabrication of new FPD."],
+  ["General / Consultation", "Consultation", "Consultation for pain wrt # (tooth no.) in (maxillary/mandibular) (right/left) region done. Advised IOPA & RCT."],
+  ["General / Consultation", "Consultation", "Consultation for bleeding gums while brushing wrt # (tooth no.) in (maxillary/mandibular) (right/left) region done. Advised oral prophylaxis"],
+  ["General / Consultation", "Consultation", "Consultation for sensitivity in teeth. Desensitizing tooth paste advised."],
+  ["General / Consultation", "Consultation", "Consultation for blackish Discoloration wrt # (tooth no.) in (maxillary/mandibular)(front/back) (right/left) region. Advised restoration wrt# (tooth no)."],
+  ["General / Consultation", "Consultation", "Consultation for swelling wrt # (tooth no.) in (maxillary/mandibular) (right/left) region"],
+  ["General / Consultation", "Consultation", "Consultation for mobile teeth wrt # (tooth no.) in (maxillary/mandibular) (right/left) region. Advised extraction wrt # (tooth no.)"],
+  ["General / Consultation", "Consultation", "Consultation for food lodgment teeth wrt # (tooth no) in (maxillary/mandibular) (right/left)/quadrant noted. Advised RCT or Extraction."],
+  ["General / Consultation", "Consultation", "Consultation for difficulty in opening mouth. Advised IOPA/OPG. Medication prescribed."],
+  ["General / Consultation", "Consultation", "P/C of swelling in buccal mucosa and cheek region on right region, Medication prescribed."],
+  ["General / Consultation", "Consultation", "Consultation done, {chief complaint} recorded. Clinical examination performed, treatment plan discussed with patient."],
+  ["General / Consultation", "Consultation - Full Mouth Rehabilitation", "Consultation for full mouth rehabilitation done. {findings} noted, treatment plan discussed across {phases} phases."],
+  ["General / Consultation", "Consultation - Invisalign/Braces", "Consultation for orthodontic correction done. {malocclusion} noted, Invisalign/Braces options discussed."],
+  ["General / Consultation", "Consultation - Smile Makeover", "Consultation for smile makeover done. {concerns} noted, treatment options discussed including {options}."],
+  ["General / Consultation", "Consultation- Virtual", "Virtual consultation conducted via {platform} for {complaint}. Advice/treatment plan shared with patient."],
+  ["Crown & Bridge", "Crown", "Crown / FPD treatment planned wrt {tooth} - {material} selected, {stage} stage discussed with patient."],
+  ["Crown & Bridge", "Crown - cementation", "Provisional crown removed, Zirconium crown placed with RelyX wrt # (tooth no). Bite adjustment done, IOPA made."],
+  ["Crown & Bridge", "Crown - cementation", "Provisional crown removed, PFM crown placed with RelyX wrt # (tooth no). Bite adjustment done, IOPA made."],
+  ["Crown & Bridge", "Crown - cementation", "Provisional crown removed, Tooth prepared, etched, bond applied, E-MAX crown bonded with VARIOLINK esthetics under rubberdam wrt # (tooth no.). Bite adjusted."],
+  ["Crown & Bridge", "Crown - Digital impression", "Digital impression recorded for {crownType} crown wrt {tooth} with bite registration, shade {shade}, sent to lab."],
+  ["Crown & Bridge", "Crown - Lengthening", "Crown lengthening done wrt {tooth} for {reason}, sutures placed."],
+  ["Crown & Bridge", "Tooth - Preparation", "Tooth preparation for (material) crown done wrt # (tooth no.) Digital scan recorded with bite, sent to lab. SHADE- (?)"],
+  ["Crown & Bridge", "Tooth - Preparation Modified", "Tooth preparation modified wrt {tooth} - {modification} done to accommodate {reason}."],
+  ["Crown & Bridge", "Crown - Provisional", "Milled acrylic Joint provisional crown placed with (cement) wrt #(tooth no.). Occlusal adjustment done."],
+  ["Crown & Bridge", "Crown - Provisional", "Provisional {material} crown wrt {tooth}, placed with {cement}."],
+  ["Crown & Bridge", "Crown - Try-in", "Provisional crown removed & (Zr.) Crowns final try in done with trying paste, fit verified with IOPA provisional crown placed back wrt #(tooth no)."],
+  ["Crown & Bridge", "Crown - Try-in", "(Material) crown trial done wrt # (tooth no.), Crown  (findings of crown), Repeat digital scan made wrt  (tooth no.). Advised to continue warm saline rinses thrice daily after meals."],
+  ["Crown & Bridge", "Crown - Putty Impression", "Manual putty impression (heavy & light body) recorded wrt {tooth} for {crownType} fabrication."],
+  ["Crown & Bridge", "Crown / FPD- recementation", "Dislodged Crown / FPD wrt {tooth} placed again with {cement}. Occlusion checked and adjusted."],
+  ["Crown & Bridge", "Crown/FPD/Provisional Removal", "(Material) Crown/FPD wrt {tooth} sectioned and removed for {reason}."],
+  ["Crown & Bridge", "Crown- Cord packed", "Retraction cord packed wrt {tooth} prior to {nextStep} for {crownType} crown."],
+  ["Prosthodontics", "Denture - Adjustment", "Denture adjustment done wrt {arch} for {complaint}. Advised to do phonetics exercise and also start chewing roasted chick peas and apple."],
+  ["Prosthodontics", "Denture - Border Moulding", "Border moulding done wrt {arch} using green stick compound, final impression recorded with {material}, using custom tray"],
+  ["Prosthodontics", "Denture - Cast Partial", "Cast partial framework try-in done wrt {arch}, fit and clasp adaptation verified."],
+  ["Prosthodontics", "Denture - Insertion", "Denture complete/partial insertion done wrt {arch}, fit, retention and bite verified, post-insertion instructions explained."],
+  ["Prosthodontics", "Denture - Final impression", "Final impression made wrt {arch} using {material} for denture fabrication, sent to lab."],
+  ["Prosthodontics", "Denture - Fixed Implant Supported", "Fixed implant-supported prosthesis wrt {arch} inserted at T={torque} Ncm, screw access sealed with {material}."],
+  ["Prosthodontics", "Denture - Jaw Relation", "Jaw relation recorded wrt {arch} using bite rim, vertical & centric relation established."],
+  ["Prosthodontics", "Denture - Relining", "Denture relining done for {arch} denture using {material}."],
+  ["Prosthodontics", "Denture - Repair", "Denture repair done for {arch} - {damage} repaired and polished/ OR sent to lab after removal"],
+  ["Prosthodontics", "Denture - RPD Acrylic/Flexible", "{material} RPD final impression recorded wrt {arch} with heavy & light body in custom / stock tray"],
+  ["Prosthodontics", "Denture - Teeth Trial", "Denture teeth trial done wrt {arch}, esthetics, phonetics and bite verified with patient."],
+  ["Prosthodontics", "Denture - Telescope", "Telescopic denture coping/component fitted wrt {arch}, retention and fit verified."],
+  ["Prosthodontics", "Denture- Preliminary impression", "Preliminary impression made wrt (arch) using (material) for primary cast fabrication."],
+  ["Diagnostic", "Diagnostic - Digital Scan", "Digital scan recorded with {scannerType} for {purpose}/treatment planning discussion."],
+  ["Diagnostic", "Diagnostic - Impression", "Diagnostic impression recorded wrt {arch} using {material} for treatment planning/study cast or to fabricate special tray."],
+  ["Minor Surgery", "Extraction", "Atraumatic extraction done under LA wrt {tooth}. Hemostasis achieved, post-op instructions given."],
+  ["Minor Surgery", "Extraction", "Surgical extraction with periapical curettage, periapical granuloma curetted."],
+  ["Minor Surgery", "Extraction + Immediate Implant Placement", "Extraction done wrt {tooth} periapical curettage followed by immediate implant placement ({brand}, {size}) at T={torque} Ncm, {coverType} placed."],
+  ["Minor Surgery", "Extraction - Complicated", "Surgical extraction with {flapType} flap done wrt {tooth}, bone edges smoothened, socket irrigated with saline+betadine, autogenous bone packed and sutures placed."],
+  ["Restoration", "Finishing & Polishing", "Finishing and polishing done wrt {tooth}, post-restorative instructions given."],
+  ["Crown & Bridge", "FMR - Teeth Final Crown", "Final {material} crowns delivered as part of Full Mouth Rehabilitation wrt {arch}, bite verified at raised vertical dimension."],
+  ["Crown & Bridge", "FMR - Trial final crown", "Final crown trial done for Full Mouth Rehabilitation wrt {arch}, esthetics and bite verified with patient."],
+  ["Crown & Bridge", "FMR- Bite record", "Bite record taken for Full Mouth Rehabilitation with {no. of sleeves} sleeves to establish vertical dimension."],
+  ["Crown & Bridge", "FMR- Composite", "Full Mouth Rehabilitation mock-up done in composite using injection moulding technique at raised vertical dimension of {vd}mm."],
+  ["Crown & Bridge", "FMR- Face bow", "Face-bow record made for Full Mouth Rehabilitation case, transferred to articulator."],
+  ["General / Consultation", "Follow up", "Follow-up visit done for {procedure} wrt {tooth}. {finding} noted, {advice} given. Mention Tests (if any) and treatment plan discussed"],
+  ["Crown & Bridge", "FPD - Digital Impression", "Digital impression recorded for {material} FPD wrt {tooth} with bite, shade {shade}, sent to lab."],
+  ["Crown & Bridge", "FPD - Maryland", "Maryland bridge with lingual wings luted wrt {tooth} using {cement}, Bite adjusted."],
+  ["Crown & Bridge", "FPD - Preparation", "{unitCount}-unit bridge preparation done or {tooth} abutments, impression made ({material})."],
+  ["Crown & Bridge", "FPD - Provisional", "Provisional FPD given wrt {tooth} using {material}, placed with {cement}."],
+  ["Crown & Bridge", "FPD - Putty Impression", "Manual putty impression recorded wrt {tooth} for {material} FPD fabrication."],
+  ["Crown & Bridge", "FPD - Removal", "Existing (material) FPD sectioned and removed wrt {tooth} for {reason}."],
+  ["Crown & Bridge", "FPD - Trial", "Try-in of {material} FPD done wrt {tooth}, shade and fit verified with patient."],
+  ["Crown & Bridge", "FPD/Bridge - cementation", "{unitCount}-unit bridge ({material}) placed wrt {tooth} with {cement}. Bite checked and adjusted. IOPA made."],
+  ["Minor Surgery", "Fractured teeth", "Fractured tooth wrt {tooth} evaluated - {finding} noted, {treatment} advised."],
+  ["Minor Surgery", "Frenectomy", "{frenumType} frenectomy done, sutures placed, post-op instructions explained."],
+  ["Implant Surgery", "Implant", "Implant ({brand}, {size}) placed wrt {tooth}. Primary stability achieved, at T= ( ) Ncm {coverType} and, sutures placed."],
+  ["Implant Surgery", "Implant Explantation", "Implant wrt {tooth} explanted due to {reason}, site curetted and bone graft and membrane secured with sutures."],
+  ["Implant Surgery", "Implant Healing Abutment", "Cover screw removed and healing abutment placed wrt implant placed in {tooth} region."],
+  ["Implant Surgery", "Implant Impression - (Single/Multiple) - Digital", "Digital implant-level impression recorded wrt {tooth} using {scanner} with bite, healing abutment placed back, shade {shade} for (material) Implant Prosthesis."],
+  ["Implant Surgery", "Implant Impression - (Single/Multiple) - Manual", "Healing Abutment removed wrt (site) Impression coping placed and splinted with synthetic resin to make implant-level impression recorded wrt {tooth} using open tray with {material}."],
+  ["Implant Prosthetic", "Implant Prosthesis - Full Arch", "Full arch implant prosthesis ({material}) delivered wrt {arch} on {implantCount} implants at T={torque} Ncm, screw holes sealed with {material}."],
+  ["Implant Prosthetic", "Implant Prosthesis - Multiple Teeth", "{unitCount}-unit implant-supported prosthesis ({material}) delivered wrt {tooth} at, torque = (___) Ncm, screw access hole sealed with {material}."],
+  ["Implant Prosthetic", "Implant Prosthesis - Provisional", "Implant provisional prosthesis delivered wrt {arch}/{tooth} at T={torque} Ncm, on implants screw access sealed with {material}."],
+  ["Implant Prosthetic", "Implant Prosthesis - Single Tooth", "{prosthesisType} implant crown delivered and torqued to {torque} Ncm wrt {tooth}, screw hole sealed with {material}, bite verified."],
+  ["Implant Prosthetic", "Implant Prosthesis - Trial", "Bisque/final trial of implant prosthesis done wrt {tooth}, shade and fit verified, bite checked."],
+  ["Implant Prosthetic", "Implant Prosthesis - Zig Trial", "H.A. removed, verification jig (zig) trial done wrt {tooth} with {sleeveType} sleeves to confirm implant position accuracy."],
+  ["Implant Prosthetic", "Implant Prosthesis- Removal", "Implant prosthesis removed wrt {tooth} due to {reason} - screw removed, {action} done."],
+  ["Implant Surgery", "Implant Screw Retrieval", "Loose/fractured implant screw retrieved wrt implant, {action} done, new screw torqued to {torque} Ncm."],
+  ["Minor Surgery", "Incision & Drainage Abscess", "Incision and drainage done wrt {tooth} for {condition}, dressing applied"],
+  ["Restoration", "Indirect Restoration - Inlay/Onlay", "{material} inlay/onlay bonded wrt {tooth} with {cement}, occlusal adjustments done."],
+  ["Diagnostic", "Intraoral & Extraoral Mid Pics", "Intraoral & extraoral mid-treatment photographs taken for {procedure} documentation."],
+  ["Diagnostic", "Intraoral & Extraoral Post Pics", "Intraoral & extraoral post-treatment photographs taken for {procedure} documentation."],
+  ["Diagnostic", "Intraoral & Extraoral Pre Pics", "Intraoral & extraoral pre-treatment photographs taken for {procedure} documentation."],
+  ["Orthodontics", "Invisalign", "Invisalign aligners delivered, Stage {stage} of {totalStages}, wear instructions explained."],
+  ["Orthodontics", "Invisalign - IPR", "Interproximal reduction (IPR) done wrt {teeth} as per Invisalign plan, {amount}mm reduced."],
+  ["Orthodontics", "Invisalign - Vivera Retainers", "Vivera retainers delivered wrt {arch}, wear instructions explained ({hours} hrs/day)."],
+  ["Orthodontics", "Invisalign Additional Aligner - I", "Additional aligner set I delivered - attachments {action}, sets {range} handed over."],
+  ["Orthodontics", "Invisalign Additional Aligner - II", "Additional aligner set II delivered - attachments {action}, sets {range} handed over."],
+  ["Orthodontics", "Invisalign Additional Aligner - III", "Additional aligner set III delivered - attachments {action}, sets {range} handed over."],
+  ["Orthodontics", "Invisalign Attachment Bonded", "Invisalign attachments bonded wrt {arch}, aligner set {setNumber} insertion done."],
+  ["Orthodontics", "Invisalign attachments removed", "Invisalign attachments removed. Intra-oral & extra-oral pics taken. Adv. to continue wearing retainer."],
+  ["Orthodontics", "Invisalign Palatal Expander", "Palatal expander delivered/activated wrt {arch}, {turns} turns done, next activation scheduled on (date)."],
+  ["Orthodontics", "Invisalign Refinement Scan", "Refinement digital scan recorded with {scanner} for additional Invisalign aligners."],
+  ["Diagnostic", "IOPA", "IOPA taken wrt {tooth} for {reason}."],
+  ["Minor Surgery", "L.A. - Infiltration/Block", "Local anaesthesia ({anaestheticType} with adrenaline {concentration}) administered as {technique} wrt {tooth}. For {Treatment}."],
+  ["Minor Surgery", "L.A. - Test Dose", "LA with adrenaline 1:80,000 administered as test dose and infilteration for (__ process)."],
+  ["Minor Surgery", "Laser - Excision", "Laser-assisted excision of {lesionType with size} done at {location}, tissue sent for {disposition/biopsy}."],
+  ["Minor Surgery", "Laser - LLLT", "Low-Level Laser Therapy (LLLT) done wrt {site} for {indication}."],
+  ["Minor Surgery", "LASER- Flap Surgery", "Laser-assisted flap surgery done wrt {site}, {procedure} completed, irrigated with {irrigant}."],
+  ["Crown & Bridge", "Occlusal Adjustment", "Occlusal adjustment done wrt {tooth} on {prosthesisType}, high points relieved and verified with articulating paper."],
+  ["Crown & Bridge", "Occlusal Adjustment - Contacts Relieved", "Occlusal contacts relieved wrt {tooth}, patient advised warm saline rinses thrice daily."],
+  ["TMJ / Occlusion", "Occlusal Balancing - T-Scan", "T-Scan assisted occlusal equilibration done in multibite, Left and right lateral excursive and protrusive movements recorded."],
+  ["TMJ / Occlusion", "Occlusal Biometrics - JVA record", "Joint Vibration Analysis (JVA) record made for TMJ assessment."],
+  ["TMJ / Occlusion", "Occlusal Biometrics - T Scan record", "T-scan record in multibite, Right and left lateral excursive and Protrusive T scan records made. Reveals hinderance on movement."],
+  ["TMJ / Occlusion", "Occlusal Biometrics - T-Scan + EMG Record", "T-Scan and EMG biometric records made in multibite Left & Right lateral movements as preoperative baseline, movement recorded."],
+  ["TMJ / Occlusion", "Occlusal Biometrics - Tens + Bite record", "TENS therapy done for {duration}, FMR bite record made {finding}."],
+  ["TMJ / Occlusion", "Occlusal Night Guard (Splint)", "Night guard/occlusal splint insertion done wrt {arch}, wear instructions explained."],
+  ["Periodontics", "Oral Prophylaxis", "Oral prophylaxis done, scaling and polishing completed. Oral hygiene instructions reinforced."],
+  ["Orthodontics", "Ortho - Braces", "Fixed orthodontic appliance bonded wrt {arch}, {wireType} archwire ligated, {additionalStep} done."],
+  ["Orthodontics", "Ortho - Braces - Discontinue elastics", "Elastics discontinued wrt {arch}, patient advised to wear retainers."],
+  ["Orthodontics", "Ortho - Braces - Dislodged Bracket", "Dislodged bracket wrt {tooth} rebonded/removed, {wireAction} done."],
+  ["Orthodontics", "Ortho - Braces- Retainers removed", "Fixed retainer removed wrt {arch}, patient advised warm saline rinses thrice daily."],
+  ["Orthodontics", "Ortho - Functional orthodontic appliance", "Functional orthodontic appliance ({applianceType}) delivered/adjusted, wear instructions explained."],
+  ["Orthodontics", "Orthodontic retainers", "Orthodontic retainer ({type}) delivered wrt {arch}, wear instructions given ({hours} hrs/day)."],
+  ["TMJ / Occlusion", "Orthotic", "Orthotic appliance delivered/adjusted in {arch}, maintenance instruction explained."],
+  ["TMJ / Occlusion", "Orthotic", "Orthotic appliance wrt (arch) adjusted / placed again with (cement), excess material removed."],
+  ["TMJ / Occlusion", "Orthotic", "Orthotic fractured- repaired and placed again with luting (cement)"],
+  ["TMJ / Occlusion", "Orthotic", "Raised vertical orthotic dislodged and placed again with (cement)"],
+  ["Pedodontics", "Pedo - Appliance", "{applianceType} delivered wrt {tooth}/{arch} for {habit}/{indication}, instructions explained to patient/parent."],
+  ["Pedodontics", "Pedo - Pit & Fissure Sealants", "Pit and fissure sealants placed wrt {teeth} using {material}."],
+  ["Pedodontics", "Pedo - Pulpecotomy", "Pulpecotomy done wrt {tooth}, {medicament} used, stainless steel crown placed if indicated."],
+  ["Periodontics", "Perio - Flap Surgery", "Flap surgery done wrt {quadrant}, subgingival calculus and granulation tissue removed, osseous recontouring done as needed, sutures placed."],
+  ["Periodontics", "Perio - Root Coverage", "Root coverage procedure ({technique}) done wrt {tooth}."],
+  ["Periodontics", "Perio - Root planning", "Root planing done wrt {quadrant}, root surfaces smoothened."],
+  ["Periodontics", "Perio - Splinting - Fiber reinforced", "Fiber-reinforced splinting done wrt {teeth} for stabilization."],
+  ["Periodontics", "Perio - Splinting - Wire/Composite", "Wire/composite splint placed wrt {teeth} using {material}."],
+  ["Periodontics", "Perio - Subgingival Curettage", "Subgingival curettage done wrt {quadrant} (medication) applied."],
+  ["Periodontics", "Perio - Subgingival Curettage", "Gingival abscess curetted (medication) applied."],
+  ["Periodontics", "Perio - Periodontitis/Perio Pockets", "Periodontal examination done wrt {quadrant} - pocket depths recorded size treatment plan discussed."],
+  ["General / Consultation", "Pre Surgical Monitoring", "Pre-surgical monitoring done for {procedure} - parameter soft & hard ---reviewed."],
+  ["RCT", "Pulp Capping - Direct", "Direct pulp capping done wrt {tooth} using {material}, followed by restoration."],
+  ["RCT", "Pulp Capping - Indirect", "Indirect pulp capping done wrt {tooth} using {material}, followed by restoration."],
+  ["RCT", "RCT", "Root canal treatment done wrt {tooth} - {stage} stage completed this visit."],
+  ["RCT", "RCT - Apicoectomy", "Apicoectomy done wrt {tooth} - flap elevated, periapical lesion curetted, root end resected and sealed with {material}."],
+  ["RCT", "RCT - BMP", "BMP in single canal (L-Size) with 3% NaOCl + EDTA 5 times for 1 min each. Canals dried & Apex cal dressing done"],
+  ["RCT", "RCT - BMP", "BMP in 2 canals merging to single apex, B= (L-Size) P= (L-Size), Irrigated with 3% NaOCl+EDTA 5 times for 1min each. Closed dressing placed."],
+  ["RCT", "RCT - BMP", "BMP in 3 canals,MB= (L-Size) & ML= (L-Size) & D= (L-Size) with 3% NaOCl + EDTA 5 mins for 1 min each. Canals dried & Calcipex dressing with IOPA"],
+  ["RCT", "RCT - BMP", "BMP in 4 canals,DB= (L-Size) & DL= (L-Size),MB= (L-Size),ML= (L-Size) with 3% NaOCl+EDTA 5 times for 1 min each. Canals dried & Calcipex dressing with IOPA"],
+  ["RCT", "RCT - Complex", "Complex RCT - old GP removed, (BMP completed/ dressing placed) with provisional restoration."],
+  ["RCT", "RCT - Composite Restoration", "Post-endodontic composite restoration done wrt {tooth} using {material}, GIC +Composite, bite adjusted. IOPA made."],
+  ["RCT", "RCT - Obturation", "Provisional rest removed, Obturation done in 4/3/2/1 canals ML= (L-Size), MB=(L-Size), DB= (L-Size), DL= (L-Size), D= (L-Size), P= (L-Size) with endomethasone, IOPA made."],
+  ["RCT", "RCT - Open", "Pulp extripated, working length determined, (no. of canals) located"],
+  ["RCT", "RCT - Post & core build up", "Fractured tooth, Automatrice with rubberdam placed, Post and Core build up done with multicore and composite. Using - Fiberpost. IOPA done wrt # (tooth no)."],
+  ["RCT", "RCT - Redo Open", "Retreatment of previously endodontically treated tooth - initiated, old obturation removed, canals re-instrumented."],
+  ["RCT", "RCT - Redo BMP", "BMP in single canal (L-Size) with 3% NaOCl + EDTA 5 times for 1 min each. Canals dried & Apex cal dressing done"],
+  ["RCT", "RCT - Redo BMP", "BMP in 2 canals merging to single apex, B= (L-Size) P= (L-Size), Irrigated with 3% NaOCl+EDTA 5 times for 1min each. Closed dressing placed."],
+  ["RCT", "RCT - Redo BMP", "BMP in 3 canals,MB= (L-Size) & ML= (L-Size) & D= (L-Size) with 3% NaOCl + EDTA 5 mins for 1 min each. Canals dried & Calcipex dressing with IOPA"],
+  ["RCT", "RCT - Redo BMP", "BMP in 4 canals,DB= (L-Size) & DL= (L-Size),MB= (L-Size),ML= (L-Size) with 3% NaOCl+EDTA 5 times for 1 min each. Canals dried & Calcipex dressing with IOPA"],
+  ["RCT", "RCT - Redo Obturation", "Provisional rest removed, Obturation done in 4/3/2/1 canals ML= (L-Size), MB=(L-Size), DB= (L-Size), DL= (L-Size), D= (L-Size), P= (L-Size) with endomethasone, IOPA made."],
+  ["RCT", "RCT - Rotary + Laser", "Laser-assisted rotary RCT done wrt {tooth} - canals instrumented, laser disinfection done, using (dye name)."],
+  ["RCT", "RCT - Single Visit", "Single visit LASER assisted RCT done with (canal) (size) using endomethasone."],
+  ["RCT", "RCT- Instrument BYPASS", "Instrument separation noted during {step} wrt {canal}. Patient informed and consent taken, instrument Bypass done & BMP completed."],
+  ["Periodontics", "Perio - Regenerative Periodontal therapy", "Regenerative periodontal therapy done wrt {tooth} - {material} applied following flap debridement and root surface preparation to promote periodontal regeneration and soft tissue healing."],
+  ["Restoration", "Restoration - Composite", "Old Provisional restoration removed, caries excavated, Tooth prepared, etched and bond applied, Flowable / Packable Genial Composite restoration done under isolation using auito-matrix"],
+  ["Restoration", "Restoration - Composite C.A", "Cervical abfraction wrt {tooth} restored with {material} composite, finishing and polishing completed."],
+  ["Restoration", "Restoration - GIC", "Caries excavated (material) restoration done wrt {tooth} as {material} restoration under rubber dam isolation, bite adjustments done."],
+  ["Restoration", "Restoration - Provisional", "Deep caries excavated provisional restoration done wrt {tooth} with {material}, Advised RCT."],
+  ["Prosthodontics", "RPD insertion", "Removable partial denture ({type}) delivered wrt {arch}, clasps/attachments checked for fit, occlusal adjustment done."],
+  ["Prosthodontics", "RPD- Final impression", "Final impression made wrt {arch} using {material} for RPD fabrication (jaw relation recorded)."],
+  ["Periodontics", "Scaling - Deep", "Deep scaling and root planing done wrt {quadrant}, subgingival calculus removed. Gingival Curettage done"],
+  ["Restoration", "Sensitive Teeth", "Patient reviewed for tooth sensitivity wrt {tooth} - {finding} noted, desensitizing agent ({agent}) applied / prescribed."],
+  ["Implant Surgery", "Sinus Lift - Direct", "Mucoperiosteal flap raised wrt (tooth) region & ant. wall of max. exposed. Sinus lining exposed through lateral bony window. Sinus membrane elevated, grafted with (graft material)"],
+  ["Implant Surgery", "Sinus Lift - Indirect", "Indirect sinus lift done wrt {tooth} region with {graftMaterial}, IOPA taken pre/intra/post-operatively."],
+  ["Implant Surgery", "Sinus Lift - Indirect", "DENSAH assisted indirect sinus lift done with Mineross bone graft."],
+  ["Minor Surgery", "Implant - Bone Augmentaion", "Bone augmentation done wrt {tooth} region with {graftMaterial} placed in the jumping distance around the implant."],
+  ["Minor Surgery", "Surgery - Bone graft + Membrane", "Bone graft ({graftMaterial}) placed and on secured side with {membraneType} membrane wrt {tooth}, tension-free sutures placed."],
+  ["Minor Surgery", "Surgery - Fracture Reduction", "Fracture reduction done wrt {site}, fixation with {method}, occlusion verified."],
+  ["Minor Surgery", "Surgery - Impaction Removal", "Surgical removal of impacted {tooth} done under LA, bone guttering and tooth sectioning done as needed. Sutures placed."],
+  ["Minor Surgery", "Surgery - Intraoral Biopsy - Soft tissue", "{biopsyType} biopsy done for lesion at {location}, specimen sent for histopathology. Soft tissue excised (size)"],
+  ["Minor Surgery", "Surgery-Wound Curettage", "Wound curettage done wrt {site}, irrigated with {irrigant}, medication placed."],
+  ["Minor Surgery", "Suture Removal", "Sutures removed wrt {tooth}/{site}, healing satisfactory, advised warm saline rinses thrice daily."],
+  ["Cosmetic", "Teeth Whitening", "Teeth whitening ({type}) done, shade improvement noted, sensitivity precautions advised."],
+  ["Crown & Bridge", "Temporization", "Temporization done wrt {tooth} with Protemp in putty index, shade {shade} matched."],
+  ["TMJ / Occlusion", "Tongue exercise", "Tongue exercises explained and demonstrated, advised to practice {frequency} times daily."],
+  ["General / Consultation", "Treatment Discontinued/Postponed", "Treatment for {procedure} discontinued/postponed due to {reason}. Patient informed and consent obtained."],
+  ["Crown & Bridge", "Veneer Bond", "{material} veneer bonded wrt {tooth} with {cement}, Using Rubberdam with gingival cord."],
+  ["Crown & Bridge", "Veneer Preparation", "Veneer preparation done wrt {tooth}, shade {shade}, impression made (digitally/manually)."],
+  ["Minor Surgery", "Vestibuloplasty", "Vestibuloplasty done wrt {site} to deepen vestibular sulcus using {technique} technique."],
+  ["General / Consultation", "Video Consultation/Follow up", "Video consultation done for follow-up on {procedure}, {finding} noted with instruction."],
+  ["Crown & Bridge", "Wax up/Mock up - Trial", "Diagnostic wax-up/mock-up trial done wrt {teeth} using {material}, bite recorded and reviewed for function."]
+];
 
 function getPatientOutstanding(p) {
   try {

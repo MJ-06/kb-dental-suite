@@ -33,8 +33,18 @@ ok("a list given no onEdit still shows Remove and simply has no Edit",
    /onEdit && React\.createElement\("button"/.test(body));
 
 // ── every list that should have it, does ──────────────────────────────────
-const sites = [...HTML.matchAll(/    (\w+): \(\) => React\.createElement\(SimpleListEditor, \{([\s\S]*?)\n    \}\),/g)]
-  .map(m => ({ tab: m[1], hasEdit: /onEdit:/.test(m[2]) }));
+// Each editor is found where it is and attributed to the Master section it
+// sits in, rather than to a fixed indentation: one of them is now wrapped
+// alongside another card, and that is not a reason for this to stop looking.
+const sites = [];
+{
+  const re = /React\.createElement\(SimpleListEditor, \{([\s\S]*?)\n\s*\}\)/g;
+  let m;
+  while ((m = re.exec(HTML))) {
+    const key = [...HTML.slice(0, m.index).matchAll(/\n    (\w+): \(\) =>/g)].pop();
+    sites.push({ tab: key ? key[1] : "(none)", hasEdit: /onEdit:/.test(m[1]) });
+  }
+}
 eq("all ten plain lists are accounted for", sites.length, 10);
 // Appointment Reasons is a plain list of names. The steps of a treatment are
 // the procedure library's stages, which the appointment form already picks —

@@ -51,7 +51,7 @@ describe("CRM collections", () => {
   it("allows an empty list but refuses a missing or damaged one, which must never wipe a list", async () => {
     expect((await exec(w, desk, "saveCrmCollection", { collection: "sources", records: [] })).count).toBe(0);
     expect((await exec(w, desk, "saveCrmCollection", { collection: "leads" })).error).toMatch(/never reached the server/);
-    const res = await w.app.inject({ url: "/exec", query: { action: "saveCrmCollection", collection: "leads", records: "[{oops" }, headers: { cookie: desk } });
+    const res = await w.app.inject({ method:"POST", url: "/exec", payload: { action: "saveCrmCollection", collection: "leads", records: "[{oops" }, headers: { cookie: desk } });
     expect(res.json().error).toMatch(/arrived damaged/);
     expect((await exec(w, desk, "getCrmData")).data.leads).toEqual([{ id: "l3", name: "Only" }]);
   });

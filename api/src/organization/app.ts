@@ -341,7 +341,7 @@ export async function buildOrganizationApp(opts:OrganizationOptions) {
   });
   // JSON base64 is intentionally capped at 1 MiB for this local synthetic demo.
   // The random server key, never filename/path input, determines the storage path.
-  app.post("/api/v1/organization/documents",async(req,reply)=>{
+  app.post("/api/v1/organization/documents",async(req)=>{
     let written:string|undefined;
     try{return await run(async(tx,a,r)=>{
       const b=body(r),unit=await unitPermission(tx,a,b.unit_id,"clinical:write"),pid=uuid(b.patient_id);await patient(tx,pid);

@@ -128,7 +128,10 @@ const tabsOf = (id) => {
   return (html.slice(a, b).match(/id:"(\w+)"/g) || []).map(x => x.slice(4, -1)).slice(1);
 };
 ok('it has left CLINIC', tabsOf('clinic').indexOf('implantBrands') < 0, tabsOf('clinic').join(','));
-eq('and is what Clinical Configuration holds', tabsOf('clinicalConfig'), ['implantBrands']);
+// Not the only thing it holds any more -- the Notes category was folded in
+// -- so what matters is that the brands are among them.
+ok('and is among what Clinical Configuration holds',
+   tabsOf('clinicalConfig').indexOf('implantBrands') >= 0, tabsOf('clinicalConfig').join(','));
 ok('which is no longer an empty placeholder',
    !/id:"clinicalConfig", label:"Clinical Configuration", placeholder:true/.test(html));
 ok('the editor behind it is untouched',

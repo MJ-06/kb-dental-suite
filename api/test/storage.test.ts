@@ -1,7 +1,7 @@
 // Per-clinic attachment storage: server folder, S3-compatible bucket and Google
 // Drive, against fake S3 and Drive servers on loopback (no network, no account).
 import { createHash, createHmac, createVerify, generateKeyPairSync, randomBytes } from "node:crypto";
-import { mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { createServer, type IncomingMessage, type Server, type ServerResponse } from "node:http";
 import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";

@@ -89,17 +89,17 @@ describe("tooth charts and care plans", () => {
     expect(await exec(w, admin, "getClinicalSheets", { uhid, sheetType: "RCT" })).toMatchObject({ allTeeth: { "36": { canals: 4 } }, sheetType: "RCT" });
     expect(await exec(w, admin, "getClinicalSheets", { uhid, sheetType: "Crown Bridge" })).toMatchObject({ allTeeth: { "46": { shade: "A2" } } });
     expect((await exec(w, admin, "getClinicalSheets", { uhid })).sheetType).toBe("RCT"); // the most recent save
-    expect(await exec(w, admin, "getClinicalSheets", { uhid: "NOPE" })).toEqual({ success: true, allTeeth: null });
+    expect(await exec(w, admin, "getClinicalSheets", { uhid: "NOPE" })).toEqual({ success: true, allTeeth: null, version:0 });
   });
 
   it("refuses a damaged chart rather than saving it empty", async () => {
-    const res = await w.app.inject({ url: "/exec", query: { action: "saveClinicalSheets", uhid, sheetType: "RCT", allTeeth: "{oops" }, headers: { cookie: admin } });
+    const res = await w.app.inject({ method:"POST", url: "/exec", payload: { action: "saveClinicalSheets", uhid, sheetType: "RCT", allTeeth: "{oops" }, headers: { cookie: admin } });
     expect(res.json()).toMatchObject({ success: false, error: expect.stringMatching(/damaged/) });
     expect((await exec(w, admin, "getClinicalSheets", { uhid, sheetType: "RCT" })).allTeeth).toEqual({ "36": { canals: 4 } });
   });
 
   it("keeps a care plan per patient, page by page", async () => {
-    expect(await exec(w, admin, "getCarePlan", { uhid })).toEqual({ success: true, page1: null, page2: null, page3: null, page4: null });
+    expect(await exec(w, admin, "getCarePlan", { uhid })).toEqual({ success: true, page1: null, page2: null, page3: null, page4: null, version:0 });
     await exec(w, admin, "saveCarePlan", { uhid, patientName: "Clinical Patient", date: "2026-10-28", page1: { a: 1 }, page2: { b: 2 } });
     await exec(w, admin, "saveCarePlan", { uhid, patientName: "Clinical Patient", date: "2026-10-29", page1: { a: 9 }, page3: [1, 2] });
     expect(await exec(w, admin, "getCarePlan", { uhid })).toMatchObject({ page1: { a: 9 }, page2: null, page3: [1, 2], page4: null });

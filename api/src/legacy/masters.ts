@@ -6,6 +6,8 @@ import { organizationMaster, verifyOrganizationMaster, saveOrganizationMaster } 
 //     (history still points at an old doctor or fee, so nothing is deleted)
 //   - plain value lists: replace the rows
 import { sql } from "kysely";
+import {createHash} from 'node:crypto';
+import {CLINICAL_NOTE_SEED} from './clinical-note-seed.js';
 import { can } from "../auth/permissions.js";
 import { hashPassword, verifyPassword } from "../auth/password.js";
 import type { Tx } from "../db/index.js";
@@ -133,13 +135,32 @@ for (const [suffix, list, key, defaults] of VALUE_LISTS) {
 
 for (const [suffix, list, key, label] of SITUATION_LISTS) {
   masters[`get${suffix}`] = read(async (_p, { tx }) => {
+    if(list==='clinical_note_template'){
+      await sql`SELECT pg_advisory_xact_lock(hashtextextended(app_clinic_id()::text||':clinical-templates',0))`.execute(tx);
+      const initialized=await getSetting<boolean>(tx,'clinical_note_templates_initialized');
+      if(!initialized){
+        const exists=(await sql`SELECT 1 FROM pick_lists WHERE list_name=${list} LIMIT 1`.execute(tx)).rows.length>0;
+        if(!exists)for(const [i,row]of CLINICAL_NOTE_SEED.entries()){
+          const [category,situation,text]=row;
+          await sql`INSERT INTO pick_lists(list_name,value,data,sort_order) VALUES(${list},${'template:'+i},${JSON.stringify({situation,text,category})}::jsonb,${i})`.execute(tx);
+        }
+        await putSetting(tx,'clinical_note_templates_initialized',true);
+      }
+    }
     const r = await sql<{ value: string; data: { text?: string; category?: string } | null }>`
       SELECT value, data FROM pick_lists WHERE list_name = ${list} ORDER BY sort_order`.execute(tx);
     return { success: true, [key]: r.rows.map((x) => ({
-      situation: x.value, text: x.data?.text ?? x.value, category: x.data?.category ?? "" })) };
+      situation: (x.data as {situation?:string}|null)?.situation ?? x.value, text: x.data?.text ?? x.value, category: x.data?.category ?? "" })) };
   });
   masters[`save${suffix}`] = write("masters:write", async (p, { tx }) => {
     const arr = parseList(p[key], label);
+    if(list==='clinical_note_template'){
+      await sql`SELECT pg_advisory_xact_lock(hashtextextended(app_clinic_id()::text||':clinical-templates',0))`.execute(tx);
+      const rows=arr.map(v=>typeof v==='string'?{situation:v.trim(),text:v.trim(),category:''}:{situation:str((v as Params).situation),text:str((v as Params).text),category:str((v as Params).category)});
+      await writeValues(tx,list,rows.map(row=>({value:createHash('sha256').update(JSON.stringify(row)).digest('hex'),data:row})));
+      await putSetting(tx,'clinical_note_templates_initialized',true);
+      return {success:true};
+    }
     await writeValues(tx, list, arr.map((v) => typeof v === "string"
       ? { value: v.trim(), data: { text: v.trim(), category: "" } }
       : { value: str((v as Params).situation), data: { text: str((v as Params).text), category: str((v as Params).category) } }));

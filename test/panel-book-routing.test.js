@@ -53,6 +53,11 @@ class FakeSheet {
     };
   }
   appendRow(v) { this.rows.push(v.slice()); }
+  // A real sheet is a fixed grid and has to be widened before it can be
+  // written past its edge. This fake starts wide enough for the registers
+  // used here; panel-book-grid-and-sweep is where the narrow case is tested.
+  getMaxColumns() { return this._max === undefined ? 60 : this._max; }
+  insertColumnsAfter(after, how) { this._max = this.getMaxColumns() + how; }
 }
 class FakeBook {
   constructor(id) { this.id = id; this.sheets = []; }
@@ -92,6 +97,8 @@ function boot(opts) {
       getActiveSpreadsheet: () => ({ getSpreadsheetTimeZone: () => 'Asia/Kolkata' }),
     },
     Logger: { log: (...a) => logged.push(a.join(' ')) },
+    // The save names the backend it ran on, so a stale deployment is visible.
+    BACKEND_BUILD: 'test',
     Utilities: { formatDate: (d, tz, f) => (f === 'yyyy' ? '2026' : '10') },
     getSheet: n => books[PMS].getSheetByName(n) || books[PMS].insertSheet(n),
     SS_ID: opts.ssId || PMS,

@@ -8,6 +8,7 @@ import { callLimiter, complete, LlmError } from "../llm.js";
 import { RECORD_FORMS, RECORD_HEADINGS, RECORD_TABS } from "./clinical-forms.js";
 import { read, write, DeskError, type ActionTable, type Params } from "./types.js";
 import { jsonOf, nz, str, uhidOf } from "./util.js";
+import {checkVersion,currentVersion} from './versions.js';
 
 /** A form value as the sheet held it: text, whatever the screen sent. */
 function cell(v: unknown): string {
@@ -103,19 +104,20 @@ export const clinical: ActionTable = {
 
   getClinicalSheets: read(async (p, { tx }) => {
     const uhid = uhidOf(p.uhid), type = str(p.sheetType);
-    const r = await sql<{ all_teeth: unknown; sheet_type: string; saved: string }>`
-      SELECT all_teeth, sheet_type, to_char(updated_at AT TIME ZONE 'UTC', ${ISO_MS}) AS saved
+    const r = await sql<{ all_teeth: unknown; sheet_type: string; saved: string;version:number }>`
+      SELECT all_teeth, sheet_type, version, to_char(updated_at AT TIME ZONE 'UTC', ${ISO_MS}) AS saved
         FROM clinical_sheets
        WHERE upper(uhid) = ${uhid} AND (${type} = '' OR sheet_type = ${type})
        ORDER BY updated_at DESC LIMIT 1`.execute(tx);
     const row = r.rows[0];
-    return row ? { success: true, allTeeth: row.all_teeth, sheetType: row.sheet_type, savedAt: row.saved }
-               : { success: true, allTeeth: null };
+    return row ? { success: true, allTeeth: row.all_teeth, sheetType: row.sheet_type, savedAt: row.saved,version:row.version }
+               : { success: true, allTeeth: null,version:0 };
   }, "clinical:read"),
 
   saveClinicalSheets: write("clinical:write", async (p, { tx }) => {
     const uhid = uhidOf(p.uhid);
     if (!uhid) throw new DeskError("uhid required");
+    await checkVersion(tx,'clinical_sheets',uhid,p.version,str(p.sheetType));
     const teeth = jsonOf(p.allTeeth, "tooth chart");
     const patient = (await sql<{ id: string }>`SELECT id FROM patients WHERE uhid = ${uhid}`.execute(tx)).rows[0];
     await sql`
@@ -123,21 +125,23 @@ export const clinical: ActionTable = {
       VALUES (${uhid}, ${patient?.id ?? null}, ${nz(p.patientName)}, ${str(p.sheetType)}, ${teeth}::jsonb)
       ON CONFLICT (clinic_id, uhid, sheet_type) DO UPDATE
         SET patient_name = EXCLUDED.patient_name, all_teeth = EXCLUDED.all_teeth`.execute(tx);
-    return { success: true };
+    return { success: true,version:await currentVersion(tx,'clinical_sheets',uhid,str(p.sheetType)) };
   }),
 
   getCarePlan: read(async (p, { tx }) => {
-    const r = await sql<{ page1: unknown; page2: unknown; page3: unknown; page4: unknown; saved: string }>`
-      SELECT page1, page2, page3, page4, to_char(updated_at AT TIME ZONE 'UTC', ${ISO_MS}) AS saved
-        FROM care_plans WHERE upper(uhid) = ${uhidOf(p.uhid)}`.execute(tx);
+    const uhid=uhidOf(p.uhid);
+    const r = await sql<{ page1: unknown; page2: unknown; page3: unknown; page4: unknown; saved: string;version:number }>`
+      SELECT page1, page2, page3, page4, version,to_char(updated_at AT TIME ZONE 'UTC', ${ISO_MS}) AS saved
+        FROM care_plans WHERE upper(uhid) = ${uhid}`.execute(tx);
     const row = r.rows[0];
-    return row ? { success: true, page1: row.page1, page2: row.page2, page3: row.page3, page4: row.page4, savedAt: row.saved }
-               : { success: true, page1: null, page2: null, page3: null, page4: null };
+    return row ? { success: true, page1: row.page1, page2: row.page2, page3: row.page3, page4: row.page4, savedAt: row.saved,version:row.version }
+               : { success: true, page1: null, page2: null, page3: null, page4: null,version:0 };
   }, "clinical:read"),
 
   saveCarePlan: write("clinical:write", async (p, { tx }) => {
     const uhid = uhidOf(p.uhid);
     if (!uhid) throw new DeskError("uhid required");
+    await checkVersion(tx,'care_plans',uhid,p.version);
     const pages = [1, 2, 3, 4].map((n) => jsonOf(p[`page${n}`], `care plan page ${n}`));
     const patient = (await sql<{ id: string }>`SELECT id FROM patients WHERE uhid = ${uhid}`.execute(tx)).rows[0];
     await sql`
@@ -147,7 +151,7 @@ export const clinical: ActionTable = {
       ON CONFLICT (clinic_id, uhid) DO UPDATE
         SET patient_name = EXCLUDED.patient_name, plan_date = EXCLUDED.plan_date,
             page1 = EXCLUDED.page1, page2 = EXCLUDED.page2, page3 = EXCLUDED.page3, page4 = EXCLUDED.page4`.execute(tx);
-    return { success: true };
+    return { success: true,version:await currentVersion(tx,'care_plans',uhid) };
   }),
 
   saveConsent: write("clinical:write", async (p, { tx }) => {

@@ -33,6 +33,7 @@ export async function errorHandler(err: FastifyError & { code?: string; constrai
   if (err.statusCode === 429) {
     return reply.status(429).send({ error: { code: "too_many_requests", message: "Too many attempts. Wait a minute and try again." } });
   }
+  if(err.statusCode&&err.statusCode>=400&&err.statusCode<500)return reply.status(err.statusCode).send({error:{code:'invalid_request',message:'The request could not be read. Check its format and try again.'}});
   const mapped = err.code ? PG_ERRORS[err.code] : undefined;
   if (mapped) {
     const [status, code, message] = mapped;

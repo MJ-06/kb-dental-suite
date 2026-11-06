@@ -8,6 +8,7 @@ import { sql } from "kysely";
 import type { Tx } from "../db/index.js";
 import { read, write, DeskError, type ActionTable, type Params } from "./types.js";
 import { nz, str, uhidOf } from "./util.js";
+import {checkVersion,currentVersion} from './versions.js';
 
 // ── dates of birth ───────────────────────────────────────────────────────
 // The screens send and expect dd/mm/yyyy.
@@ -48,6 +49,7 @@ const last10 = (v: unknown) => str(v).replace(/\D/g, "").slice(-10);
 // ── one patient, with their newest history ───────────────────────────────
 
 interface Row {
+  version:number;
   import_provenance:Record<string,unknown>;
   import_review_required:boolean;
   registration_date_source:string|null;
@@ -65,7 +67,7 @@ interface Row {
 
 export async function findPatient(tx: Tx, uhid: string): Promise<Row | undefined> {
   const r = await sql<Row>`
-    SELECT identity.id AS organization_patient_id,p.id, p.uhid, coalesce(identity.name,p.full_name) AS full_name,
+    SELECT identity.id AS organization_patient_id,p.id,p.version, p.uhid, coalesce(identity.name,p.full_name) AS full_name,
            CASE WHEN identity.id IS NOT NULL THEN identity.gender ELSE p.gender END AS gender,
            (CASE WHEN identity.id IS NOT NULL THEN identity.dob ELSE p.date_of_birth END)::text AS dob,
            CASE WHEN identity.id IS NOT NULL THEN nullif(identity.phone,'') ELSE p.mobile END AS mobile, p.mobile_2, p.whatsapp,
@@ -178,6 +180,7 @@ export const patients: ActionTable = {
 
     const uhid = uhidOf(p.uhid);
     if (!uhid) throw new DeskError("A patient cannot be saved without a UHID. Ask for a new one and try again.");
+    await checkVersion(tx,'patients',uhid,p.version);
     const status: "Quick" | "Complete" = str(p.regStatus) === "Quick" ? "Quick" : "Complete";
     const prev = await findPatient(tx, uhid);
     const fields = demographics(p);
@@ -206,7 +209,7 @@ export const patients: ActionTable = {
 
     await setPanel(tx, patientId, p);
     if (!prev || HAS_HISTORY.some((k) => nz(p[k]) !== null)) await addHistory(tx, patientId, prev, p, status);
-    return { success: true, uhid };
+    return { success: true, uhid,version:await currentVersion(tx,'patients',uhid) };
   }),
 
   getPending: read(async (_p, { tx }) => {
@@ -219,7 +222,7 @@ export const patients: ActionTable = {
     const uhid = uhidOf(p.uhid);
     const x = await findPatient(tx, uhid);
     if (!x) return { success: false, error: `Patient not found: ${uhid}` };
-    return { success: true, patient: {
+    return { success: true,version:x.version, patient: {
       organizationPatientId:x.organization_patient_id ?? undefined, safetyFlags:x.safety_flags ?? [], uhid: x.uhid, name: x.full_name, gender: x.gender ?? "", dob: dobOut(x.dob),
       mobile: x.mobile ?? "", mobile2: x.mobile_2 ?? "", whatsapp: x.whatsapp ?? "", email: x.email ?? "",
       bloodGroup: x.blood_group ?? "", occupation: x.occupation ?? "", maritalStatus: x.marital_status ?? "",

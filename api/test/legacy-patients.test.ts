@@ -14,7 +14,8 @@ afterAll(() => w.close());
 async function quickRegister(name: string, extra: Record<string, unknown> = {}) {
   const { uhid } = await exec(w, desk, "getNextUHID");
   const res = await exec(w, desk, "saveRegistration", { uhid, name, dob: "22/02/2005", mobile: "9876500001", complaint: "Pain", regStatus: "Quick", ...extra });
-  expect(res).toEqual({ success: true, uhid });
+  expect(res).toMatchObject({ success: true, uhid });
+  expect(res.version).toBeGreaterThan(0);
   return uhid as string;
 }
 

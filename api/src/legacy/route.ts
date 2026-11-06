@@ -17,6 +17,9 @@ import { assertClinicContext } from "../http/context.js";
 import { sql } from "kysely";
 import { DeskError, type Params, type Result } from "./types.js";
 import {capabilities,actionFeature} from "../entitlements.js";
+import {SaveConflict} from './versions.js';
+import {emitUsage} from '../usage.js';
+import type {Actor} from '../db/index.js';
 
 const BATCH_MAX = 25;
 const AUTH_REQUIRED: Result = { success: false, error: "AUTH_REQUIRED", authRequired: true };
@@ -46,7 +49,7 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
       if (req.method !== "POST") return { success: false, error: "Sign in must be sent as a POST" };
       return staffLogin((req.body as Params | undefined) ?? {}, req);
     }
-    if (action === "staffLogout") return staffLogout(req);
+    if (action === "staffLogout") return req.method==='POST'?staffLogout(req):{success:false,error:'Sign out must be sent as a POST'};
     if (action === "verifyMasterPassword" && masterAttempts(req.ip)) return { success: false, error: "Too many attempts. Wait a minute and try again." };
     if (["switchWorkingClinic", "saveOrganizationProfile", "attachOrganizationPatient", "openOrganizationPatient"].includes(action) && req.method !== "POST") {
       return { success: false, error: "Send this change as a POST" };
@@ -72,14 +75,17 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
   async function run(action: string, params: Params, token: string, req: FastifyRequest): Promise<Result> {
     const def = actions[action];
     if (!def) return { success: false, error: `Unknown action: ${action}` };
+    const started=Date.now();let observed:Actor|undefined;
     try {
-      return await db.transaction().execute(async (tx) => {
+      const outcome=await db.transaction().execute(async (tx) => {
         const actor = await resumeSession(tx, hashToken(token));
         if (!actor) return AUTH_REQUIRED;
+        observed=actor;
         if (!["whoAmI", "getWorkingClinics"].includes(action)) assertClinicContext(req, actor);
         if (def.permission && !can(actor, def.permission)) {
           return { success: false, error: "Your role does not allow this", forbidden: true };
         }
+        if(req.method!=='POST'&&(def.mutation||action==='getNextUHID'||/^verify.*Password$/.test(action)))return {success:false,error:'Send this operation in a POST body'};
         const feature=actionFeature(action);
         if(feature && !(await capabilities(tx,actor)).features[feature])return {success:false,featureUnavailable:true,error:"This feature is not enabled for this organization"};
         const out = await def.run(params, { tx, actor });
@@ -87,7 +93,10 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
         if (!out.success) throw new Refused(out);
         return out;
       });
+      if(observed)emitUsage(observed,'action',action,Date.now()-started,outcome.success,new Set(Object.keys(actions)));
+      return outcome;
     } catch (e) {
+      if(observed)emitUsage(observed,'action',action,Date.now()-started,false,new Set(Object.keys(actions)));
       if (e instanceof Error && "code" in e && e.code === "clinic_changed") {
         return { success: false, clinicChanged: true, error: e.message };
       }
@@ -110,7 +119,7 @@ export const legacyRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) =>
       const isObj = entry !== null && typeof entry === "object";
       const name = String((isObj ? (entry as Params).action : entry) ?? "").trim();
       const key = String((isObj && (entry as Params).key) || name || "?");
-      if (!name.startsWith("get")) { results[key] = { success: false, error: "batch: reads only" }; return; }
+      if (!name.startsWith("get")||actions[name]?.mutation) { results[key] = { success: false, error: "batch: reads only" }; return; }
       const p: Params = { ...((isObj && ((entry as Params).params as Params)) || {}) };
       results[key] = await run(name, { ...p, action: name }, token, req);
     }));
@@ -175,6 +184,7 @@ const PG_MESSAGES: Record<string, string> = {
 /** What the desk is told for a failure we expect; null for one we do not (it is logged). */
 function describe(e: unknown): Result | null {
   if (e instanceof Refused) return e.result;
+  if (e instanceof SaveConflict) return {success:false,conflict:true,error:e.message};
   if (e instanceof DeskError) return { success: false, error: e.message };
   const code = (e as { code?: string }).code;
   if (code && PG_MESSAGES[code]) return { success: false, error: PG_MESSAGES[code]!, rule: (e as { constraint?: string }).constraint };

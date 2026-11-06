@@ -27,6 +27,13 @@ ok('the app states which build it is', !!app, app);
 // one in a day. Compared as text, so the letter sorts after the plain date.
 ok('in the same shape as the backend marker', /^\d{4}-\d{2}-\d{2}[a-z]?$/.test(app || ''), app);
 ok('and it is not older than the backend it needs', app >= backendNeeded, `${app} vs ${backendNeeded}`);
+// It exists to answer "did the new page reach this browser". It sat at
+// 2026-11-06 through six changes to this file in one day, so for six
+// changes it could not answer that -- and GitHub Pages caches index.html
+// hard, which makes a stale page look exactly like a change never made.
+// A marker that only moves when the DATE changes is no marker at all.
+ok('a second change in a day carries a letter, so the marker always moves',
+   /\/\/ Bumped on EVERY change to this file/.test(html));
 
 // ── it is shown, in every state the line can be in ──────────────────────
 const A = html.indexOf('function BackendBuildLine() {');

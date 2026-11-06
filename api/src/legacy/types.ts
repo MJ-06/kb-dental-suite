@@ -16,13 +16,14 @@ export interface Ctx {
 export interface LegacyAction {
   /** null = any signed-in user. */
   permission: Permission | null;
+  mutation: boolean;
   run: (p: Params, ctx: Ctx) => Promise<Result>;
 }
 
 export type ActionTable = Record<string, LegacyAction>;
 
-export const read = (run: LegacyAction["run"], permission: Permission | null = null): LegacyAction => ({ permission, run });
-export const write = (permission: Permission, run: LegacyAction["run"]): LegacyAction => ({ permission, run });
+export const read = (run: LegacyAction["run"], permission: Permission | null = null): LegacyAction => ({ permission, run,mutation:false });
+export const write = (permission: Permission, run: LegacyAction["run"]): LegacyAction => ({ permission, run,mutation:true });
 
 /** A refusal written for the desk; reported as {success:false, error}. */
 export class DeskError extends Error {}

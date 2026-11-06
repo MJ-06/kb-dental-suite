@@ -109,7 +109,10 @@ ok('and an empty list says where to fix it',
 // --- and the clinic can edit it, without a developer ----------------------
 ok('Master has a Panels tab', /\{ id:"panels",\s*label:"Panels" \}/.test(html));
 ok('it uses the same list editor as the other lists',
-  /panels: \(\) => React\.createElement\(SimpleListEditor/.test(html));
+  /panels: \(\) => React\.createElement\((?:React\.Fragment, null,\s*React\.createElement\()?SimpleListEditor/.test(html));
+// Named here, so "where did the empanelled patients go" is answered here too.
+ok('and the empanelled-book repair sits under it',
+  /panels: \(\) =>[\s\S]{0,600}React\.createElement\(PanelBookRepair/.test(html));
 // It goes through the Master screen's checked save, which reports a refused
 // write instead of leaving the panel on screen and losing it at the next
 // refresh — so look for the action, not for a bare api() call.

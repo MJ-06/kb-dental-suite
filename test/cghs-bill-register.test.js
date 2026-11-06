@@ -37,7 +37,23 @@ ok('the bill code was found', src.length > 800, src.length);
 const makeSheet = (rows) => ({
   _rows: rows.slice(),
   getLastRow() { return this._rows.length; },
+  // A sheet left by an earlier build is a column short of the headings, and
+  // the heading is added rather than assumed -- so it has to be readable and
+  // writable here, not just appendable.
+  getLastColumn() { return this._rows.reduce((m, r) => Math.max(m, r.length), 0); },
+  getMaxColumns() { return Math.max(26, this.getLastColumn()); },
+  insertColumnsAfter() {},
   getDataRange() { const r = this._rows; return { getValues: () => r.map(x => x.slice()) }; },
+  getRange(row, col, nr, nc) {
+    const sh = this;
+    return {
+      getValues: () => [(sh._rows[row - 1] || []).slice(col - 1, col - 1 + nc)],
+      setValues: (vals) => {
+        while (sh._rows.length < row) sh._rows.push([]);
+        vals[0].forEach((v, i) => { sh._rows[row - 1][col - 1 + i] = v; });
+      }
+    };
+  },
   appendRow(r) { this._rows.push(r.slice()); }
 });
 
@@ -52,6 +68,13 @@ const run = (rows, locked) => {
       waitLock(ms) { log.locks++; if (locked) throw new Error('timeout'); },
       releaseLock() { log.releases++; }
     }) },
+    // A bill written before the address was kept with it is topped up from
+    // the register. There is no register here, and an empty one is the
+    // honest case: these bills were written by an earlier build.
+    regAllRows_: () => [],
+    regLatestByUhid_: () => ({}),
+    findRegColumn_: () => -1,
+    ensureGridWidth_: () => {},
     Date, Number, String, isNaN, JSON
   };
   vm.createContext(ctx);
@@ -69,6 +92,30 @@ ok('the header row was written once',
    sheet._rows[0][0] === 'Bill No' && sheet._rows.length === 3, JSON.stringify(sheet._rows.map(r => r[0])));
 ok('the number is taken under a lock, and the lock is let go',
    log.locks === 2 && log.releases === 2, JSON.stringify(log));
+
+// ── the address the panel asked for ─────────────────────────────────────
+// A sheet written before the address was kept is a column short. Writing
+// into a column that does not exist loses the value silently, so the
+// heading is added first -- and the bills already in the sheet keep theirs.
+{
+  const OLD = ["Bill No", "Bill Date", "UHID", "Patient", "Panel",
+               "Card ID", "Panel Category", "Amount", "Lines", "Saved At"];
+  // Copied in: the sheet writes into its heading row, and OLD is what the
+  // sheet looked like BEFORE that.
+  const r = run([OLD.slice(), ['2026110001', '2026-11-04', 'AL1009', 'Earlier', 'CGHS', '1', '', 500, 'null', '']]);
+  const res = r.ctx.saveCghsBill({ uhid: 'AL1010', patientName: 'Santosh', billDate: '2026-11-05',
+    amount: 795, address: 'B-12, Lajpat Nagar, New Delhi' });
+  eq('the bill is still issued', res.billNo, '2026110002');
+  eq('the heading is added', r.sheet._rows[0][10], 'Address');
+  eq('nothing else in the heading row moved', r.sheet._rows[0].slice(0, 10), OLD);
+  eq('the bill already in the sheet is untouched', r.sheet._rows[1][0], '2026110001');
+  eq('and the address lands under its own heading',
+     r.sheet._rows[2][r.sheet._rows[0].indexOf('Address')], 'B-12, Lajpat Nagar, New Delhi');
+  // Asked for again, nothing is rewritten: the sheet is already wide enough.
+  r.ctx.saveCghsBill({ uhid: 'AL1011', patientName: 'Asha', billDate: '2026-11-05', amount: 450, address: 'C-9' });
+  eq('a second bill does not rewrite the heading row', r.sheet._rows[0][10], 'Address');
+  eq('and is simply appended', r.sheet._rows.length, 4);
+}
 
 // The series belongs to the BILL's month, not to today: a bill written on
 // the 2nd for last month's work belongs to last month's series.

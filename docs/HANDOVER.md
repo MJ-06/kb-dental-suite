@@ -1,5 +1,37 @@
 # Handover for the next tool (31 Oct 2026)
 
+## UI integration, save reliability and local analytics — 7 November2026
+
+Read REVIEW-2026-11-07.md and LOCAL-ANALYTICS.md. Integrated Viveyk's UI snapshot
+31cfce0 while retaining Organization, native Security/roles, reports, clinic switch
+and archiving. Added stale-load guards, native POST-only mutations, optional local
+record versions and in-memory save/navigation guards. Dependency audit now reports
+zero production advisories after jsPDF4.2.1. Migration0034 adds bill-address snapshots;
+applied to the marked review, without backfilling historical bills or changing passwords.
+
+All46 backend test files have passing results from serialized individual-file runs
+(five older fixtures updated and rerun; new transport regression reproduced/fixed).
+Strict unused-symbol TypeScript scan and build pass;198 focused upstream assertions,
+113 report arithmetic assertions,34 read-only review API checks and10 actual local
+analytics persistence/privacy checks pass. Browser tools both failed initialization
+with "failed to write kernel assets"; no fresh visual acceptance or physical print
+acceptance is claimed. Clinical test writes use fictional disposable DB records.
+
+Umami3.4.1 production build runs on loopback8091 with its own marked DB/credentials;
+replay disabled, no browser SDK, only allowlisted patient-free events. No public
+analytics URL. Clinical review runs on loopback8300; old staff/Master passwords kept.
+No new Cloudflare tunnel was started in this batch. Analytics startup is manual via
+api/scripts/start-local-analytics.ps1; retention/backups are separate from clinical
+archiving. Archive destination remains intentionally unconfigured/disabled.
+
+Whole-day4-vs5 is reconciled read-only: all5 bookings match. Raw export5 Scheduled;
+imported snapshot5 No Show due to historical inference; current source has1 Cancelled,
+3 Completed,1 Scheduled and hides the cancelled row. Do not correct attendance from
+assumptions: source-owner review/fresh export remains necessary. Keep ambiguous
+provenance/opening estimates separate. CRM collection concurrency, cross-clinic shared
+identity versioning, durable write idempotency, full print-layout QA and structured
+visit/material recording remain follow-on work. No broad clinical UI redesign.
+
 ## Organization data archiving — 6 November 2026
 
 Read DATA-ARCHIVING.md. Master → Organization → Data Archiving now has daily time,

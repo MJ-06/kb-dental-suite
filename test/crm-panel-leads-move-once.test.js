@@ -195,6 +195,55 @@ const run = f => sandbox.__move(f.leads, f.contacts, f.companies, f.followups, f
   eq('nothing was moved on that open either', third.moved, 0);
 }
 
+// ── a patient who BECOMES a panel patient, long after the sweep ─────────
+// "We have got old patients whose data is there with us and they were CGHS
+//  patients ... since now we have CGHS panel I updated their record to panel
+//  patients ... in CRM it did not update."
+//
+// The sweep used to be one flag on the board: once it had run, no lead was
+// ever looked at again, so a patient marked onto a panel afterwards sat on
+// the regular board with nothing left to move them. The question is asked
+// per lead now, so the day the record changes is the day the lead moves.
+{
+  const f = fixture();
+  // Anita (KB003) is a cash patient when the boards are first split.
+  const first = run(f);
+  eq('she is left on the regular board, as she should be',
+     first.leads.find(l => l.id === 'l3').pipelineId, 'p_dental');
+  ok('and carries no stamp, because nothing was decided about her',
+     !first.leads.find(l => l.id === 'l3').panelMovedAt);
+
+  // Months later the clinic marks her as a CGHS patient.
+  const nowPanel = f.contacts.map(c =>
+    c.id === 'c_cash' ? Object.assign({}, c, { panel: 'CGHS', companyId: 'co_cghs' }) : c);
+  const after = sandbox.__move(first.leads, nowPanel, f.companies, first.followups, first.pipelines);
+
+  eq('her lead moves to the panel board on the next open', after.moved, 1);
+  eq('and it is the right lead', after.leads.find(l => l.id === 'l3').pipelineId, 'p_panel');
+  eq('the change is saved', after.changed, true);
+  ok('the lead says why it moved',
+     /this patient is on a panel/.test(
+       (after.leads.find(l => l.id === 'l3').notes.slice(-1)[0] || {}).text || ''));
+  ok('and is stamped, so it is never dragged again',
+     !!after.leads.find(l => l.id === 'l3').panelMovedAt);
+
+  // The patients already decided about are not touched a second time, so
+  // exactly one lead joined the panel board on this open.
+  const onPanel = (ls) => ls.filter(l => l.pipelineId === 'p_panel').map(l => l.id).sort();
+  eq('exactly one lead joined the panel board, and it is hers',
+     onPanel(after.leads).filter(id => onPanel(first.leads).indexOf(id) < 0), ['l3']);
+  eq('and none left it', onPanel(first.leads).filter(id => onPanel(after.leads).indexOf(id) < 0), []);
+
+  // And if the clinic moves her back — she is paying cash for something the
+  // panel does not cover — that decision stands.
+  const back = after.leads.map(l =>
+    l.id === 'l3' ? Object.assign({}, l, { pipelineId: 'p_dental', stageId: 's2' }) : l);
+  const again = sandbox.__move(back, nowPanel, f.companies, after.followups, after.pipelines);
+  eq('a lead moved back by hand stays back, even though she is still on a panel',
+     again.leads.find(l => l.id === 'l3').pipelineId, 'p_dental');
+  eq('and nothing is written for it', again.changed, false);
+}
+
 // ── stamped even when there was nothing to move ──────────────────────────
 // Otherwise it comes back and looks again every morning, which is the one
 // thing that could undo a decision somebody made in between.

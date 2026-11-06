@@ -172,7 +172,7 @@ describe("balances", () => {
   });
 
   it("refuses a damaged plan instead of saving nothing", async () => {
-    const res = await w.app.inject({ url: "/exec", query: { action: "saveTreatmentPlan", uhid, rows: "[{oops", estimate: "{}" }, headers: { cookie: admin } });
+    const res = await w.app.inject({ method:"POST", url: "/exec", payload: { action: "saveTreatmentPlan", uhid, rows: "[{oops", estimate: "{}" }, headers: { cookie: admin } });
     expect(res.json()).toMatchObject({ success: false, error: expect.stringMatching(/damaged/) });
   });
 

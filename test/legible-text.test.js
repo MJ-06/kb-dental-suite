@@ -63,7 +63,10 @@ ok("and plenty of it reached 14",
 // and a table at 10pt -- the same sizes every other sheet uses, which is the
 // point of pinning this. A count that moves for any other reason is a sheet
 // whose type was changed by accident.
-ok("the other printed documents keep their 8.5pt", count(/font-size:8\.5pt/g) === 33);
+// 33 -> 34 with the prescription's detail line: the clinical note under each
+// endorsed treatment is set at the same 8.5pt as every other sheet's small
+// print, which is the point of pinning this.
+ok("the other printed documents keep their 8.5pt", count(/font-size:8\.5pt/g) === 34);
 ok("and their 10pt", count(/font-size:10pt/g) === 47);
 ok("and their 11pt", count(/font-size:11pt/g) === 14);
 

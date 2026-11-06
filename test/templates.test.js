@@ -24,7 +24,10 @@ function extractForms() {
 }
 
 
-// The categories the parent filters by, matching the FORMS list in index.html.
+// The categories the parent filters by. They are CHECKED against index.html
+// below rather than only claiming to match it: the departments were renamed
+// once already, and a fixture that quietly disagrees with the page tests a
+// filter nobody is using.
 const FORMS = {
   RCT_FORM_B64:            { cat: 'RCT',                notes: 'n4'  },
   IMP_SURGERY_B64:         { cat: 'Implant Surgery',    notes: null  },
@@ -61,6 +64,31 @@ const ALL_TEMPLATES = [
   { situation: 'Denture Try-in',    text: 'Try-in done, occlusion verified.',            category: 'Prosthodontics' },
   { situation: 'Pulpotomy',         text: 'Pulpotomy done wrt {tooth}, {medicament} placed.', category: 'Pedodontics' },
 ];
+
+// Every form's category here must be the one the page declares, or this
+// whole suite is exercising a filter the clinic never sees.
+let wrong = [];
+{
+  const page = fs.readFileSync(path.join(REPO, 'index.html'), 'utf8');
+  const block = page.slice(page.indexOf('{ id:"rct",'), page.indexOf('{ id:"labLog",') + 500);
+  const declared = {};
+  const re = /id:"(\w+)"[^\n]*?templateCategory:"([^"]*)"/g;
+  let m;
+  while ((m = re.exec(block))) declared[m[1]] = m[2];
+  const BY_FORM = {
+    RCT_FORM_B64: 'rct', IMP_SURGERY_B64: 'imp_surgery', IMP_PROSTHETIC_B64: 'imp_prosth',
+    CROWN_BRIDGE_B64: 'crown', RESTORATION_FORM_B64: 'restoration',
+    MINORSURGERY_FORM_B64: 'minorSurgery', PATHOLOGY_FORM_B64: 'pathology',
+    RADIOLOGY_FORM_B64: 'radiology', RADIOGRAPH_FORM_B64: 'radiograph',
+    INTRAORAL_FORM_B64: 'intraOral', SCALING_FORM_B64: 'scaling',
+    ORTHODONTICS_FORM_B64: 'orthodontics', ORTHOPROGRESS_FORM_B64: 'orthoProgress',
+    DENTURE_FORM_B64: 'denture', PEDO_FORM_B64: 'pedo', TMJOINT_FORM_B64: 'tmJoint',
+    LOCALANESTHESIA_FORM_B64: 'localAnesthesia', LABLOG_FORM_B64: 'labLog'
+  };
+  wrong = Object.keys(BY_FORM)
+    .filter(k => declared[BY_FORM[k]] !== FORMS[k].cat)
+    .map(k => k + ': page says ' + declared[BY_FORM[k]] + ', here ' + FORMS[k].cat);
+}
 
 function expectedFor(cat) {
   return cat === '*' ? ALL_TEMPLATES : ALL_TEMPLATES.filter(t => t.category === cat);
@@ -195,6 +223,16 @@ function expectedFor(cat) {
   console.log('WORK DONE TEMPLATE DROPDOWN — FUNCTIONAL TEST');
   console.log('='.repeat(100));
   let pass = 0, fail = 0;
+  // The fixture above has to agree with the page, or every row below is
+  // exercising a filter the clinic never sees.
+  if (wrong.length) {
+    fail++;
+    console.log('  FAIL  the categories here are not the ones index.html declares');
+    wrong.forEach(w => console.log('          ' + w));
+  } else {
+    pass++;
+    console.log('  PASS  every category here is the one index.html declares');
+  }
   for (const r of results) {
     const ok = r.status === 'PASS';
     ok ? pass++ : fail++;

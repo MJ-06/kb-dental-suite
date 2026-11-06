@@ -15,7 +15,7 @@ export async function execLogin(world: World, clinic: string, username: string):
 export async function exec(world: World, cookie: string, action: string, params: Record<string, unknown> = {}) {
   const query: Record<string, string> = { action };
   for (const [k, v] of Object.entries(params)) query[k] = typeof v === "object" ? JSON.stringify(v) : String(v);
-  const res = await world.app.inject({ url: "/exec", query, headers: { cookie } });
+  const res = await world.app.inject({method:'POST',url: "/exec",payload:query,headers: { cookie } });
   expect(res.statusCode).toBe(200);
   return res.json();
 }

@@ -46,7 +46,9 @@ ok('Master fetches it with everything else', /"getSafetyFlagsList", "getOccupati
 // The batch and the destructure have to stay in step, or every list after
 // the one that moved is read from the wrong answer.
 ok('and takes it off the same destructure, in the same order',
-   /,wd,ct,sf,oc,rs,pt\]\) =>/.test(html));
+   // Not anchored to the end of the destructure: a list added after these
+// is fine, a list that moves in front of them is not.
+   /,wd,ct,sf,oc,rs,pt[,\]]/.test(html));
 ok('an older backend without it is survivable', /if \(sf && sf\.success\) setSafetyFlags\(sf\.flags \|\| \[\]\);/.test(html));
 ok('saving goes through the usual path',
    /persist\("saveSafetyFlagsList", \{ flags: JSON\.stringify\(arr\) \}/.test(html));

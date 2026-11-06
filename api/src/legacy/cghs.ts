@@ -13,13 +13,13 @@ export const cghs:ActionTable={
   const period=day.slice(0,7).replace("-","");
   const n=(await sql<{n:number}>`INSERT INTO cghs_bill_counters(period,last_value) VALUES(${period},1) ON CONFLICT(clinic_id,period) DO UPDATE SET last_value=cghs_bill_counters.last_value+1 RETURNING last_value AS n`.execute(tx)).rows[0]!.n;
   const billNo=period+String(n).padStart(4,"0");
-  await sql`INSERT INTO cghs_bills(patient_id,uhid,bill_no,bill_date,patient_name,panel,card_id,panel_category,amount,lines) VALUES(${patient.id},${uhid},${billNo},${day}::date,${patient.name},${str(p.panel)},${str(p.cardId)},${str(p.panelCategory)},${amount},${JSON.stringify(lines)}::jsonb)`.execute(tx);
+  await sql`INSERT INTO cghs_bills(patient_id,uhid,bill_no,bill_date,patient_name,panel,card_id,panel_category,address,amount,lines) VALUES(${patient.id},${uhid},${billNo},${day}::date,${patient.name},${str(p.panel)},${str(p.cardId)},${str(p.panelCategory)},${str(p.address)},${amount},${JSON.stringify(lines)}::jsonb)`.execute(tx);
   return {success:true,billNo};
  }),
  getCghsBills:read(async(p,{tx,actor})=>{
   if(!actor.permissions.has("finance:read"))return {success:false,forbidden:true,error:"Finance permission required"};
   const uhid=uhidOf(p.uhid);
-  const rows=(await sql<any>`SELECT bill_no AS "billNo",bill_date::text AS "billDate",uhid,patient_name AS "patientName",panel,card_id AS "cardId",panel_category AS "panelCategory",amount::float8 AS amount,lines,created_at AS "savedAt" FROM cghs_bills WHERE (${uhid}='' OR upper(uhid)=${uhid}) ORDER BY bill_date DESC,created_at DESC,id DESC`.execute(tx)).rows;
+  const rows=(await sql<any>`SELECT bill_no AS "billNo",bill_date::text AS "billDate",uhid,patient_name AS "patientName",panel,card_id AS "cardId",panel_category AS "panelCategory",address,amount::float8 AS amount,lines,created_at AS "savedAt" FROM cghs_bills WHERE (${uhid}='' OR upper(uhid)=${uhid}) ORDER BY bill_date DESC,created_at DESC,id DESC`.execute(tx)).rows;
   return {success:true,bills:rows};
  },"finance:read")
 };

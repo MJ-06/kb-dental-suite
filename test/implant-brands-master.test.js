@@ -107,8 +107,10 @@ const send = (page, brands) => page.evaluate(bs => {
   await page.close();
 
   // --- the app side: Master screen and the plumbing behind it -------------
+  // Matched loosely on the spacing: the entry is aligned with the lists that
+  // joined it under Clinical Configuration, and that is not what is pinned.
   ok('Master has an Implant Brands & Sizes subtab',
-    html.includes('{ id:"implantBrands", label:"Implant Brands & Sizes" }'));
+    /\{ id:"implantBrands",\s*label:"Implant Brands & Sizes" \}/.test(html));
   ok('Master renders the brand editor', html.includes('ImplantBrandListEditor'));
   ok('Master loads the list', html.includes('api("getImplantBrandsList")'));
   ok('Master saves the list', html.includes('saveImplantBrandsList'));

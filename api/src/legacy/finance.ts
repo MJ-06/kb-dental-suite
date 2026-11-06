@@ -5,6 +5,7 @@
 // Every "today", "this month" and financial year is the clinic's own: the
 // financial year runs April to March, and the server's timezone never enters.
 import { sql } from "kysely";
+import {checkVersion,currentVersion} from './versions.js';
 import { can } from "../auth/permissions.js";
 import type { Tx } from "../db/index.js";
 import { read, write, DeskError, type ActionTable } from "./types.js";
@@ -277,17 +278,18 @@ export const finance: ActionTable = {
   // because the balances above are measured against its estimate.
   getTreatmentPlan: read(async (p, { tx }) => {
     const uhid = uhidOf(p.uhid);
-    const r = await sql<{ plan_rows: unknown; estimate: unknown; saved: string }>`
-      SELECT plan_rows, estimate, to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS saved
+    const r = await sql<{ plan_rows: unknown; estimate: unknown; saved: string;version:number }>`
+      SELECT plan_rows, estimate,version, to_char(updated_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') AS saved
         FROM treatment_plans WHERE upper(uhid) = ${uhid}`.execute(tx);
     const row = r.rows[0];
-    return row ? { success: true, rows: row.plan_rows, estimate: row.estimate, savedAt: row.saved }
-               : { success: true, rows: null, estimate: null };
+    return row ? { success: true, rows: row.plan_rows, estimate: row.estimate, savedAt: row.saved,version:row.version }
+               : { success: true, rows: null, estimate: null,version:0 };
   }, "clinical:read"),
 
   saveTreatmentPlan: write("clinical:write", async (p, { tx }) => {
     const uhid = uhidOf(p.uhid);
     if (!uhid) throw new DeskError("uhid required");
+    await checkVersion(tx,'treatment_plans',uhid,p.version);
     const json = (v: unknown) => {
       if (v === undefined || v === null || v === "") return null;
       if (typeof v !== "string") return JSON.stringify(v);
@@ -305,6 +307,6 @@ export const finance: ActionTable = {
       ON CONFLICT (clinic_id, uhid) DO UPDATE
         SET patient_name = EXCLUDED.patient_name, plan_date = EXCLUDED.plan_date,
             plan_rows = EXCLUDED.plan_rows, estimate = EXCLUDED.estimate`.execute(tx);
-    return { success: true };
+    return { success: true,version:await currentVersion(tx,'treatment_plans',uhid) };
   })
 };

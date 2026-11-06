@@ -180,10 +180,14 @@ ok('and the Records stage does too', /const onRegion = \(v\) => \{\n    if \(act
     const ctx = {
       endActive: 0, active: 0,
       setTpRows: (f) => { rows = f(rows); }, setRows: (f) => { rows = f(rows); },
-      setSaved: () => {}, touch: () => {}, String
+      setSaved: () => {}, touch: () => {}, String, Number
     };
     vm.createContext(ctx);
-    vm.runInContext(src + '\nthis.go = ' + call + ';', ctx);
+    // Picking a region sets the units as well as the teeth, and the real
+    // unitsFromTeeth is used rather than a stand-in: a region is one unit,
+    // and that is the rule being relied on here.
+    vm.runInContext(pick('const TOOTH_REGIONS = [', 'const LOWER_T =')
+      + '\n' + src + '\nthis.go = ' + call + ';', ctx);
     ctx.go('Full Mouth');
     eq('a region replaces the teeth on that line ' + where, rows[0].tooth, 'Full Mouth');
     ctx.go('Full Mouth');
@@ -191,6 +195,8 @@ ok('and the Records stage does too', /const onRegion = \(v\) => \{\n    if \(act
     ctx.go('Quadrant 4');
     eq('another region simply takes its place ' + where, rows[0].tooth, 'Quadrant 4');
     eq('and no other line is touched ' + where, rows[1].tooth, '');
+    // A quadrant is one unit, not eight. The panel pays for the quadrant.
+    eq('a region is one unit ' + where, rows[0].qty, 1);
   }
 
   let pass = 0, fail = 0;

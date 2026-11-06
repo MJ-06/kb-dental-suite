@@ -14,6 +14,7 @@ import type { FastifyPluginAsync } from "fastify";
 import type { AppOptions } from "../app.js";
 import { resumeSession } from "../db/index.js";
 import { hashToken, SESSION_COOKIE } from "../auth/tokens.js";
+import {RECORD_FORMS} from '../legacy/clinical-forms.js';
 
 const ROOT = fileURLToPath(new URL("../../../", import.meta.url)); // the repo root, beside api/
 const MODULES = fileURLToPath(new URL("../../node_modules/", import.meta.url));
@@ -53,6 +54,7 @@ const OVERRIDE = `<script>window.KB_SCRIPT_URL_OVERRIDE = location.origin + "/ex
 // The page's own b64decode is patched to do that to anything that decodes to HTML.
 const EMBED_FIX = (nonce: string) => String.raw`<script>window.__kbEmbed = function (h) {
   if (!/<script/i.test(h)) return h;
+  if (/KB_SAVE_RECORD|KB_SAVE_CLINICAL_SHEET/.test(h)) h=h.replace(/<head>/i,'<head><script>document.addEventListener("input",function(){parent.postMessage({type:"KB_FORM_DIRTY"},"*");},true);\x3c/script>');
   var o = location.origin;
   return h.replace(/<script(?=[\s>])/gi, '<script nonce="${nonce}"')
     .replace(/https:\/\/cdnjs\.cloudflare\.com\/ajax\/libs\/react\/[^"']+/g, o + "/vendor/react.js")
@@ -86,6 +88,7 @@ function csp(nonce: string, needsEval: boolean, framedBySelf = false): string {
 export const pageRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) => {
   app.get('/roles-access.js',async(_req,reply)=>reply.type('application/javascript; charset=utf-8').header('Cache-Control','no-cache').send(readFileSync(ROOT+'roles-access.js')));
   app.get('/archive-panel.js',async(_req,reply)=>reply.type('application/javascript; charset=utf-8').header('Cache-Control','no-cache').send(readFileSync(ROOT+'archive-panel.js')));
+  app.get('/save-safety.js',async(_req,reply)=>reply.type('application/javascript; charset=utf-8').header('Cache-Control','no-cache').send(readFileSync(ROOT+'save-safety.js')));
   for (const [path, file] of Object.entries(PAGES)) {
     app.get(path, async (req, reply) => {
       const nonce = randomBytes(16).toString("base64");
@@ -94,6 +97,7 @@ export const pageRoutes: FastifyPluginAsync<AppOptions> = async (app, opts) => {
       let html = readFileSync(ROOT + file, "utf8");
       for (const [from, to] of CDN_SRC) html = html.replace(from, to);
       let head = OVERRIDE;
+      head += `<script>window.KB_ALLOWED_RECORD_ACTIONS=${JSON.stringify(Object.keys(RECORD_FORMS))};</script>`;
       const token = req.cookies[SESSION_COOKIE];
       const actor = token ? await opts.db.transaction().execute(tx => resumeSession(tx, hashToken(token))) : null;
       if(actor) head += `<script>window.KB_CLINIC_TIMEZONE = ${JSON.stringify(actor.timezone)};</script>`;
@@ -130,13 +134,16 @@ window.KB_PIN_FETCH = function(w) {
       const headers = new Headers((init && init.headers) || (input && input.headers));
       headers.set('X-KB-Clinic', clinic.id); headers.set('X-KB-Clinic-Revision', String(clinic.revision));
       init = Object.assign({}, init, {headers});
+      if(url.pathname==='/exec' && String(init.method || input.method || 'GET').toUpperCase()==='GET' && url.searchParams.has('action')){
+        init.method='POST';init.body=JSON.stringify(Object.fromEntries(url.searchParams));headers.set('Content-Type','text/plain;charset=utf-8');input=url.origin+url.pathname;
+      }
     }
     return original(input, init);
   };
 }; window.KB_PIN_FETCH(window);</script>`;
       }
       if (file === "index.html") {
-        html=html.replace(/(<script[^>]*src="\/vendor\/react.js"[^>]*><\/script>)/i,'$1<script src="/roles-access.js"></script><script src="/archive-panel.js"></script>');
+        html=html.replace(/(<script[^>]*src="\/vendor\/react.js"[^>]*><\/script>)/i,'$1<script src="/roles-access.js"></script><script src="/archive-panel.js"></script><script src="/save-safety.js"></script>');
         head += EMBED_FIX(nonce);
         if (actor?.organizationId) {
           head += `<script>const embed = window.__kbEmbed; window.__kbEmbed = function(h) {

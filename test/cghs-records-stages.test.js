@@ -36,10 +36,12 @@ ok('there are three stages, numbered in the order they happen',
    /\{ id: "endorsement", label: "1 \\u00b7 Endorsement" \}[\s\S]{0,200}?\{ id: "bill", label: "3 \\u00b7 Bill" \}/.test(html)
    || /id: "endorsement"[\s\S]{0,200}?id: "prescription"[\s\S]{0,120}?id: "bill"/.test(html));
 // The two later stages take `approved`, never `endRows`: that is the gate.
+// `pat` rather than `globalPat`: the bill prints the beneficiary's address,
+// which only the registration holds, so the record is topped up first.
 ok('the prescription is handed only the endorsed lines',
-   /CghsPrescription, \{ pat: globalPat, lines: e\.approved \}/.test(html));
+   /CghsPrescription, \{ pat: pat, lines: e\.approved \}/.test(html));
 ok('and so is the bill',
-   /CghsBill, \{ pat: globalPat, panel: e\.panel, card: e\.card,\s*holder: e\.holder, lines: e\.approved \}/.test(html));
+   /CghsBill, \{ pat: pat, panel: e\.panel, card: e\.card,\s*holder: e\.holder, lines: e\.approved \}/.test(html));
 ok('with nothing ticked, neither stage is drawn at all',
    /stage === "prescription" && \(e\.approved\.length/.test(html) &&
    /stage === "bill" && \(e\.approved\.length/.test(html));

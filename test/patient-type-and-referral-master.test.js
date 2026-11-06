@@ -74,7 +74,9 @@ ok('and the patient types as the two the app acts on',
 ok('Master fetches both',
    /"getReferralSourcesList", "getPatientTypesList"/.test(html));
 ok('and takes them off the same destructure, in the same order',
-   /,wd,ct,sf,oc,rs,pt\]\) =>/.test(html));
+   // Not anchored to the end of the destructure: a list added after these
+// is fine, a list that moves in front of them is not.
+   /,wd,ct,sf,oc,rs,pt[,\]]/.test(html));
 ok('and reads them back',
    /if \(rs && rs\.success\) setReferralSources\(rs\.sources \|\| \[\]\);/.test(html) &&
    /if \(pt && pt\.success\) setPatientTypes\(pt\.types \|\| \[\]\);/.test(html));
